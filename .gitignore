@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+*.spec
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# PyInstaller output
+*.exe
+
+# User data (runtime-generated, not source)
+~/.mutsumi/
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+
+# Claude Code local config
+.claude/

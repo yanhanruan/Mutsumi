@@ -1,0 +1,142 @@
+{
+  "idle": [
+    "Hmm... it's been quiet~",
+    "I wonder what you're up to...",
+    "*stretches* Ahh, this is nice~",
+    "Are you busy? I'm right here if you need me!",
+    "La la la... ♪"
+  ],
+  "clicked": [
+    "Hmm? Do you need something~",
+    "W-what is it?",
+    "Oh! You noticed me!",
+    "Ehehe~ hello there!",
+    "I'm here, I'm here~"
+  ],
+  "dragged": [
+    "W-woah, where are we going?!",
+    "Ahh! Don't drag me like that~",
+    "H-hey, careful okay!",
+    "Wheee~! ...I mean, put me down!",
+    "Moving again? Okay, okay~"
+  ],
+  "morning": [
+    "Good morning~! Did you sleep well?",
+    "Morning! Today is going to be great, I just know it!",
+    "Yawn... oh! Good morning~",
+    "Rise and shine! Let's do our best today!",
+    "Morning already? Let's get going~!"
+  ],
+  "afternoon": [
+    "It's the middle of the day already!",
+    "Are you remembering to eat lunch? That's important!",
+    "Afternoon~ how's your day going so far?",
+    "Don't push yourself too hard, okay?",
+    "Want to take a little break? Even five minutes helps~"
+  ],
+  "evening": [
+    "The day went by so fast...",
+    "Evening~ you worked really hard today!",
+    "Are you wrapping things up soon?",
+    "Let's relax a little now, okay?",
+    "Good job today! You did great~"
+  ],
+  "night": [
+    "It's getting late... are you okay?",
+    "Don't stay up too late~ you need rest!",
+    "I'm here if you need some company tonight.",
+    "The world is quiet at this hour...",
+    "...Are you still awake? Me too~"
+  ],
+  "bored": [
+    "Hey... are you forgetting about me?",
+    "...I'm a little lonely, you know.",
+    "*taps screen* Helloooo~?",
+    "It's been a while... I missed you!",
+    "Notice me~! ...Please?"
+  ],
+  "petted": [
+    "Ehehe~ that tickles!",
+    "Mmm~ I like this~",
+    "H-hey, don't spoil me too much... okay, maybe a little.",
+    "...Can we stay like this a while longer?",
+    "You're really sweet, you know that?"
+  ],
+  "grumpy": [
+    "Mmph... I'm sleepy, leave me alone~",
+    "Zzz... five more minutes...",
+    "...Do you have to poke me right now?",
+    "*yawn* ...What do you want?",
+    "I'm barely awake, okay?!"
+  ],
+  "dragged_rough": [
+    "H-hey! Be more gentle!",
+    "Ow! That was way too rough!",
+    "W-wait, slow down please!",
+    "I'm not a toy, you know!",
+    "E-eek! So sudden!"
+  ],
+  "dragged_gentle": [
+    "Ahh~ it's like floating on clouds~",
+    "Mmm, I don't mind being carried like this~",
+    "Where are we off to on this nice walk?",
+    "This is... actually kind of nice~",
+    "I could get used to this~"
+  ],
+  "excited": [
+    "Oh! You're here! You're really here!",
+    "Finally~! I was waiting sooo long!",
+    "You came~! Don't ever leave again, okay?!",
+    "*gasps* You noticed me! Ehehe~",
+    "I knew you wouldn't forget me!"
+  ],
+  "focus_start": [
+    "Okay! Let's focus together~!",
+    "I'll be right here cheering you on!",
+    "Time to concentrate! You can do it!",
+    "Let's give it our best shot~!",
+    "I'll be quiet... but I'm rooting for you!"
+  ],
+  "focus_done": [
+    "You did it~! I'm so proud of you!",
+    "Amazing work! Take a breather now~",
+    "That was incredible! Well done!",
+    "Ehehe~ I knew you could do it!",
+    "One session down! You're on a roll~!"
+  ],
+  "break_start": [
+    "Break time~! You've earned it!",
+    "Let's rest a little, okay? Don't push too hard~",
+    "Stretch a bit~ I'll wait right here!",
+    "Five minutes, just for us~ ♪",
+    "Relax now! You worked really hard!"
+  ],
+  "worried": [
+    "H-hey... you've been gone a while. Are you okay?",
+    "I haven't seen you move in ages... everything alright?",
+    "...Did you forget about me? Or did something happen?",
+    "I'm getting a little worried... please come back soon.",
+    "It's been so quiet... I hope you're doing okay out there."
+  ],
+  "welcome_back": [
+    "You're back~! I missed you so much!",
+    "Oh! There you are! I was starting to worry!",
+    "Welcome back~! Don't scare me like that!",
+    "Ehehe~ you're here! Everything's better now!",
+    "I knew you'd come back! ...I wasn't worried at all. (I was.)"
+  ],
+  "stretch_reminder": [
+    "Hey~ you've been at it for a while. Time to stretch!",
+    "Stand up and shake it out a little~ your body will thank you!",
+    "Psst! Take a quick break and move around~ I'll wait!",
+    "You've been sitting too long! Stretch those arms~",
+    "Don't forget to take care of yourself too, okay? Quick stretch time~!"
+  ],
+  "thrown": [
+    "Th-that was way too fast...! *dizzy*",
+    "W-woaaah...! The world is spinning~",
+    "H-hey! Warn me before you do that!!",
+    "*stumbles* I-I'm okay... I think...",
+    "Ehehe... that was actually kinda fun... don't tell anyone."
+  ]
+}

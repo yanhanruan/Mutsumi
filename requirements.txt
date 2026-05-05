@@ -1,0 +1,5 @@
+Pillow>=10.0.0
+pyinstaller>=6.0.0
+# pyautogui is optional — used as cross-platform fallback for mouse position
+# on Windows, ctypes (built-in) is used instead and pyautogui is not required
+# pyautogui>=0.9.54
