@@ -55,10 +55,8 @@ class Animation:
 
 # ── 内部画布工具 ─────────────────────────────────────────────────────────────
 
-def _make_canvas() -> Image.Image:
-    """创建纯色度键背景画布（透明区域将渲染为透明）"""
-    return Image.new('RGB', (WINDOW_SIZE, WINDOW_SIZE), CHROMA_COLOR)
-
+def _make_canvas():
+    return Image.new('RGBA', (WINDOW_SIZE, WINDOW_SIZE), (0, 0, 0, 0))
 
 def _paste(canvas: Image.Image, char: Image.Image, ox: int = 0, oy: int = 0) -> None:
     """
@@ -231,3 +229,4 @@ def generate_dizzy_frames(char_img: Image.Image, count: int = 8) -> List[Image.I
         _paste(canvas, rotated)
         frames.append(canvas)
     return frames
+

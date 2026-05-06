@@ -1,118 +1,138 @@
 """
-右键菜单模块
-提供角色右键点击后弹出的上下文菜单（无系统托盘图标）
-
-菜单布局
-  ▶ Start Pomodoro   (idle / paused 时可用)
-  ⏸ Pause            (running 时可用)
-  ⏹ Stop             (非 idle 时可用)
-  Duration ▶         (子菜单：15 / 25 / 45 / 60 分钟)
-  ──────────────────
-  Toggle Idle Animation
-  ☑ Stretch Reminders
-  ──────────────────
-  Settings...
-  About
-  Exit
+Modern glassmorphism system tray integration.
+Framework: PySide6
 """
-import tkinter as tk
-from typing import Callable
+
+from __future__ import annotations
+
+from typing import Any, Callable, Optional
+
+from PySide6.QtGui import QAction, QIcon
+from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
+from PySide6.QtCore import QPoint
+
+# 🔴 核心修复：引入我们新的 Theme 类，抛弃旧的 PALETTE
+from ui_theme import Theme
 
 
 class ContextMenu:
-    """
-    右键上下文菜单，内置番茄钟控制区块与拉伸提醒开关。
-    通过 update_pom_state() 按实际阶段启用 / 禁用番茄钟菜单项。
-    """
-
-    # 番茄钟菜单项的固定索引（相对于 self._menu）
-    _IDX_START = 0
-    _IDX_PAUSE = 1
-    _IDX_STOP  = 2
-    # index 3 = Duration submenu
-    # index 4 = separator
-    # index 5 = Toggle Idle Animation
-    # index 6 = Stretch Reminders (checkbutton)
-    # index 7 = separator
-    # index 8 = Settings...
-    # index 9 = About
-    # index 10 = Exit
-
     def __init__(
         self,
-        parent: tk.Tk,
-        on_exit:              Callable,
-        on_toggle_animation:  Callable,
-        on_about:             Callable,
-        on_pom_start:         Callable,
-        on_pom_pause:         Callable,
-        on_pom_stop:          Callable,
-        on_pom_set_focus:     Callable,          # 接收 int（分钟数）
-        on_stretch_toggle:    Callable,          # 接收 bool（启用状态）
-        on_settings:          Callable,          # 打开设置窗口
+        parent: Optional[Any] = None,  
+        on_exit: Optional[Callable[[], None]] = None,
+        on_toggle_animation: Optional[Callable[[], None]] = None,
+        on_about: Optional[Callable[[], None]] = None,
+        on_pom_start: Optional[Callable[[], None]] = None,
+        on_pom_pause: Optional[Callable[[], None]] = None,
+        on_pom_stop: Optional[Callable[[], None]] = None,
+        on_pom_set_focus: Optional[Callable[[int], None]] = None,
+        on_stretch_toggle: Optional[Callable[[bool], None]] = None,
+        on_settings: Optional[Callable[[], None]] = None,
+        icon_path: Optional[str] = None,
     ):
-        self._menu = tk.Menu(parent, tearoff=0, font=('Segoe UI', 10))
+        on_exit = on_exit or (lambda: None)
+        on_toggle_animation = on_toggle_animation or (lambda: None)
+        on_about = on_about or (lambda: None)
+        on_pom_start = on_pom_start or (lambda: None)
+        on_pom_pause = on_pom_pause or (lambda: None)
+        on_pom_stop = on_pom_stop or (lambda: None)
+        on_pom_set_focus = on_pom_set_focus or (lambda _m: None)
+        on_stretch_toggle = on_stretch_toggle or (lambda _e: None)
+        on_settings = on_settings or (lambda: None)
 
-        # ── 番茄钟控制 ──
-        self._menu.add_command(label='▶  Start Pomodoro', command=on_pom_start)
-        self._menu.add_command(label='⏸  Pause',          command=on_pom_pause)
-        self._menu.add_command(label='⏹  Stop',           command=on_pom_stop)
+        self.tray = QSystemTrayIcon(parent)
+        icon = QIcon(icon_path) if icon_path else QApplication.style().standardIcon(QApplication.style().SP_ComputerIcon)
+        self.tray.setIcon(icon)
+        self.tray.setToolTip("Mutsumi - Premium Desktop Pet")
 
-        # ── 时长子菜单 ──
-        dur_menu = tk.Menu(self._menu, tearoff=0, font=('Segoe UI', 10))
-        for mins in (15, 25, 45, 60):
-            dur_menu.add_command(
-                label=f'{mins} min',
-                command=lambda m=mins: on_pom_set_focus(m),
-            )
-        self._menu.add_cascade(label='Duration  ▶', menu=dur_menu)
-
-        self._menu.add_separator()
-
-        # ── 通用控件 ──
-        self._menu.add_command(label='Toggle Idle Animation', command=on_toggle_animation)
-
-        # 拉伸提醒复选框（BooleanVar 持有勾选状态）
-        self._stretch_var = tk.BooleanVar(value=False)
-        self._menu.add_checkbutton(
-            label='Stretch Reminders',
-            variable=self._stretch_var,
-            command=lambda: on_stretch_toggle(self._stretch_var.get()),
+        # 🔴 核心修复：使用新的 Theme 变量重写托盘样式
+        self.menu = QMenu()
+        self.menu.setStyleSheet(
+            f"""
+            QMenu {{
+                background: rgba(28, 30, 32, 0.85); /* 半透明暗色背景 */
+                color: #F3F6F3;
+                border: 1px solid rgba(255, 255, 255, 0.35);
+                border-radius: 8px;
+                padding: 6px;
+                font-family: 'Segoe UI', sans-serif;
+                font-size: 10pt;
+            }}
+            QMenu::item {{
+                padding: 6px 20px 6px 12px;
+                border-radius: 4px;
+                margin: 2px;
+                background: transparent;
+            }}
+            QMenu::item:selected {{
+                background: {Theme.PRIMARY}; /* 鼠尾草绿的高级感悬浮色 */
+                color: white;
+            }}
+            QMenu::separator {{
+                height: 1px;
+                background: rgba(255, 255, 255, 0.35);
+                margin: 4px 10px;
+            }}
+            """
         )
 
-        self._menu.add_separator()
-        self._menu.add_command(label='Settings...', command=on_settings)
-        self._menu.add_command(label='About',       command=on_about)
-        self._menu.add_command(label='Exit',        command=on_exit)
+        self.start_action = QAction("Start Pomodoro", self.menu)
+        self.pause_action = QAction("Pause", self.menu)
+        self.stop_action = QAction("Stop", self.menu)
+        self.start_action.triggered.connect(on_pom_start)
+        self.pause_action.triggered.connect(on_pom_pause)
+        self.stop_action.triggered.connect(on_pom_stop)
+        self.menu.addAction(self.start_action)
+        self.menu.addAction(self.pause_action)
+        self.menu.addAction(self.stop_action)
 
-        # 初始化番茄钟菜单为 idle 状态
-        self.update_pom_state('idle', is_paused=False)
+        duration_menu = self.menu.addMenu("Duration")
+        for mins in (15, 25, 45, 60):
+            action = QAction(f"{mins} min", duration_menu)
+            action.triggered.connect(lambda _checked=False, m=mins: on_pom_set_focus(m))
+            duration_menu.addAction(action)
+
+        self.menu.addSeparator()
+
+        toggle_action = QAction("Toggle Idle Animation", self.menu)
+        toggle_action.triggered.connect(on_toggle_animation)
+        self.menu.addAction(toggle_action)
+
+        self.stretch_action = QAction("Stretch Reminders", self.menu)
+        self.stretch_action.setCheckable(True)
+        self.stretch_action.toggled.connect(on_stretch_toggle)
+        self.menu.addAction(self.stretch_action)
+
+        self.menu.addSeparator()
+
+        settings_action = QAction("Settings", self.menu)
+        settings_action.triggered.connect(on_settings)
+        self.menu.addAction(settings_action)
+
+        about_action = QAction("About", self.menu)
+        about_action.triggered.connect(on_about)
+        self.menu.addAction(about_action)
+
+        self.menu.addSeparator()
+        
+        exit_action = QAction("Exit", self.menu)
+        exit_action.triggered.connect(on_exit)
+        self.menu.addAction(exit_action)
+
+        self.tray.setContextMenu(self.menu)
+        self.tray.show()
+        
+        self.update_pom_state("idle", is_paused=False)
 
     def update_pom_state(self, phase: str, is_paused: bool) -> None:
-        """
-        根据番茄钟当前阶段与暂停状态更新菜单项的启用 / 禁用。
-          idle                → Start 可用，Pause / Stop 禁用
-          focus/break running → Pause 可用，Start / Stop 可用
-          focus/break paused  → Start（恢复）可用，Pause 禁用，Stop 可用
-        """
-        is_idle    = (phase == 'idle')
+        is_idle = phase == "idle"
         is_running = (not is_idle) and (not is_paused)
-
-        start_state = tk.NORMAL if (is_idle or is_paused) else tk.DISABLED
-        pause_state = tk.NORMAL if is_running              else tk.DISABLED
-        stop_state  = tk.NORMAL if not is_idle             else tk.DISABLED
-
-        self._menu.entryconfig(self._IDX_START, state=start_state)
-        self._menu.entryconfig(self._IDX_PAUSE, state=pause_state)
-        self._menu.entryconfig(self._IDX_STOP,  state=stop_state)
+        self.start_action.setEnabled(is_idle or is_paused)
+        self.pause_action.setEnabled(is_running)
+        self.stop_action.setEnabled(not is_idle)
 
     def set_stretch_enabled(self, enabled: bool) -> None:
-        """从外部同步复选框状态（设置窗口更改时调用）"""
-        self._stretch_var.set(enabled)
+        self.stretch_action.setChecked(enabled)
 
     def show(self, x: int, y: int) -> None:
-        """在屏幕绝对坐标 (x, y) 处弹出菜单"""
-        try:
-            self._menu.tk_popup(x, y)
-        finally:
-            self._menu.grab_release()
+        self.menu.popup(QPoint(x, y))
