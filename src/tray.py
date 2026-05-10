@@ -9,6 +9,7 @@ from typing import Any, Callable, Optional
 
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
+from PySide6.QtWidgets import QStyle
 from PySide6.QtCore import QPoint
 
 # 🔴 核心修复：引入我们新的 Theme 类，抛弃旧的 PALETTE
@@ -41,7 +42,7 @@ class ContextMenu:
         on_settings = on_settings or (lambda: None)
 
         self.tray = QSystemTrayIcon(parent)
-        icon = QIcon(icon_path) if icon_path else QApplication.style().standardIcon(QApplication.style().SP_ComputerIcon)
+        icon = QIcon(icon_path) if icon_path else QApplication.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon)
         self.tray.setIcon(icon)
         self.tray.setToolTip("Mutsumi - Premium Desktop Pet")
 

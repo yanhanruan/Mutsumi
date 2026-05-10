@@ -21,6 +21,7 @@ from PIL import Image
 from PIL.ImageQt import ImageQt
 
 import events
+from placeholder  import create_placeholder_character
 from animator     import (Animation,
                            generate_idle_frames, generate_click_frames,
                            generate_drag_frames, generate_fly_frames,
@@ -59,9 +60,8 @@ class DesktopPet(QWidget):
         self.pet_label = QLabel(self)
         self.pet_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
-        # TODO: 这里调用你原本的动画加载逻辑
         self._animations = self._load_all_animations()
-        self._current_frame_generator = self._get_anim_generator(self._anim)
+        self._current_frame_generator = iter(self._animations['idle'].frames)
 
         # ── 4. 初始化附属 UI 组件 ──
         self.chat_bubble = ChatBubble()
@@ -72,10 +72,10 @@ class DesktopPet(QWidget):
             parent=self,
             on_exit=QApplication.instance().quit,
             on_about=self._on_about,
+            on_settings=self.settings_window.show,
             on_pom_start=self._pom.start,
             on_pom_pause=self._pom.pause,
             on_pom_stop=self._pom.stop,
-            # 其他你原本绑定的回调...
         )
 
         # ── 5. 替换原本的 root.after 定时器 ──
@@ -88,8 +88,32 @@ class DesktopPet(QWidget):
         self.badge_timer = QTimer(self)
         self.badge_timer.timeout.connect(self._update_badge)
 
+        # 宠物状态 tick 定时器（每 5 秒驱动能量/亲密度衰减和心情重算）
+        self.state_timer = QTimer(self)
+        self.state_timer.timeout.connect(self._pet_state.tick)
+        self.state_timer.start(5000)
+
         # 物理拖拽变量
         self._drag_start_pos = None
+        self._drag_start_time: Optional[float] = None
+
+        # 番茄钟事件订阅 — 开始时启动 badge 刷新
+        events.subscribe('pomodoro_focus_start', lambda **_: self.badge_timer.start(1000))
+        events.subscribe('pomodoro_break_start', lambda **_: self.badge_timer.start(1000))
+
+    # ── 动画加载 ──────────────────────────────────────────────────────────
+    def _load_all_animations(self) -> dict:
+        char = create_placeholder_character()
+        squash_frames, rebound_frames = generate_squash_frames(char)
+        return {
+            'idle':    Animation(generate_idle_frames(char),   fps=8,  loop=True),
+            'click':   Animation(generate_click_frames(char),  fps=12, loop=False),
+            'drag':    Animation(generate_drag_frames(char),   fps=10, loop=True),
+            'fly':     Animation(generate_fly_frames(char),    fps=16, loop=True),
+            'dizzy':   Animation(generate_dizzy_frames(char),  fps=10, loop=False),
+            'squash':  Animation(squash_frames,                fps=12, loop=False),
+            'rebound': Animation(rebound_frames,               fps=12, loop=False),
+        }
 
     # ── 动画渲染核心 ──────────────────────────────────────────────────────
     def _animate_step(self):
@@ -132,14 +156,31 @@ class DesktopPet(QWidget):
             self.anim_timer.setInterval(int(1000 / anim_obj.fps))
             
     # ── 鼠标交互 (替代 bind 事件) ─────────────────────────────────────────
+    _CLICK_PHRASES = [
+        "I'm not a toy, you know!",
+        "Ahh~ be gentle!",
+        "What do you want~?",
+        "Eek! That tickles!",
+        "H-Hey! Stop that!",
+    ]
+
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self._drag_start_pos = event.globalPos() - self.frameGeometry().topLeft()
+            self._drag_start_time = time.monotonic()
+            self._pet_state.on_click()
             self._set_anim('click')
+            pet_top_center = QPoint(
+                self.frameGeometry().left() + self.width() // 2,
+                self.frameGeometry().top(),
+            )
+            self.chat_bubble.show_message(
+                random.choice(self._CLICK_PHRASES),
+                pet_top_center,
+            )
             event.accept()
-            
+
         elif event.button() == Qt.MouseButton.RightButton:
-            # 右键弹出菜单
             self.tray.show(event.globalPos().x(), event.globalPos().y())
             event.accept()
 
@@ -147,23 +188,31 @@ class DesktopPet(QWidget):
         if event.buttons() == Qt.MouseButton.LeftButton and self._drag_start_pos:
             self.move(event.globalPos() - self._drag_start_pos)
             if self._anim != 'drag':
+                self._pet_state.on_drag()
                 self._set_anim('drag')
+            if self.chat_bubble.isVisible():
+                pet_top_center = QPoint(
+                    self.frameGeometry().left() + self.width() // 2,
+                    self.frameGeometry().top(),
+                )
+                self.chat_bubble.move(
+                    pet_top_center.x() - self.chat_bubble.width() // 2,
+                    pet_top_center.y() - self.chat_bubble.height() - 10,
+                )
             event.accept()
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
+            was_dragging = self._anim == 'drag'
+            drag_duration = (time.monotonic() - self._drag_start_time) if self._drag_start_time else 1.0
             self._drag_start_pos = None
-            
-            # 物理抛出逻辑简述：
-            # 如果你之前在 mouseMoveEvent 里记录了位移增量（velocity），
-            # 可以在这里判断速度是否超过阈值。
-            # 暂时先回归最稳妥的逻辑：
-            
-            if self._anim == 'drag':
-                # 如果你想让它有“落地”动作，可以先切到 squash 再切回 idle
-                # 这里我们直接恢复待机
+            self._drag_start_time = None
+
+            if was_dragging:
+                rough = drag_duration < 0.5
+                self._pet_state.on_drag_release(rough=rough)
                 self._set_anim('idle')
-                
+
             event.accept()
 
     # ── 附属 UI 逻辑转换 ──────────────────────────────────────────────────
@@ -236,4 +285,9 @@ class DesktopPet(QWidget):
         )
     def _on_reset(self):
         self._pet_state = PetState()
-        # 更新显示...
+        self.state_timer.timeout.disconnect()
+        self.state_timer.timeout.connect(self._pet_state.tick)
+        self._persistence.save_now('state.json', {
+            'energy': self._pet_state.energy,
+            'affection': self._pet_state.affection,
+        })
