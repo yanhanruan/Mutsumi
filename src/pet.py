@@ -102,17 +102,35 @@ class DesktopPet(QWidget):
         events.subscribe('pomodoro_break_start', lambda **_: self.badge_timer.start(1000))
 
     # ── 动画加载 ──────────────────────────────────────────────────────────
+    @staticmethod
+    def _sheets_dir() -> str:
+        src_dir = os.path.dirname(os.path.abspath(__file__))
+        return os.path.join(os.path.dirname(src_dir), 'assets', 'sheets')
+
+    def _try_load_sheet(self, name: str, fallback_frames: list, fps: float, loop: bool) -> Animation:
+        path = os.path.join(self._sheets_dir(), f'{name}.png')
+        if os.path.isfile(path):
+            try:
+                with Image.open(path) as img:
+                    fh = img.height
+                    fc = max(1, img.width // fh)
+                raw = load_sprite_sheet(path, fh, fh, fc)
+                return build_animation(raw, fps=fps, loop=loop)
+            except Exception:
+                pass
+        return Animation(fallback_frames, fps=fps, loop=loop)
+
     def _load_all_animations(self) -> dict:
         char = create_placeholder_character()
         squash_frames, rebound_frames = generate_squash_frames(char)
         return {
-            'idle':    Animation(generate_idle_frames(char),   fps=8,  loop=True),
-            'click':   Animation(generate_click_frames(char),  fps=12, loop=False),
-            'drag':    Animation(generate_drag_frames(char),   fps=10, loop=True),
-            'fly':     Animation(generate_fly_frames(char),    fps=16, loop=True),
-            'dizzy':   Animation(generate_dizzy_frames(char),  fps=10, loop=False),
-            'squash':  Animation(squash_frames,                fps=12, loop=False),
-            'rebound': Animation(rebound_frames,               fps=12, loop=False),
+            'idle':    self._try_load_sheet('idle',  generate_idle_frames(char),  fps=8,  loop=True),
+            'click':   self._try_load_sheet('click', generate_click_frames(char), fps=12, loop=False),
+            'drag':    self._try_load_sheet('drag',  generate_drag_frames(char),  fps=10, loop=True),
+            'fly':     self._try_load_sheet('fly',   generate_fly_frames(char),   fps=16, loop=True),
+            'dizzy':   self._try_load_sheet('dizzy', generate_dizzy_frames(char), fps=10, loop=False),
+            'squash':  Animation(squash_frames,                                    fps=12, loop=False),
+            'rebound': Animation(rebound_frames,                                   fps=12, loop=False),
         }
 
     # ── 动画渲染核心 ──────────────────────────────────────────────────────
