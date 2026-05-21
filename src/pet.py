@@ -11,23 +11,18 @@ import time
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
-# 🔴 移除所有的 import tkinter，全面替换为 PySide6
 from PySide6.QtWidgets import QWidget, QLabel, QMessageBox, QApplication
 from PySide6.QtCore import Qt, QTimer, QPoint
-from PySide6.QtGui import QPixmap, QCursor, QImage
+from PySide6.QtGui import QPixmap
 
-# 🔴 引入 ImageQt 用于将 PIL 动画帧转为 Qt 格式
-from PIL import Image
 from PIL.ImageQt import ImageQt
 
 import events
 from placeholder  import create_placeholder_character
 from animator     import (Animation,
-                           generate_idle_frames, generate_click_frames,
+                           generate_click_frames,
                            generate_drag_frames, generate_fly_frames,
-                           generate_dizzy_frames, generate_squash_frames,
-                           load_sprite_sheet, build_animation,
-                           CHROMA_HEX, WINDOW_SIZE)
+                           generate_dizzy_frames, generate_squash_frames)
 from activity     import ActivityMonitor
 from bubble       import ChatBubble  # 确保这里导入的名字和你 bubble.py 里新类的名字一致
 from persistence  import Persistence
@@ -63,6 +58,12 @@ class DesktopPet(QWidget):
         self._animations = self._load_all_animations()
         self._current_frame_generator = iter(self._animations['idle'].frames)
 
+        # Size window to first idle frame immediately (instead of waiting for first tick)
+        if self._animations['idle'].frames:
+            _first = self._animations['idle'].frames[0]
+            self.resize(_first.width(), _first.height())
+            self.pet_label.resize(_first.width(), _first.height())
+
         # ── 4. 初始化附属 UI 组件 ──
         self.chat_bubble = ChatBubble()
         self.settings_window = SettingsWindow(self._settings, self._on_settings_change, self._on_reset)
@@ -82,7 +83,7 @@ class DesktopPet(QWidget):
         # 主动画循环定时器 (替代 root.after(100, update))
         self.anim_timer = QTimer(self)
         self.anim_timer.timeout.connect(self._animate_step)
-        self.anim_timer.start(110) # 默认 110ms 一帧
+        self.anim_timer.start(self._animations['idle'].interval_ms)
 
         # 番茄钟 Badge 刷新定时器
         self.badge_timer = QTimer(self)
@@ -103,57 +104,52 @@ class DesktopPet(QWidget):
 
     # ── 动画加载 ──────────────────────────────────────────────────────────
     @staticmethod
-    def _sheets_dir() -> str:
+    def _idle_frames_dir() -> str:
         src_dir = os.path.dirname(os.path.abspath(__file__))
-        return os.path.join(os.path.dirname(src_dir), 'assets', 'sheets')
+        return os.path.join(os.path.dirname(src_dir), 'assets', 'idle')
 
-    def _try_load_sheet(self, name: str, fallback_frames: list, fps: float, loop: bool) -> Animation:
-        path = os.path.join(self._sheets_dir(), f'{name}.png')
-        if os.path.isfile(path):
-            try:
-                with Image.open(path) as img:
-                    fh = img.height
-                    fc = max(1, img.width // fh)
-                raw = load_sprite_sheet(path, fh, fh, fc)
-                return build_animation(raw, fps=fps, loop=loop)
-            except Exception:
-                pass
-        return Animation(fallback_frames, fps=fps, loop=loop)
+    _IDLE_DISPLAY_HEIGHT = 200  # px; change to scale the pet up or down
+
+    @staticmethod
+    def _load_idle_from_dir(fps: float = 24.0, loop: bool = True) -> Animation:
+        frames_dir = DesktopPet._idle_frames_dir()
+        paths = sorted(
+            f for f in (os.path.join(frames_dir, n) for n in os.listdir(frames_dir))
+            if f.lower().endswith('.png')
+        )
+        h = DesktopPet._IDLE_DISPLAY_HEIGHT
+        frames = [
+            QPixmap(p).scaledToHeight(h, Qt.TransformationMode.SmoothTransformation)
+            for p in paths
+        ]
+        return Animation(frames, fps=fps, loop=loop)
+
+    @staticmethod
+    def _pil_anim(pil_frames: list, fps: float, loop: bool) -> Animation:
+        pixmaps = [QPixmap.fromImage(ImageQt(f)) for f in pil_frames]
+        return Animation(pixmaps, fps=fps, loop=loop)
 
     def _load_all_animations(self) -> dict:
         char = create_placeholder_character()
-        squash_frames, rebound_frames = generate_squash_frames(char)
+        squash_pil, rebound_pil = generate_squash_frames(char)
         return {
-            'idle':    self._try_load_sheet('idle',  generate_idle_frames(char),  fps=8,  loop=True),
-            'click':   self._try_load_sheet('click', generate_click_frames(char), fps=12, loop=False),
-            'drag':    self._try_load_sheet('drag',  generate_drag_frames(char),  fps=10, loop=True),
-            'fly':     self._try_load_sheet('fly',   generate_fly_frames(char),   fps=16, loop=True),
-            'dizzy':   self._try_load_sheet('dizzy', generate_dizzy_frames(char), fps=10, loop=False),
-            'squash':  Animation(squash_frames,                                    fps=12, loop=False),
-            'rebound': Animation(rebound_frames,                                   fps=12, loop=False),
+            'idle':    self._load_idle_from_dir(fps=24.0, loop=True),
+            'click':   self._pil_anim(generate_click_frames(char),  fps=12, loop=False),
+            'drag':    self._pil_anim(generate_drag_frames(char),   fps=10, loop=True),
+            'fly':     self._pil_anim(generate_fly_frames(char),    fps=16, loop=True),
+            'dizzy':   self._pil_anim(generate_dizzy_frames(char),  fps=10, loop=False),
+            'squash':  self._pil_anim(squash_pil,                   fps=12, loop=False),
+            'rebound': self._pil_anim(rebound_pil,                  fps=12, loop=False),
         }
 
     # ── 动画渲染核心 ──────────────────────────────────────────────────────
     def _animate_step(self):
-        """替代原来的逐帧渲染逻辑"""
         try:
-            # 提取下一帧 (类型为 PIL.Image.Image)
-            pil_frame = next(self._current_frame_generator)
-            
-            if pil_frame:
-                # 【核心转换魔法】：PIL Image -> QImage -> QPixmap
-                # 使用 ImageQt 将 PIL 原生转换为 PySide6 可识别的高清透明图像
-                qimage = ImageQt(pil_frame)
-                pixmap = QPixmap.fromImage(qimage)
-                
-                self.pet_label.setPixmap(pixmap)
-                
-                # 动态调整窗口大小以适应动画帧
-                self.pet_label.resize(pixmap.width(), pixmap.height())
-                self.resize(pixmap.width(), pixmap.height())
-                
+            pixmap: QPixmap = next(self._current_frame_generator)
+            self.pet_label.setPixmap(pixmap)
+            self.pet_label.resize(pixmap.width(), pixmap.height())
+            self.resize(pixmap.width(), pixmap.height())
         except StopIteration:
-            # 当前动画序列播放完毕，切回待机状态
             self._set_anim('idle')
 
     def _set_anim(self, anim_name: str):

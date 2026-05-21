@@ -3,23 +3,12 @@
 从基础角色图像（RGBA）生成待机、点击、拖拽三种动画的所有帧
 
 Animation 类
-  封装帧列表（已合成到色度键画布上的 PIL Image）、fps 和循环标志。
+  封装帧列表（QPixmap 或 PIL Image）、fps 和循环标志。
   作为整个动画系统中"帧数据 + 播放规则"的统一载体。
-
-Sprite sheet 支持
-  load_sprite_sheet(path, frame_width, frame_height, frame_count)
-    从水平排列的 PNG 条带中切出原始 RGBA 帧列表。
-  build_animation(raw_frames, fps, loop)
-    将原始帧合成到色度键画布，包装成 Animation 对象。
 """
 import math
 from typing import List
 from PIL import Image
-
-# ── 色度键设置（透明窗口的"魔法颜色"）──
-# Windows 的 -transparentcolor 会把这个颜色渲染成透明
-CHROMA_COLOR = (255, 0, 255)   # 品红 RGB
-CHROMA_HEX   = '#FF00FF'       # 品红 十六进制
 
 # ── 尺寸常量 ──
 WINDOW_SIZE = 200   # 宠物窗口像素大小
@@ -30,16 +19,16 @@ CHAR_SIZE   = 150   # 角色图像像素大小（占位符模式默认缩放目�
 
 class Animation:
     """
-    一个命名动画的完整描述：已合成到色度键画布的帧列表、播放速率和循环标志。
+    一个命名动画的完整描述：帧列表（QPixmap 或 PIL Image）、播放速率和循环标志。
 
-    frames  — List[PIL.Image.Image]，每帧均已合成在品红画布上，可直接转为 PhotoImage。
+    frames  — list of QPixmap (for directory-loaded animations) or PIL Image (for generated ones).
     fps     — 播放帧率（帧/秒），interval_ms 由此派生。
     loop    — True = 循环播放；False = 播完一轮后切回 'idle'。
     """
 
     def __init__(
         self,
-        frames: List[Image.Image],
+        frames: list,
         fps:    float = 12.0,
         loop:   bool  = True,
     ) -> None:
@@ -72,58 +61,9 @@ def _paste(canvas: Image.Image, char: Image.Image, ox: int = 0, oy: int = 0) -> 
         canvas.paste(char, (x, y))
 
 
-# ── Sprite sheet 加载 ─────────────────────────────────────────────────────────
-
-def load_sprite_sheet(
-    path:        str,
-    frame_width: int,
-    frame_height: int,
-    frame_count: int,
-) -> List[Image.Image]:
-    """
-    从水平排列的 PNG 条带中切出 RGBA 帧列表。
-
-    path         — PNG 文件路径
-    frame_width  — 每帧宽度（像素）
-    frame_height — 每帧高度（像素）
-    frame_count  — 切取的帧数（从左到右）
-
-    返回 List[Image.Image]（RGBA 模式），每帧为原始裁剪，未做色度键合成。
-    调用方应传给 build_animation() 完成合成与包装。
-    """
-    sheet = Image.open(path).convert('RGBA')
-    frames: List[Image.Image] = []
-    for i in range(frame_count):
-        x0 = i * frame_width
-        x1 = x0 + frame_width
-        frames.append(sheet.crop((x0, 0, x1, frame_height)))
-    return frames
-
-
-def build_animation(
-    raw_frames: List[Image.Image],
-    fps:        float = 12.0,
-    loop:       bool  = True,
-) -> Animation:
-    """
-    将原始 RGBA 帧合成到色度键画布，包装成 Animation 对象。
-
-    raw_frames — load_sprite_sheet() 返回的裸帧列表（或任意 RGBA PIL Image 列表）
-    fps        — 播放帧率
-    loop       — 是否循环播放
-    """
-    composited: List[Image.Image] = []
-    for frame in raw_frames:
-        canvas = _make_canvas()
-        _paste(canvas, frame)
-        composited.append(canvas)
-    return Animation(composited, fps=fps, loop=loop)
-
-
 # ── Pillow 占位符帧生成器 ─────────────────────────────────────────────────────
-# 当 assets/sheets/ 中没有对应 sprite sheet 时使用。
-# 每个函数返回已合成到色度键画布上的 PIL Image 列表，
-# 可直接传给 Animation() 构造器。
+# 用于非 idle 动画（click/drag/fly/dizzy/squash/rebound）的程序化帧生成。
+# 每个函数返回 PIL Image 列表，由 pet.py 的 _pil_anim() 在启动时转换为 QPixmap。
 
 def generate_idle_frames(char_img: Image.Image, count: int = 8) -> List[Image.Image]:
     """
