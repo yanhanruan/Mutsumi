@@ -29,3 +29,8 @@ env/
 
 # png
 *.png
+
+# ignore all normalize_frames.py input images except for .gitkeep to keep the directory structure 
+frames_raw/**/*
+!frames_raw/**/
+!frames_raw/**/.gitkeep
