@@ -103,21 +103,21 @@ class DesktopPet(QWidget):
         events.subscribe('pomodoro_break_start', lambda **_: self.badge_timer.start(1000))
 
     # ── 动画加载 ──────────────────────────────────────────────────────────
+    _DISPLAY_HEIGHT = 200  # px; change to scale the pet up or down
+
     @staticmethod
-    def _idle_frames_dir() -> str:
+    def _assets_dir() -> str:
         src_dir = os.path.dirname(os.path.abspath(__file__))
-        return os.path.join(os.path.dirname(src_dir), 'assets', 'idle')
-
-    _IDLE_DISPLAY_HEIGHT = 200  # px; change to scale the pet up or down
+        return os.path.join(os.path.dirname(src_dir), 'assets')
 
     @staticmethod
-    def _load_idle_from_dir(fps: float = 24.0, loop: bool = True) -> Animation:
-        frames_dir = DesktopPet._idle_frames_dir()
+    def _load_dir_anim(name: str, fps: float, loop: bool) -> Animation:
+        frames_dir = os.path.join(DesktopPet._assets_dir(), name)
         paths = sorted(
             f for f in (os.path.join(frames_dir, n) for n in os.listdir(frames_dir))
-            if f.lower().endswith('.png')
+            if f.lower().endswith('.webp')
         )
-        h = DesktopPet._IDLE_DISPLAY_HEIGHT
+        h = DesktopPet._DISPLAY_HEIGHT
         frames = [
             QPixmap(p).scaledToHeight(h, Qt.TransformationMode.SmoothTransformation)
             for p in paths
@@ -133,8 +133,8 @@ class DesktopPet(QWidget):
         char = create_placeholder_character()
         squash_pil, rebound_pil = generate_squash_frames(char)
         return {
-            'idle':    self._load_idle_from_dir(fps=24.0, loop=True),
-            'click':   self._pil_anim(generate_click_frames(char),  fps=12, loop=False),
+            'idle':    self._load_dir_anim('idle',  fps=24.0, loop=True),
+            'click':   self._load_dir_anim('click_matched', fps=24.0, loop=False),
             'drag':    self._pil_anim(generate_drag_frames(char),   fps=10, loop=True),
             'fly':     self._pil_anim(generate_fly_frames(char),    fps=16, loop=True),
             'dizzy':   self._pil_anim(generate_dizzy_frames(char),  fps=10, loop=False),
