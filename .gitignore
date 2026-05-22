@@ -26,3 +26,6 @@ env/
 
 # Claude Code local config
 .claude/
+
+# png
+*.png
