@@ -152,6 +152,7 @@ class DesktopPet(QWidget):
             'headphones_on':  self._load_dir_anim('headphones_on',  fps=24.0, loop=False),
             'headphones_off': self._load_dir_anim('headphones_off', fps=24.0, loop=False),
             'music':          self._load_dir_anim('music',          fps=24.0, loop=True),
+            'music2':         self._load_dir_anim('music2',         fps=24.0, loop=True),
             'drag':       self._pil_anim(generate_drag_frames(char),  fps=10, loop=True),
             'fly':        self._pil_anim(generate_fly_frames(char),   fps=16, loop=True),
             'dizzy':      self._pil_anim(generate_dizzy_frames(char), fps=10, loop=False),
@@ -173,6 +174,10 @@ class DesktopPet(QWidget):
                 print(f'[pet] → switching to pending {nxt!r}')
                 self._set_anim(nxt)
             elif self._anim == 'headphones_on':
+                self._set_anim('music')
+            elif self._anim == 'music':
+                self._set_anim('music2')
+            elif self._anim == 'music2':
                 self._set_anim('music')
             elif self._anim == 'headphones_off':
                 self._set_anim('idle')
@@ -346,7 +351,7 @@ class DesktopPet(QWidget):
 
     def _begin_music_sequence(self):
         print(f'[pet] _begin_music_sequence: anim={self._anim!r}, pending={self._pending_anim!r}')
-        if self._anim not in ('headphones_on', 'headphones_off', 'music'):
+        if self._anim not in ('headphones_on', 'headphones_off', 'music', 'music2'):
             self._pending_anim = 'headphones_on'
             print('[pet] pending → headphones_on')
             if self._anim == 'idle':
@@ -355,7 +360,7 @@ class DesktopPet(QWidget):
 
     def _end_music_sequence(self):
         print(f'[pet] _end_music_sequence: anim={self._anim!r}, pending={self._pending_anim!r}')
-        if self._anim in ('headphones_on', 'music'):
+        if self._anim in ('headphones_on', 'music', 'music2'):
             self._pending_anim = 'headphones_off'
             print('[pet] pending → headphones_off')
         elif self._anim == 'headphones_off':
