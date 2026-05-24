@@ -102,6 +102,20 @@ class DesktopPet(QWidget):
         events.subscribe('pomodoro_focus_start', lambda **_: self.badge_timer.start(1000))
         events.subscribe('pomodoro_break_start', lambda **_: self.badge_timer.start(1000))
 
+        # ── 音频检测与动画待机队列 ──
+        self._pending_anim: Optional[str] = None
+
+        # Stop is debounced by 3 s to ignore brief gaps (song transitions, buffering).
+        # Start fires immediately.
+        self._audio_stop_timer = QTimer(self)
+        self._audio_stop_timer.setSingleShot(True)
+        self._audio_stop_timer.timeout.connect(self._end_music_sequence)
+
+        from audio_detector import AudioDetector
+        self._audio = AudioDetector(poll_ms=500, parent=self)
+        self._audio.audio_started.connect(self._on_audio_started)
+        self._audio.audio_stopped.connect(self._on_audio_stopped)
+
     # ── 动画加载 ──────────────────────────────────────────────────────────
     _DISPLAY_HEIGHT = 200  # px; change to scale the pet up or down
 
@@ -133,13 +147,16 @@ class DesktopPet(QWidget):
         char = create_placeholder_character()
         squash_pil, rebound_pil = generate_squash_frames(char)
         return {
-            'idle':    self._load_dir_anim('idle',  fps=24.0, loop=True),
-            'click':   self._load_dir_anim('click_matched', fps=24.0, loop=False),
-            'drag':    self._pil_anim(generate_drag_frames(char),   fps=10, loop=True),
-            'fly':     self._pil_anim(generate_fly_frames(char),    fps=16, loop=True),
-            'dizzy':   self._pil_anim(generate_dizzy_frames(char),  fps=10, loop=False),
-            'squash':  self._pil_anim(squash_pil,                   fps=12, loop=False),
-            'rebound': self._pil_anim(rebound_pil,                  fps=12, loop=False),
+            'idle':       self._load_dir_anim('idle',          fps=24.0, loop=True),
+            'click':      self._load_dir_anim('click_matched', fps=24.0, loop=False),
+            'headphones_on':  self._load_dir_anim('headphones_on',  fps=24.0, loop=False),
+            'headphones_off': self._load_dir_anim('headphones_off', fps=24.0, loop=False),
+            'music':          self._load_dir_anim('music',          fps=24.0, loop=True),
+            'drag':       self._pil_anim(generate_drag_frames(char),  fps=10, loop=True),
+            'fly':        self._pil_anim(generate_fly_frames(char),   fps=16, loop=True),
+            'dizzy':      self._pil_anim(generate_dizzy_frames(char), fps=10, loop=False),
+            'squash':     self._pil_anim(squash_pil,                  fps=12, loop=False),
+            'rebound':    self._pil_anim(rebound_pil,                 fps=12, loop=False),
         }
 
     # ── 动画渲染核心 ──────────────────────────────────────────────────────
@@ -150,7 +167,19 @@ class DesktopPet(QWidget):
             self.pet_label.resize(pixmap.width(), pixmap.height())
             self.resize(pixmap.width(), pixmap.height())
         except StopIteration:
-            self._set_anim('idle')
+            print(f'[pet] StopIteration: anim={self._anim!r}, pending={self._pending_anim!r}')
+            if self._pending_anim:
+                nxt, self._pending_anim = self._pending_anim, None
+                print(f'[pet] → switching to pending {nxt!r}')
+                self._set_anim(nxt)
+            elif self._anim == 'headphones_on':
+                self._set_anim('music')
+            elif self._anim == 'headphones_off':
+                self._set_anim('idle')
+            elif self._animations[self._anim].loop:
+                self._set_anim(self._anim)
+            else:
+                self._set_anim('idle')
 
     def _set_anim(self, anim_name: str):
         if anim_name not in self._animations:
@@ -305,3 +334,32 @@ class DesktopPet(QWidget):
             'energy': self._pet_state.energy,
             'affection': self._pet_state.affection,
         })
+
+    # ── 音频响应 ──────────────────────────────────────────────────────────
+
+    def _on_audio_started(self):
+        self._audio_stop_timer.stop()   # cancel any pending stop debounce
+        self._begin_music_sequence()
+
+    def _on_audio_stopped(self):
+        self._audio_stop_timer.start(3000)  # wait 3 s before acting
+
+    def _begin_music_sequence(self):
+        print(f'[pet] _begin_music_sequence: anim={self._anim!r}, pending={self._pending_anim!r}')
+        if self._anim not in ('headphones_on', 'headphones_off', 'music'):
+            self._pending_anim = 'headphones_on'
+            print('[pet] pending → headphones_on')
+            if self._anim == 'idle':
+                # Fast-forward idle so StopIteration fires on the next timer tick.
+                self._current_frame_generator = iter([])
+
+    def _end_music_sequence(self):
+        print(f'[pet] _end_music_sequence: anim={self._anim!r}, pending={self._pending_anim!r}')
+        if self._anim in ('headphones_on', 'music'):
+            self._pending_anim = 'headphones_off'
+            print('[pet] pending → headphones_off')
+        elif self._anim == 'headphones_off':
+            pass  # already on the way out
+        elif self._pending_anim == 'headphones_on':
+            self._pending_anim = None
+            print('[pet] cancelled pending headphones_on')  # cancel queued music start
