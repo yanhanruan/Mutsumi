@@ -97,6 +97,8 @@ class DesktopPet(QWidget):
         # 物理拖拽变量
         self._drag_start_pos = None
         self._drag_start_time: Optional[float] = None
+        self._drag_start_global: Optional[QPoint] = None  # for distinguishing click vs drag
+        self._did_drag = False  # set to True once movement exceeds threshold
 
         # 番茄钟事件订阅 — 开始时启动 badge 刷新
         events.subscribe('pomodoro_focus_start', lambda **_: self.badge_timer.start(1000))
@@ -215,25 +217,23 @@ class DesktopPet(QWidget):
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self._drag_start_pos = event.globalPos() - self.frameGeometry().topLeft()
+            self._drag_start_global = event.globalPos()
             self._drag_start_time = time.monotonic()
-            self._pet_state.on_click()
-            self._set_anim('click')
-            pet_top_center = QPoint(
-                self.frameGeometry().left() + self.width() // 2,
-                self.frameGeometry().top(),
-            )
-            self.chat_bubble.show_message(
-                random.choice(self._CLICK_PHRASES),
-                pet_top_center,
-            )
+            self._did_drag = False
             event.accept()
 
         elif event.button() == Qt.MouseButton.RightButton:
             self.tray.show(event.globalPos().x(), event.globalPos().y())
             event.accept()
 
+    _DRAG_THRESHOLD = 5  # pixels of movement before treating press as a drag
+
     def mouseMoveEvent(self, event):
         if event.buttons() == Qt.MouseButton.LeftButton and self._drag_start_pos:
+            if not self._did_drag:
+                delta = event.globalPos() - self._drag_start_global
+                if delta.manhattanLength() >= self._DRAG_THRESHOLD:
+                    self._did_drag = True
             self.move(event.globalPos() - self._drag_start_pos)
             if self.chat_bubble.isVisible():
                 pet_top_center = QPoint(
@@ -248,8 +248,25 @@ class DesktopPet(QWidget):
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
+            was_drag = self._did_drag
             self._drag_start_pos = None
+            self._drag_start_global = None
             self._drag_start_time = None
+            self._did_drag = False
+
+            if not was_drag:
+                # True click — fire click logic only now
+                self._pet_state.on_click()
+                self._set_anim('click')
+                pet_top_center = QPoint(
+                    self.frameGeometry().left() + self.width() // 2,
+                    self.frameGeometry().top(),
+                )
+                self.chat_bubble.show_message(
+                    random.choice(self._CLICK_PHRASES),
+                    pet_top_center,
+                )
+
             event.accept()
 
     # ── 附属 UI 逻辑转换 ──────────────────────────────────────────────────
