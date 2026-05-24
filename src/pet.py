@@ -153,7 +153,7 @@ class DesktopPet(QWidget):
             'headphones_off': self._load_dir_anim('headphones_off', fps=24.0, loop=False),
             'music':          self._load_dir_anim('music',          fps=24.0, loop=True),
             'music2':         self._load_dir_anim('music2',         fps=24.0, loop=True),
-            'drag':       self._pil_anim(generate_drag_frames(char),  fps=10, loop=True),
+            'drag':       self._pil_anim(generate_drag_frames(char),  fps=10, loop=True),  # unused — kept for future use
             'fly':        self._pil_anim(generate_fly_frames(char),   fps=16, loop=True),
             'dizzy':      self._pil_anim(generate_dizzy_frames(char), fps=10, loop=False),
             'squash':     self._pil_anim(squash_pil,                  fps=12, loop=False),
@@ -235,9 +235,6 @@ class DesktopPet(QWidget):
     def mouseMoveEvent(self, event):
         if event.buttons() == Qt.MouseButton.LeftButton and self._drag_start_pos:
             self.move(event.globalPos() - self._drag_start_pos)
-            if self._anim != 'drag':
-                self._pet_state.on_drag()
-                self._set_anim('drag')
             if self.chat_bubble.isVisible():
                 pet_top_center = QPoint(
                     self.frameGeometry().left() + self.width() // 2,
@@ -251,16 +248,8 @@ class DesktopPet(QWidget):
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            was_dragging = self._anim == 'drag'
-            drag_duration = (time.monotonic() - self._drag_start_time) if self._drag_start_time else 1.0
             self._drag_start_pos = None
             self._drag_start_time = None
-
-            if was_dragging:
-                rough = drag_duration < 0.5
-                self._pet_state.on_drag_release(rough=rough)
-                self._set_anim('idle')
-
             event.accept()
 
     # ── 附属 UI 逻辑转换 ──────────────────────────────────────────────────
