@@ -168,15 +168,25 @@ class DesktopPet(QWidget):
     def _animate_step(self):
         now = time.monotonic()
         interval = self._animations[self._anim].interval_ms / 1000.0
-        if now - self._last_frame_t < interval:
+        elapsed = now - self._last_frame_t
+        if elapsed < interval:
             return  # not yet time for the next frame
-        self._last_frame_t += interval  # locked-step: stay locked to target cadence
+        # Clamp: if we're more than 2 frames behind (startup lag or stall),
+        # reset instead of catching up — prevents rapid-fire frame bursts.
+        if elapsed > interval * 2:
+            self._last_frame_t = now
+        else:
+            self._last_frame_t += interval  # locked-step
 
         try:
             pixmap: QPixmap = next(self._current_frame_generator)
             self.pet_label.setPixmap(pixmap)
-            self.pet_label.resize(pixmap.width(), pixmap.height())
-            self.resize(pixmap.width(), pixmap.height())
+            # Only resize when dimensions actually change — avoids hammering
+            # the DWM compositor on every frame of a same-size animation.
+            w, h = pixmap.width(), pixmap.height()
+            if self.width() != w or self.height() != h:
+                self.pet_label.resize(w, h)
+                self.resize(w, h)
         except StopIteration:
             print(f'[pet] StopIteration: anim={self._anim!r}, pending={self._pending_anim!r}')
             if self._pending_anim:
