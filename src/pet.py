@@ -80,10 +80,12 @@ class DesktopPet(QWidget):
         )
 
         # ── 5. 替换原本的 root.after 定时器 ──
-        # 主动画循环定时器 (替代 root.after(100, update))
+        # 主动画循环定时器 — 固定 8 ms 轮询，由 _animate_step 内部根据
+        # 实际经过时间决定是否推进帧，避免 setInterval 重启造成的帧间隔抖动
+        self._last_frame_t = time.monotonic()
         self.anim_timer = QTimer(self)
         self.anim_timer.timeout.connect(self._animate_step)
-        self.anim_timer.start(self._animations['idle'].interval_ms)
+        self.anim_timer.start(8)  # ~120 Hz poll; actual fps controlled by elapsed time
 
         # 番茄钟 Badge 刷新定时器
         self.badge_timer = QTimer(self)
@@ -164,6 +166,11 @@ class DesktopPet(QWidget):
 
     # ── 动画渲染核心 ──────────────────────────────────────────────────────
     def _animate_step(self):
+        now = time.monotonic()
+        if now - self._last_frame_t < self._animations[self._anim].interval_ms / 1000:
+            return  # not yet time for the next frame
+        self._last_frame_t = now
+
         try:
             pixmap: QPixmap = next(self._current_frame_generator)
             self.pet_label.setPixmap(pixmap)
@@ -197,13 +204,9 @@ class DesktopPet(QWidget):
         
         # 重新生成迭代器，确保从第一帧开始播放
         self._current_frame_generator = iter(anim_obj.frames)
-        
-        # 根据该动画设定的 fps 调整定时器间隔 (1000ms / fps)
-        # 如果 Animation 对象里有 interval_ms 属性则直接使用
-        if hasattr(anim_obj, 'interval_ms'):
-            self.anim_timer.setInterval(anim_obj.interval_ms)
-        else:
-            self.anim_timer.setInterval(int(1000 / anim_obj.fps))
+        # Reset the elapsed-time clock so the first frame of the new animation
+        # renders on the very next poll instead of waiting a leftover interval.
+        self._last_frame_t = time.monotonic()
             
     # ── 鼠标交互 (替代 bind 事件) ─────────────────────────────────────────
     _CLICK_PHRASES = [
