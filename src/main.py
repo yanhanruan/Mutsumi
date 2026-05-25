@@ -13,16 +13,6 @@ if _SRC_DIR not in sys.path:
 from PySide6.QtWidgets import QApplication
 from pet import DesktopPet
 
-# Raise Windows multimedia timer resolution to 1 ms so QTimer fires at the
-# requested interval instead of the default ~15 ms system clock granularity.
-# This is the single biggest win for animation smoothness on Windows.
-try:
-    import ctypes
-    ctypes.windll.winmm.timeBeginPeriod(1)
-    _TIMER_PERIOD_SET = True
-except Exception:
-    _TIMER_PERIOD_SET = False
-
 
 def main():
     # 【核心修复】：全面弃用 tkinter，整个程序生命周期只允许一个 QApplication
@@ -40,16 +30,7 @@ def main():
         _pet.show()
 
     # 进入 PySide6 事件循环
-    result = app.exec()
-
-    # Release the timer resolution boost on clean exit.
-    if _TIMER_PERIOD_SET:
-        try:
-            ctypes.windll.winmm.timeEndPeriod(1)
-        except Exception:
-            pass
-
-    sys.exit(result)
+    sys.exit(app.exec())
 
 
 if __name__ == '__main__':
