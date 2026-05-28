@@ -100,7 +100,7 @@ export const DEFAULT_ANIMATIONS: Record<AnimationName, AnimationDef> = {
   headphones_off: { dir: 'headphones_off', count: 185, fps: 24, loop: false },
   music1:         { dir: 'music1',         count: 185, fps: 24, loop: true  },
   music2:         { dir: 'music2',         count: 185, fps: 24, loop: false,
-                    buildSequence: f => buildPingPongSequence(f,  81, 159, odd(13)) },
+                    buildSequence: f => buildPingPongSequence(f,  81, 104, odd(31)) },
   music3:         { dir: 'music3',         count: 330, fps: 24, loop: true  },
   music4:         { dir: 'music4',         count: 185, fps: 24, loop: false,
                     buildSequence: f => buildPingPongSequence(f, 105, 161, odd(13)) },

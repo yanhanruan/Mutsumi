@@ -22,6 +22,10 @@ pub fn run() {
   let audio_state   = audio::AudioState(AtomicBool::new(false));
 
   tauri::Builder::default()
+    .plugin(tauri_plugin_autostart::init(
+      tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+      None,
+    ))
     .manage(shared.clone())
     .manage(weather_state)
     .manage(audio_state)

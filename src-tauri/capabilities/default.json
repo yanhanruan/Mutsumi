@@ -16,6 +16,9 @@
     "core:window:allow-close",
     "core:window:allow-set-ignore-cursor-events",
     "core:tray:default",
-    "core:menu:default"
+    "core:menu:default",
+    "autostart:allow-enable",
+    "autostart:allow-disable",
+    "autostart:allow-is-enabled"
   ]
 }

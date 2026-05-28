@@ -1,16 +1,18 @@
 <script setup lang="ts">
 /**
- * SettingsWindow — Pomodoro durations + reset.
+ * SettingsWindow — Pomodoro durations + reset + launch-on-startup.
  *
  * Loaded by App.vue when URL is `?window=settings`. Configured as a separate
  * Tauri window in tauri.conf.json (label "settings", hidden by default).
  *
  * State is fetched on mount via the `get_state` command, saved via
  * `pom_set_durations`. Reset wipes pet energy/affection via `pet_reset`.
+ * Launch-on-startup uses @tauri-apps/plugin-autostart.
  */
 import { onMounted, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { enable, disable, isEnabled } from '@tauri-apps/plugin-autostart'
 
 interface PetStateSnapshot {
   energy:    number
@@ -31,12 +33,13 @@ interface StateSnapshot {
   pomodoro: PomodoroSnapshot
 }
 
-const focusMins = ref(25)
-const breakMins = ref(5)
-const energy    = ref(100)
-const affection = ref(50)
-const mood      = ref('content')
-const status    = ref('')
+const focusMins   = ref(25)
+const breakMins   = ref(5)
+const energy      = ref(100)
+const affection   = ref(50)
+const mood        = ref('content')
+const status      = ref('')
+const autostart   = ref(false)
 
 async function refresh() {
   const s = await invoke<StateSnapshot>('get_state')
@@ -45,6 +48,30 @@ async function refresh() {
   energy.value    = Math.round(s.pet.energy)
   affection.value = Math.round(s.pet.affection)
   mood.value      = s.pet.mood
+}
+
+async function refreshAutostart() {
+  try {
+    autostart.value = await isEnabled()
+  } catch {
+    autostart.value = false
+  }
+}
+
+async function toggleAutostart() {
+  try {
+    if (autostart.value) {
+      await enable()
+    } else {
+      await disable()
+    }
+    status.value = autostart.value ? 'Launch on startup enabled.' : 'Launch on startup disabled.'
+    setTimeout(() => { status.value = '' }, 1500)
+  } catch (e) {
+    console.error('autostart toggle failed', e)
+    // Revert the checkbox if the OS call failed.
+    autostart.value = !autostart.value
+  }
 }
 
 async function save() {
@@ -67,7 +94,10 @@ async function close() {
   await getCurrentWindow().hide()
 }
 
-onMounted(refresh)
+onMounted(async () => {
+  await refresh()
+  await refreshAutostart()
+})
 </script>
 
 <template>
@@ -91,6 +121,22 @@ onMounted(refresh)
       <div class="row stat"><label>Energy</label>    <span>{{ energy }}</span></div>
       <div class="row stat"><label>Affection</label> <span>{{ affection }}</span></div>
       <div class="row stat"><label>Mood</label>      <span>{{ mood }}</span></div>
+    </section>
+
+    <section>
+      <h3>System</h3>
+      <div class="row toggle-row">
+        <label for="autostart-toggle">Launch on startup</label>
+        <label class="toggle">
+          <input
+            id="autostart-toggle"
+            type="checkbox"
+            v-model="autostart"
+            @change="toggleAutostart"
+          />
+          <span class="slider" />
+        </label>
+      </div>
     </section>
 
     <div class="actions">
@@ -135,7 +181,7 @@ section {
   padding: 4px 0;
 }
 .row label { color: #4a4055; }
-.row input {
+.row input[type="number"] {
   width: 80px;
   padding: 4px 8px;
   font-size: 13px;
@@ -144,6 +190,50 @@ section {
   background: white;
 }
 .row.stat span { color: #7a6e8a; }
+
+/* ── Toggle switch ───────────────────────────────── */
+.toggle-row {
+  padding: 6px 0;
+}
+.toggle {
+  position: relative;
+  display: inline-block;
+  width: 38px;
+  height: 22px;
+  cursor: pointer;
+}
+.toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.slider {
+  position: absolute;
+  inset: 0;
+  border-radius: 11px;
+  background: #d4cde0;
+  transition: background 200ms ease;
+}
+.slider::before {
+  content: '';
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: white;
+  top: 3px;
+  left: 3px;
+  transition: transform 200ms ease;
+  box-shadow: 0 1px 3px rgba(0,0,0,.25);
+}
+.toggle input:checked + .slider {
+  background: #6750a4;
+}
+.toggle input:checked + .slider::before {
+  transform: translateX(16px);
+}
+
+/* ── Actions ─────────────────────────────────────── */
 .actions {
   display: flex;
   gap: 8px;
