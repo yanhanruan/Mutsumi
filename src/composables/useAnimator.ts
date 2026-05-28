@@ -17,10 +17,17 @@ import { onMounted, onUnmounted, ref, shallowRef } from 'vue'
 export interface AnimationDef {
   /** Frame URLs relative to `/assets/`. */
   dir:       string
-  /** Number of frames (file_001.webp through file_NNN.webp). */
+  /** Number of source files on disk (frame_001.webp … frame_NNN.webp). */
   count:     number
   fps:       number
   loop:      boolean
+  /**
+   * Optional post-load transform. When provided, the raw loaded frames are
+   * passed in and the returned array becomes the actual playback sequence.
+   * Use this to build ping-pong, intro+loop, or other non-linear orderings
+   * without changing the tick loop.
+   */
+  buildSequence?: (frames: HTMLImageElement[]) => HTMLImageElement[]
 }
 
 export type AnimationName =
@@ -39,6 +46,32 @@ interface LoadedAnimation {
   loop:      boolean
 }
 
+// ── music4 custom sequence ─────────────────────────────────────────
+//
+// Playback layout (185 source frames):
+//   • Intro    : frames   1-105  played once, straight through.
+//   • Ping-pong: frames 106-161  forward then 161-106 reverse, × 7.
+//     7 full cycles (odd count) so the sequence ends on frame 106,
+//     letting the outro begin naturally at frame 107.
+//   • Outro    : frames 107-185  played once to the end.
+//
+// Total virtual length: 105 + (56 + 56) × 7 + 79 = 968 frames.
+// Exported so the sequence logic can be unit-tested independently.
+
+export function buildMusic4Sequence(frames: HTMLImageElement[]): HTMLImageElement[] {
+  const intro   = frames.slice(0, 105)       // frame_001 … frame_105
+  const pingFwd = frames.slice(105, 161)     // frame_106 … frame_161 (56 frames)
+  const pingRev = pingFwd.slice().reverse()  // frame_161 … frame_106 (non-mutating copy)
+  const outro   = frames.slice(106)          // frame_107 … frame_185 (79 frames)
+
+  const seq: HTMLImageElement[] = [...intro]
+  for (let i = 0; i < 7; i++) {
+    seq.push(...pingFwd, ...pingRev)
+  }
+  seq.push(...outro)
+  return seq
+}
+
 // ── Default registry (matches Python original) ──────────────────────
 
 export const DEFAULT_ANIMATIONS: Record<AnimationName, AnimationDef> = {
@@ -49,7 +82,7 @@ export const DEFAULT_ANIMATIONS: Record<AnimationName, AnimationDef> = {
   music1:         { dir: 'music1',         count: 185, fps: 24, loop: true  },
   music2:         { dir: 'music2',         count: 185, fps: 24, loop: true  },
   music3:         { dir: 'music3',         count: 330, fps: 24, loop: true  },
-  music4:         { dir: 'music4',         count: 185, fps: 24, loop: true  },
+  music4:         { dir: 'music4',         count: 185, fps: 24, loop: false, buildSequence: buildMusic4Sequence },
 }
 
 // ── Composable ─────────────────────────────────────────────────────
@@ -83,7 +116,9 @@ export function useAnimator(registry: Record<AnimationName, AnimationDef> = DEFA
         img.onerror = () => res()
       }))
     }
-    return Promise.all(promises).then(() => frames)
+    return Promise.all(promises).then(() =>
+      def.buildSequence ? def.buildSequence(frames) : frames
+    )
   }
 
   async function preloadAll(): Promise<void> {
@@ -199,7 +234,7 @@ export function useAnimator(registry: Record<AnimationName, AnimationDef> = DEFA
   // ── Lifecycle ─────────────────────────────────────────────────
   onMounted(async () => {
     await preloadAll()
-    setAnim('idle')
+    setAnim('music4')
     rafId = requestAnimationFrame(tick)
   })
 
