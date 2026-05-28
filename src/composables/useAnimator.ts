@@ -5,7 +5,7 @@
  *   - A registry of named animations (frames, fps, loop)
  *   - A current animation + frame index
  *   - A "pending" slot that's consumed at the natural end of the current loop
- *   - Hardwired chains: headphones_on → music, music ↔ music2, headphones_off → idle
+ *   - Hardwired chains: headphones_on → music1 → music2 → music3 → music4 → music1 → …
  *
  * Timing uses a locked-step clock with a 2× lag clamp, the same pattern that
  * fixed the smoothness/catch-up issues in the Python original.
@@ -28,8 +28,10 @@ export type AnimationName =
   | 'click'
   | 'headphones_on'
   | 'headphones_off'
-  | 'music'
+  | 'music1'
   | 'music2'
+  | 'music3'
+  | 'music4'
 
 interface LoadedAnimation {
   frames:    HTMLImageElement[]
@@ -44,8 +46,10 @@ export const DEFAULT_ANIMATIONS: Record<AnimationName, AnimationDef> = {
   click:          { dir: 'click_matched',  count: 156, fps: 24, loop: false },
   headphones_on:  { dir: 'headphones_on',  count: 185, fps: 24, loop: false },
   headphones_off: { dir: 'headphones_off', count: 185, fps: 24, loop: false },
-  music:          { dir: 'music',          count: 185, fps: 24, loop: true  },
+  music1:         { dir: 'music1',         count: 185, fps: 24, loop: true  },
   music2:         { dir: 'music2',         count: 185, fps: 24, loop: true  },
+  music3:         { dir: 'music3',         count: 330, fps: 24, loop: true  },
+  music4:         { dir: 'music4',         count: 185, fps: 24, loop: true  },
 }
 
 // ── Composable ─────────────────────────────────────────────────────
@@ -151,9 +155,11 @@ export function useAnimator(registry: Record<AnimationName, AnimationDef> = DEFA
       return nxt
     }
     const cur = currentName.value
-    if (cur === 'headphones_on')  return 'music'
-    if (cur === 'music')          return 'music2'
-    if (cur === 'music2')         return 'music'
+    if (cur === 'headphones_on')  return 'music1'
+    if (cur === 'music1')         return 'music2'
+    if (cur === 'music2')         return 'music3'
+    if (cur === 'music3')         return 'music4'
+    if (cur === 'music4')         return 'music1'
     if (cur === 'headphones_off') return 'idle'
     // Loop or fall back to idle for one-shots.
     const def = loaded.value[cur]

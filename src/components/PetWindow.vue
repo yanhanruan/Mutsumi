@@ -37,7 +37,7 @@ useAudioReaction(queueAnim, currentName, getPending, cancelPending)
 useHitTest(getCurrentImage)
 
 // Animations during which click animation is suppressed (bubble still shows).
-const MUSIC_MODE = new Set(['headphones_on', 'headphones_off', 'music', 'music2'])
+const MUSIC_MODE = new Set(['headphones_on', 'headphones_off', 'music1', 'music2', 'music3', 'music4'])
 
 const bubbleRef = ref<InstanceType<typeof ChatBubble> | null>(null)
 

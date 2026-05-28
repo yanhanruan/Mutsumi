@@ -104,13 +104,25 @@ describe('useAudioReaction → audio-started', () => {
   })
 
   it('does NOT queue when already in music', async () => {
-    const hx = await mountReaction('music')
+    const hx = await mountReaction('music1')
     fire('audio-started')
     expect(hx.queueAnim).not.toHaveBeenCalled()
   })
 
   it('does NOT queue when already in music2', async () => {
     const hx = await mountReaction('music2')
+    fire('audio-started')
+    expect(hx.queueAnim).not.toHaveBeenCalled()
+  })
+
+  it('does NOT queue when already in music3', async () => {
+    const hx = await mountReaction('music3')
+    fire('audio-started')
+    expect(hx.queueAnim).not.toHaveBeenCalled()
+  })
+
+  it('does NOT queue when already in music4', async () => {
+    const hx = await mountReaction('music4')
     fire('audio-started')
     expect(hx.queueAnim).not.toHaveBeenCalled()
   })
@@ -124,7 +136,7 @@ describe('useAudioReaction → audio-started', () => {
   it('cancels a stale pending headphones_off when audio resumes mid-music', async () => {
     // Simulates: music → audio-stopped → queue headphones_off → audio-started
     // before the music loop ended. The stale pending must be cancelled.
-    const hx = await mountReaction('music')
+    const hx = await mountReaction('music1')
     hx.setPending('headphones_off')
     fire('audio-started')
     expect(hx.cancelPending).toHaveBeenCalled()
@@ -132,7 +144,7 @@ describe('useAudioReaction → audio-started', () => {
   })
 
   it('does NOT cancel pending if pending is something other than headphones_off', async () => {
-    const hx = await mountReaction('music')
+    const hx = await mountReaction('music1')
     hx.setPending('click')
     fire('audio-started')
     expect(hx.cancelPending).not.toHaveBeenCalled()
@@ -141,13 +153,25 @@ describe('useAudioReaction → audio-started', () => {
 
 describe('useAudioReaction → audio-stopped', () => {
   it('queues headphones_off when in music', async () => {
-    const hx = await mountReaction('music')
+    const hx = await mountReaction('music1')
     fire('audio-stopped')
     expect(hx.queueAnim).toHaveBeenCalledWith('headphones_off')
   })
 
   it('queues headphones_off when in music2', async () => {
     const hx = await mountReaction('music2')
+    fire('audio-stopped')
+    expect(hx.queueAnim).toHaveBeenCalledWith('headphones_off')
+  })
+
+  it('queues headphones_off when in music3', async () => {
+    const hx = await mountReaction('music3')
+    fire('audio-stopped')
+    expect(hx.queueAnim).toHaveBeenCalledWith('headphones_off')
+  })
+
+  it('queues headphones_off when in music4', async () => {
+    const hx = await mountReaction('music4')
     fire('audio-stopped')
     expect(hx.queueAnim).toHaveBeenCalledWith('headphones_off')
   })
@@ -183,7 +207,7 @@ describe('useAudioReaction → audio-stopped', () => {
   it('does NOT cancel pending headphones_on if currently in music (handled via queue instead)', async () => {
     // When in music with pending=headphones_on (unusual but possible), audio-stopped
     // should take the queue-headphones_off branch, not the cancel branch.
-    const hx = await mountReaction('music')
+    const hx = await mountReaction('music1')
     hx.setPending('headphones_on')
     fire('audio-stopped')
     expect(hx.queueAnim).toHaveBeenCalledWith('headphones_off')
@@ -193,7 +217,7 @@ describe('useAudioReaction → audio-stopped', () => {
 
 describe('useAudioReaction → realistic event sequences', () => {
   it('audio stop → music loop ends → headphones_off plays → audio resumes mid-exit → re-enters', async () => {
-    const hx = await mountReaction('music')
+    const hx = await mountReaction('music1')
 
     // 1. User stops audio. Pet is in music.
     fire('audio-stopped')
@@ -210,7 +234,7 @@ describe('useAudioReaction → realistic event sequences', () => {
   })
 
   it('stop → fast restart while still in music: pending cancelled, no glitch', async () => {
-    const hx = await mountReaction('music')
+    const hx = await mountReaction('music1')
     fire('audio-stopped')
     expect(hx.queueAnim).toHaveBeenCalledWith('headphones_off')
     // music loop has not ended yet — pending still 'headphones_off'

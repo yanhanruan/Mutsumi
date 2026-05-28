@@ -28,8 +28,10 @@ import type { AnimationName } from './useAnimator'
 // re-enter via headphones_on, not skip it.
 const IN_MUSIC_ANIMS: ReadonlySet<AnimationName> = new Set([
   'headphones_on',
-  'music',
+  'music1',
   'music2',
+  'music3',
+  'music4',
 ])
 
 export function useAudioReaction(
