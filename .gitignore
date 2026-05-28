@@ -1,36 +1,40 @@
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-*.egg-info/
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Node / Vite
+node_modules/
 dist/
-build/
-*.spec
+dist-ssr/
+*.local
 
-# Virtual environments
-venv/
-.venv/
-env/
+# Rust / Tauri
+src-tauri/target/
+src-tauri/Cargo.lock
+src-tauri/WixTools/
+src-tauri/gen/schemas/
 
-# PyInstaller output
-*.exe
-
-# User data (runtime-generated, not source)
-~/.mutsumi/
-
-# Editor / IDE
-.vscode/
+# IDE
+.vscode/*
+!.vscode/extensions.json
 .idea/
 *.swp
+*.suo
+
+# OS
+.DS_Store
+Thumbs.db
 
 # Claude Code local config
 .claude/
 
-# png
+# Raw input frames and intermediate PNGs (not needed after WebP conversion)
 *.png
-
-# ignore all normalize_frames.py input images except for .gitkeep to keep the directory structure 
 frames_raw/**/*
 !frames_raw/**/
 !frames_raw/**/.gitkeep
+
+# Local runtime state
+state.json

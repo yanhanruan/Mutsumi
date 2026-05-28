@@ -1,103 +1,97 @@
-# 🌸 Mutsumi Desktop Pet
+# Mutsumi (Tauri rewrite)
 
-A lightweight Python desktop companion featuring **Wakaba Mutsumi** (chibi style).  
-Runs as a transparent, always-on-top window with no taskbar icon.
+A desktop pet built on **Tauri 2 + Vue 3 + TypeScript**, rewriting the existing PySide6 implementation in `../Mutsumi/`.
 
----
+## Status — Feature-complete spike
 
-## Requirements
+Both layers are functional and compile cleanly:
 
-| Tool | Version |
-|------|---------|
-| Python | 3.9 + |
-| Pillow | 10.0 + |
-| PyInstaller | 6.0 + (build only) |
+- **Rust backend** (`src-tauri/src/`)
+  - `app_state.rs` — `Mutex<AppState>` holding pet + pomodoro, ticker thread emits events
+  - `audio.rs` — Windows WASAPI session-peak polling via `windows-rs` (Windows only)
+  - `pomodoro.rs` — phase state machine (Idle / Focus / Break) with countdown
+  - `state.rs` — pet state (energy / affection / mood) with decay tick
+  - `persistence.rs` — JSON load/save at `%APPDATA%/com.mutsumi.app/state.json`
+  - `tray.rs` — system tray menu (Show/Hide/Pomodoro/Settings/Quit)
 
-Install runtime dependencies:
+- **Vue frontend** (`src/`)
+  - `composables/useAnimator.ts` — animation registry, locked-step RAF loop, lag clamp, pending-anim slot, hardwired chains (headphones_on→music→music2↔music, headphones_off→idle)
+  - `composables/useAudioReaction.ts` — listens for audio-started/stopped events, queues headphones animations with 3s stop debounce
+  - `components/PetWindow.vue` — main pet view with click-vs-drag handling
+  - `components/ChatBubble.vue` — speech bubble (glassmorphism, auto-hide)
+  - `components/PomodoroBadge.vue` — corner badge showing remaining time + phase color
+  - `components/SettingsWindow.vue` — secondary window for Pomodoro durations + pet stats
+
+## Run it
 
 ```bash
-pip install -r requirements.txt
+cd Mutsumi-tauri
+npm install                    # only first time
+npm run tauri dev
 ```
 
----
+The first `tauri dev` triggers a Rust dependency compile that can take 3–10 minutes. Subsequent runs are fast.
 
-## Running
+## Tauri commands exposed to Vue
 
-```bash
-python src/main.py
-```
+| Command | Purpose |
+|---|---|
+| `get_state` | Snapshot of pet + pomodoro state |
+| `pet_click` | Increase energy/affection; recomputes mood; persists |
+| `pet_drag_end(rough)` | Adjust affection based on drag style; persists |
+| `pet_reset` | Reset pet to defaults; persists |
+| `pom_start` / `pom_pause` / `pom_stop` | Pomodoro controls |
+| `pom_set_durations(focus_mins, break_mins)` | Adjust durations; persists |
 
-The pet spawns at the **bottom-right corner** of your screen.
+## Events emitted by Rust
 
----
+| Event | When |
+|---|---|
+| `audio-started` / `audio-stopped` | WASAPI session peak crosses 0.001 threshold |
+| `pomodoro-tick` | Every second while pomodoro is running |
+| `pomodoro-phase-change` | When focus → break or break → focus auto-transition fires |
+| `pet-state-update` | Every 5 seconds (matches Python original's 5s tick) |
 
-## Interactions
-
-| Action | Result |
-|--------|--------|
-| **Left click** | Shake animation + random speech bubble (2 s) |
-| **Drag** | Move the pet anywhere on screen |
-| **Right click** | Context menu → Exit / Toggle Animation / About |
-
----
-
-## Replacing the Character Art
-
-1. Prepare a **PNG file with a transparent background** (recommended: 200×200 px or larger square).
-2. Name it **`mutsumi.png`** (or `character.png` / `pet.png`).
-3. Place it in the **`assets/`** folder next to `src/`.
-4. Restart the app — animation frames are generated automatically:
-   - **Idle** (8 frames) — gentle vertical float via sine wave
-   - **Click** (6 frames) — left/right shake
-   - **Drag** (4 frames) — slight rotation tilt
-
-> **Note:** Avoid using pure magenta (`#FF00FF`) in your artwork — that colour is used as the transparency key and will appear as a transparent hole.
-
-If no image is found, a built-in placeholder character is generated on the fly.
-
----
-
-## Building the `.exe`
-
-Double-click **`build.bat`** (or run it in a terminal):
-
-```bat
-build.bat
-```
-
-What it does:
-1. Runs `pip install -r requirements.txt` to ensure dependencies are up-to-date.
-2. Calls PyInstaller with `--onefile --windowed` to produce a single portable `.exe`.
-3. Output: **`dist\MutsumiPet.exe`**
-
-**To use custom art with the packaged exe:**  
-Create an `assets\` folder in the **same directory as `MutsumiPet.exe`** and place your PNG there.  
-The app checks that folder first before falling back to the built-in placeholder.
-
----
-
-## Project Structure
+## Project layout
 
 ```
-Mutsumi/
-├── assets/             ← place your character PNG here
+Mutsumi-tauri/
+├── public/
+│   └── assets/
+│       ├── idle/             234 WebP frames
+│       ├── click_matched/    156 frames
+│       ├── headphones_on/    185 frames
+│       ├── headphones_off/   185 frames
+│       ├── music/            185 frames
+│       └── music2/           185 frames
 ├── src/
-│   ├── main.py         ← entry point
-│   ├── pet.py          ← window, animation state machine, mouse events
-│   ├── bubble.py       ← speech bubble (follows character position)
-│   ├── tray.py         ← right-click context menu
-│   ├── animator.py     ← frame generation (idle / click / drag)
-│   └── placeholder.py  ← built-in fallback character drawn with Pillow
-├── requirements.txt
-├── build.bat           ← one-click PyInstaller build
-└── README.md
+│   ├── components/           PetWindow, SettingsWindow, ChatBubble, PomodoroBadge
+│   ├── composables/          useAnimator, useAudioReaction
+│   ├── App.vue               Routes between Pet and Settings via URL param
+│   ├── main.ts
+│   └── style.css             Global transparency reset
+├── src-tauri/
+│   ├── src/                  Rust modules (see above)
+│   ├── capabilities/         Tauri 2 permission config
+│   ├── tauri.conf.json       Two windows: main (transparent pet) + settings (opaque)
+│   └── Cargo.toml
+└── index.html
 ```
 
----
+## Window architecture
 
-## How Transparency Works
+Two Tauri windows defined in `tauri.conf.json`:
 
-The window background is set to **magenta (`#FF00FF`)**, and Windows'  
-`-transparentcolor` attribute makes every pixel of that colour invisible.  
-Character frames are composited onto a magenta canvas so transparent areas  
-in the original PNG become invisible at runtime — no additional libraries needed.
+- **main** — 240×320, transparent, frameless, always-on-top, no taskbar. The pet lives in the bottom 220px, the chat bubble in the top 100px.
+- **settings** — 360×320, opaque, decorated, hidden by default. Shown via tray "Settings…" entry. Loads the same `index.html` with `?window=settings`, which makes `App.vue` render `SettingsWindow` instead of `PetWindow`.
+
+## Not yet ported from the Python original
+
+Minor features deferred until the core spike is validated:
+
+- Stretch reminder (cursor-proximity nudges from `activity.py`)
+- Z particles sleep effect (`zparticles.py`)
+- "Rough" drag detection — currently `pet_drag_end` defaults to gentle. Add Vue-side drag-duration tracking to flip the `rough` flag.
+- Asset bundling — currently served from `public/` in dev; for production builds, move to `src-tauri/assets/` as bundled resources.
+
+The Python original in `../Mutsumi/` stays untouched until parity is reached.
