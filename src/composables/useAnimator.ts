@@ -46,27 +46,46 @@ interface LoadedAnimation {
   loop:      boolean
 }
 
-// ── music4 custom sequence ─────────────────────────────────────────
+// ── Generic ping-pong sequence builder ─────────────────────────────
 //
-// Playback layout (185 source frames):
-//   • Intro    : frames   1-105  played once, straight through.
-//   • Ping-pong: frames 106-161  forward then 161-106 reverse, × 7.
-//     7 full cycles (odd count) so the sequence ends on frame 106,
-//     letting the outro begin naturally at frame 107.
-//   • Outro    : frames 107-185  played once to the end.
+// Builds an intro → ping-pong → outro playback sequence from a flat frame
+// array. The three boundary parameters fully determine all three regions:
 //
-// Total virtual length: 105 + (56 + 56) × 7 + 79 = 968 frames.
+//   pingStart — first frame index (0-based, inclusive) of the ping-pong range.
+//               Everything before it is the intro, played once.
+//   pingEnd   — exclusive end index of the ping-pong range.
+//               Everything from pingEnd onward is the outro, played once.
+//   passes    — number of directional passes over [pingStart, pingEnd),
+//               alternating fwd/rev and always starting fwd.
+//               Must be OddNumber so the sequence ends on a forward pass.
+//               Use the odd() helper to construct the value.
+//
 // Exported so the sequence logic can be unit-tested independently.
 
-export function buildMusic4Sequence(frames: HTMLImageElement[]): HTMLImageElement[] {
-  const intro   = frames.slice(0, 105)       // frame_001 … frame_105
-  const pingFwd = frames.slice(105, 161)     // frame_106 … frame_161 (56 frames)
-  const pingRev = pingFwd.slice().reverse()  // frame_161 … frame_106 (non-mutating copy)
-  const outro   = frames.slice(106)          // frame_107 … frame_185 (79 frames)
+declare const _ODD: unique symbol
+/** Branded type for odd integers. Construct via odd(). */
+export type OddNumber = number & { readonly [_ODD]: true }
+
+/** Cast n to OddNumber. Throws a RangeError at runtime if n is even. */
+export function odd(n: number): OddNumber {
+  if (n % 2 === 0) throw new RangeError(`passes must be odd, got ${n}`)
+  return n as OddNumber
+}
+
+export function buildPingPongSequence(
+  frames:    HTMLImageElement[],
+  pingStart: number,
+  pingEnd:   number,
+  passes:    OddNumber,
+): HTMLImageElement[] {
+  const intro = frames.slice(0, pingStart)
+  const fwd   = frames.slice(pingStart, pingEnd)
+  const rev   = fwd.slice().reverse()
+  const outro = frames.slice(pingEnd)
 
   const seq: HTMLImageElement[] = [...intro]
-  for (let i = 0; i < 7; i++) {
-    seq.push(...pingFwd, ...pingRev)
+  for (let i = 0; i < passes; i++) {
+    seq.push(...(i % 2 === 0 ? fwd : rev))
   }
   seq.push(...outro)
   return seq
@@ -80,9 +99,11 @@ export const DEFAULT_ANIMATIONS: Record<AnimationName, AnimationDef> = {
   headphones_on:  { dir: 'headphones_on',  count: 185, fps: 24, loop: false },
   headphones_off: { dir: 'headphones_off', count: 185, fps: 24, loop: false },
   music1:         { dir: 'music1',         count: 185, fps: 24, loop: true  },
-  music2:         { dir: 'music2',         count: 185, fps: 24, loop: true  },
+  music2:         { dir: 'music2',         count: 185, fps: 24, loop: false,
+                    buildSequence: f => buildPingPongSequence(f,  81, 159, odd(13)) },
   music3:         { dir: 'music3',         count: 330, fps: 24, loop: true  },
-  music4:         { dir: 'music4',         count: 185, fps: 24, loop: false, buildSequence: buildMusic4Sequence },
+  music4:         { dir: 'music4',         count: 185, fps: 24, loop: false,
+                    buildSequence: f => buildPingPongSequence(f, 105, 161, odd(13)) },
 }
 
 // ── Composable ─────────────────────────────────────────────────────
@@ -234,7 +255,7 @@ export function useAnimator(registry: Record<AnimationName, AnimationDef> = DEFA
   // ── Lifecycle ─────────────────────────────────────────────────
   onMounted(async () => {
     await preloadAll()
-    setAnim('music4')
+    setAnim('music2')
     rafId = requestAnimationFrame(tick)
   })
 

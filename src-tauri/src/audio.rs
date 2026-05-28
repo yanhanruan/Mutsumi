@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 use windows::core::Interface;
 use windows::Win32::Media::Audio::Endpoints::IAudioMeterInformation;
@@ -31,6 +31,20 @@ const THRESHOLD: f32 = 0.001;
 const POLL_INTERVAL: Duration = Duration::from_millis(500);
 const START_THRESHOLD_POLLS: u32 = 6;
 const STOP_THRESHOLD_POLLS:  u32 = 12;
+
+// ── Managed state ──────────────────────────────────────────────────
+
+/// Mirrors `ContinuityTracker::emitted_playing` in managed app state.
+/// The frontend reads this on mount so it never misses the initial
+/// `audio-started` event that fires before the WebView listener registers.
+pub struct AudioState(pub AtomicBool);
+
+/// Tauri command: returns true if audio is currently in the "playing" state
+/// (i.e. `audio-started` has fired and `audio-stopped` has not yet fired).
+#[tauri::command]
+pub fn get_audio_state(state: tauri::State<AudioState>) -> bool {
+    state.0.load(Ordering::Relaxed)
+}
 
 // ── Pure state machine (testable without WASAPI/Tauri) ─────────────
 
@@ -102,10 +116,16 @@ pub fn spawn(app: AppHandle, stop_flag: Arc<AtomicBool>) {
             match tracker.observe(now_playing) {
                 Some(AudioEvent::Started) => {
                     log::info!("[audio] *** audio-started (poll #{}) ***", poll_count);
+                    if let Some(s) = app.try_state::<AudioState>() {
+                        s.0.store(true, Ordering::Relaxed);
+                    }
                     let _ = app.emit("audio-started", ());
                 }
                 Some(AudioEvent::Stopped) => {
                     log::info!("[audio] *** audio-stopped (poll #{}) ***", poll_count);
+                    if let Some(s) = app.try_state::<AudioState>() {
+                        s.0.store(false, Ordering::Relaxed);
+                    }
                     let _ = app.emit("audio-stopped", ());
                 }
                 None => {}

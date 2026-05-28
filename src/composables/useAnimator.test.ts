@@ -1,128 +1,176 @@
 /**
  * Tests for pure helpers exported from useAnimator.ts.
  *
- * buildMusic4Sequence is the only pure export today; the composable itself
- * requires a DOM + RAF loop and is covered via integration with
- * useAudioReaction.test.ts.
+ * buildPingPongSequence is tested with the parameters used for music2 and
+ * music4 so the tests also serve as regression coverage for those layouts.
  *
  * Frames are represented as plain numbers so the tests run in Node/happy-dom
  * without needing real HTMLImageElement objects. Each number is unique, so
  * reference-equality checks (toBe) correctly verify that the right source
  * frame appears at each position in the sequence.
+ *
+ * buildPingPongSequence(frames, pingStart, pingEnd, passes):
+ *   intro  = frames[0 .. pingStart)              played once
+ *   ping   = frames[pingStart .. pingEnd)  × passes  (alternating fwd/rev)
+ *   outro  = frames[pingEnd ..]                  played once
  */
 import { describe, it, expect } from 'vitest'
-import { buildMusic4Sequence } from './useAnimator'
+import { buildPingPongSequence, odd } from './useAnimator'
 
 // ── helpers ────────────────────────────────────────────────────────
 
-/** 185 unique "frames" (plain numbers 0-184, cast to the expected type). */
-function makeFrames(): HTMLImageElement[] {
-  return Array.from({ length: 185 }, (_, i) => i) as unknown as HTMLImageElement[]
+function makeFrames(n: number): HTMLImageElement[] {
+  return Array.from({ length: n }, (_, i) => i) as unknown as HTMLImageElement[]
 }
 
-// ── buildMusic4Sequence ────────────────────────────────────────────
+// ── odd() ──────────────────────────────────────────────────────────
+
+describe('odd()', () => {
+  it('returns the value unchanged for odd inputs', () => {
+    expect(odd(1)).toBe(1)
+    expect(odd(3)).toBe(3)
+    expect(odd(7)).toBe(7)
+  })
+
+  it('throws RangeError for even inputs', () => {
+    expect(() => odd(0)).toThrow(RangeError)
+    expect(() => odd(2)).toThrow(RangeError)
+    expect(() => odd(14)).toThrow(RangeError)
+  })
+})
+
+// ── music2: buildPingPongSequence(frames, 81, 159, odd(3)) ─────────
 //
-// Expected layout:
-//   Intro    : frames[0..104]   → 105 virtual frames
-//   Ping-pong: 7 × { frames[105..160] fwd + frames[160..105] rev }
-//            = 7 × 112          → 784 virtual frames
-//   Outro    : frames[106..184] →  79 virtual frames
-//   Total                       → 968 virtual frames
+//   Intro  : frames[0..80]     →  81 frames   (seq[0..80])
+//   Pass 1 fwd: frames[81..158] →  78 frames  (seq[81..158])
+//   Pass 2 rev: frames[158..81] →  78 frames  (seq[159..236])
+//   Pass 3 fwd: frames[81..158] →  78 frames  (seq[237..314])
+//   Outro  : frames[159..184]  →  26 frames   (seq[315..340])
+//   Total  : 81 + 3×78 + 26 = 341 frames
 
-describe('buildMusic4Sequence — shape', () => {
-  const frames = makeFrames()
-  const seq    = buildMusic4Sequence(frames)
+describe('buildPingPongSequence — music2 shape', () => {
+  const frames = makeFrames(185)
+  const seq    = buildPingPongSequence(frames, 81, 159, odd(3))
 
-  it('total length = 105 (intro) + 7 × 112 (ping-pong) + 79 (outro) = 968', () => {
-    expect(seq.length).toBe(968)
+  it('total length = 81 (intro) + 3×78 (ping-pong) + 26 (outro) = 341', () => {
+    expect(seq.length).toBe(341)
   })
 
   it('does not mutate the source frames array', () => {
-    const src = makeFrames()
-    buildMusic4Sequence(src)
-    for (let i = 0; i < 185; i++) {
-      expect(src[i]).toBe(i)
-    }
+    const src = makeFrames(185)
+    buildPingPongSequence(src, 81, 159, odd(3))
+    for (let i = 0; i < 185; i++) expect(src[i]).toBe(i)
   })
 })
 
-describe('buildMusic4Sequence — intro (frames 1-105)', () => {
-  const frames = makeFrames()
-  const seq    = buildMusic4Sequence(frames)
+describe('buildPingPongSequence — music2 intro (frames 1-81)', () => {
+  const frames = makeFrames(185)
+  const seq    = buildPingPongSequence(frames, 81, 159, odd(3))
 
-  it('seq[0] is frame_001 (source index 0)', () => expect(seq[0]).toBe(frames[0]))
-  it('seq[104] is frame_105 (source index 104)', () => expect(seq[104]).toBe(frames[104]))
+  it('seq[0] is source index 0',   () => expect(seq[0]).toBe(frames[0]))
+  it('seq[80] is source index 80', () => expect(seq[80]).toBe(frames[80]))
+
+  it('all 81 intro frames are in ascending order', () => {
+    for (let i = 0; i < 81; i++) expect(seq[i]).toBe(frames[i])
+  })
+})
+
+describe('buildPingPongSequence — music2 ping-pong passes', () => {
+  const frames = makeFrames(185)
+  const seq    = buildPingPongSequence(frames, 81, 159, odd(3))
+
+  // Pass 0 fwd: seq[81..158] = frames[81..158]
+  it('pass 1 fwd: starts at source index 81',  () => expect(seq[81]).toBe(frames[81]))
+  it('pass 1 fwd: ends at source index 158',   () => expect(seq[158]).toBe(frames[158]))
+  it('pass 1 fwd: all 78 frames ascending', () => {
+    for (let i = 0; i < 78; i++) expect(seq[81 + i]).toBe(frames[81 + i])
+  })
+
+  // Pass 1 rev: seq[159..236] = frames[158..81]
+  it('pass 2 rev: starts at source index 158', () => expect(seq[159]).toBe(frames[158]))
+  it('pass 2 rev: ends at source index 81',    () => expect(seq[236]).toBe(frames[81]))
+  it('pass 2 rev: all 78 frames descending', () => {
+    for (let i = 0; i < 78; i++) expect(seq[159 + i]).toBe(frames[158 - i])
+  })
+
+  // Pass 2 fwd: seq[237..314] = frames[81..158]
+  it('pass 3 fwd: starts at source index 81',  () => expect(seq[237]).toBe(frames[81]))
+  it('pass 3 fwd: ends at source index 158',   () => expect(seq[314]).toBe(frames[158]))
+  it('pass 3 fwd: all 78 frames ascending', () => {
+    for (let i = 0; i < 78; i++) expect(seq[237 + i]).toBe(frames[81 + i])
+  })
+
+  it('last ping-pong frame is source index 158 (ends on fwd pass)', () => {
+    expect(seq[314]).toBe(frames[158])
+  })
+})
+
+describe('buildPingPongSequence — music2 outro (frames after pingEnd)', () => {
+  const frames = makeFrames(185)
+  const seq    = buildPingPongSequence(frames, 81, 159, odd(3))
+
+  // Outro: seq[315..340] = frames[159..184]
+  it('seq[315] is source index 159', () => expect(seq[315]).toBe(frames[159]))
+  it('seq[340] is source index 184', () => expect(seq[340]).toBe(frames[184]))
+  it('all 26 outro frames are in ascending order', () => {
+    for (let i = 0; i < 26; i++) expect(seq[315 + i]).toBe(frames[159 + i])
+  })
+})
+
+// ── music4: buildPingPongSequence(frames, 105, 161, odd(1)) ────────
+//
+//   Intro  : frames[0..104]   → 105 frames  (seq[0..104])
+//   Pass 1 fwd: frames[105..160] → 56 frames (seq[105..160])
+//   Outro  : frames[161..184] →  24 frames  (seq[161..184])
+//   Total  : 105 + 1×56 + 24 = 185 frames
+
+describe('buildPingPongSequence — music4 shape', () => {
+  const frames = makeFrames(185)
+  const seq    = buildPingPongSequence(frames, 105, 161, odd(1))
+
+  it('total length = 105 (intro) + 1×56 (ping-pong) + 24 (outro) = 185', () => {
+    expect(seq.length).toBe(185)
+  })
+
+  it('does not mutate the source frames array', () => {
+    const src = makeFrames(185)
+    buildPingPongSequence(src, 105, 161, odd(1))
+    for (let i = 0; i < 185; i++) expect(src[i]).toBe(i)
+  })
+})
+
+describe('buildPingPongSequence — music4 intro (frames 1-105)', () => {
+  const frames = makeFrames(185)
+  const seq    = buildPingPongSequence(frames, 105, 161, odd(1))
+
+  it('seq[0] is source index 0',     () => expect(seq[0]).toBe(frames[0]))
+  it('seq[104] is source index 104', () => expect(seq[104]).toBe(frames[104]))
 
   it('all 105 intro frames are in ascending order', () => {
-    for (let i = 0; i < 105; i++) {
-      expect(seq[i]).toBe(frames[i])
-    }
+    for (let i = 0; i < 105; i++) expect(seq[i]).toBe(frames[i])
   })
 })
 
-describe('buildMusic4Sequence — 7 ping-pong cycles (frames 106-161 ↔ 161-106)', () => {
-  const frames = makeFrames()
-  const seq    = buildMusic4Sequence(frames)
+describe('buildPingPongSequence — music4 ping-pong (1 fwd pass)', () => {
+  const frames = makeFrames(185)
+  const seq    = buildPingPongSequence(frames, 105, 161, odd(1))
 
-  // Cycle k (0-indexed) starts at seq[105 + k * 112].
-  // Forward half  [+0  .. +55 ]: frames[105..160]  (frame_106 … frame_161)
-  // Reverse half  [+56 .. +111]: frames[160..105]  (frame_161 … frame_106)
-
-  for (let k = 0; k < 7; k++) {
-    const base = 105 + k * 112
-
-    it(`cycle ${k + 1} forward: starts with frame_106`, () => {
-      expect(seq[base]).toBe(frames[105])
-    })
-
-    it(`cycle ${k + 1} forward: ends with frame_161`, () => {
-      expect(seq[base + 55]).toBe(frames[160])
-    })
-
-    it(`cycle ${k + 1} forward: all 56 frames in ascending order`, () => {
-      for (let i = 0; i < 56; i++) {
-        expect(seq[base + i]).toBe(frames[105 + i])
-      }
-    })
-
-    it(`cycle ${k + 1} reverse: starts with frame_161`, () => {
-      expect(seq[base + 56]).toBe(frames[160])
-    })
-
-    it(`cycle ${k + 1} reverse: ends with frame_106`, () => {
-      expect(seq[base + 111]).toBe(frames[105])
-    })
-
-    it(`cycle ${k + 1} reverse: all 56 frames in descending order`, () => {
-      for (let i = 0; i < 56; i++) {
-        expect(seq[base + 56 + i]).toBe(frames[160 - i])
-      }
-    })
-  }
-
-  it('last frame of ping-pong section is frame_106 (→ outro begins at 107)', () => {
-    // ping-pong ends at seq[105 + 7*112 - 1] = seq[888]
-    expect(seq[888]).toBe(frames[105])
+  // Pass 0 fwd: seq[105..160] = frames[105..160]
+  it('pass 1 fwd: starts at source index 105', () => expect(seq[105]).toBe(frames[105]))
+  it('pass 1 fwd: ends at source index 160',   () => expect(seq[160]).toBe(frames[160]))
+  it('pass 1 fwd: all 56 frames ascending', () => {
+    for (let i = 0; i < 56; i++) expect(seq[105 + i]).toBe(frames[105 + i])
   })
 })
 
-describe('buildMusic4Sequence — outro (frames 107-185)', () => {
-  const frames = makeFrames()
-  const seq    = buildMusic4Sequence(frames)
+describe('buildPingPongSequence — music4 outro (frames after pingEnd)', () => {
+  const frames = makeFrames(185)
+  const seq    = buildPingPongSequence(frames, 105, 161, odd(1))
 
-  // Outro occupies seq[889..967].
-
-  it('seq[889] is frame_107 (source index 106)', () => {
-    expect(seq[889]).toBe(frames[106])
-  })
-
-  it('seq[967] is frame_185 (source index 184)', () => {
-    expect(seq[967]).toBe(frames[184])
-  })
-
-  it('all 79 outro frames are in ascending order', () => {
-    for (let i = 0; i < 79; i++) {
-      expect(seq[889 + i]).toBe(frames[106 + i])
-    }
+  // Outro: seq[161..184] = frames[161..184]
+  it('seq[161] is source index 161', () => expect(seq[161]).toBe(frames[161]))
+  it('seq[184] is source index 184', () => expect(seq[184]).toBe(frames[184]))
+  it('all 24 outro frames are in ascending order', () => {
+    for (let i = 0; i < 24; i++) expect(seq[161 + i]).toBe(frames[161 + i])
   })
 })

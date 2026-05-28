@@ -20,6 +20,7 @@
  */
 import { onMounted, onUnmounted, type Ref } from 'vue'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import { invoke } from '@tauri-apps/api/core'
 import type { AnimationName } from './useAnimator'
 
 // Animations that represent "in / entering music mode". headphones_off is
@@ -44,6 +45,16 @@ export function useAudioReaction(
   let unlistenStopped: UnlistenFn | null = null
 
   onMounted(async () => {
+    // Pull the cached Rust state first.  If audio-started fired before this
+    // listener registered (WebView2 cold-start can take 1-5 s; the tracker
+    // threshold fires at poll #6 = 3 s), the event is already gone and
+    // ContinuityTracker will never re-emit it.  Reading the managed
+    // AudioState here covers that window.
+    const alreadyPlaying = await invoke<boolean>('get_audio_state')
+    if (alreadyPlaying && !IN_MUSIC_ANIMS.has(currentName.value)) {
+      queueAnim('headphones_on')
+    }
+
     unlistenStarted = await listen('audio-started', () => {
       if (IN_MUSIC_ANIMS.has(currentName.value)) {
         // Already in / entering music. A pending 'headphones_off' here

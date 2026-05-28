@@ -19,10 +19,12 @@ use app_state::SharedState;
 pub fn run() {
   let shared = SharedState::new();
   let weather_state = weather::WeatherState(Mutex::new(None));
+  let audio_state   = audio::AudioState(AtomicBool::new(false));
 
   tauri::Builder::default()
     .manage(shared.clone())
     .manage(weather_state)
+    .manage(audio_state)
     .invoke_handler(tauri::generate_handler![
       app_state::get_state,
       app_state::pet_click,
@@ -33,6 +35,7 @@ pub fn run() {
       app_state::pom_stop,
       app_state::pom_set_durations,
       weather::get_weather,
+      audio::get_audio_state,
     ])
     .setup(move |app| {
       if cfg!(debug_assertions) {

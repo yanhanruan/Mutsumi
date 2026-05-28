@@ -12,6 +12,18 @@ import { mount } from '@vue/test-utils'
 
 import type { AnimationName } from './useAnimator'
 
+// ── Mock @tauri-apps/api/core ──────────────────────────────────────
+// `invoke('get_audio_state')` returns false by default (no audio).
+// Individual tests can override it via mockInvokeAudioState().
+let _invokeAudioState = false
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: vi.fn(() => Promise.resolve(_invokeAudioState)),
+}))
+
+function mockInvokeAudioState(playing: boolean) {
+  _invokeAudioState = playing
+}
+
 // ── Mock @tauri-apps/api/event ─────────────────────────────────────
 // We replace `listen` with a function that stores the supplied handler
 // keyed by event name. Tests call `fire('audio-started')` (etc.) to
@@ -72,6 +84,7 @@ async function mountReaction(initial: AnimationName = 'idle'): Promise<Harness> 
 
 beforeEach(() => {
   for (const k of Object.keys(handlers)) delete handlers[k]
+  _invokeAudioState = false   // default: no audio playing at mount time
 })
 
 afterEach(() => {
@@ -252,6 +265,68 @@ describe('useAudioReaction → realistic event sequences', () => {
     hx.setPending('headphones_on')
     fire('audio-stopped')
     expect(hx.cancelPending).toHaveBeenCalled()
+    expect(hx.queueAnim).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('useAudioReaction → initial-state bootstrap (get_audio_state)', () => {
+  // Covers the WebView2 cold-start race: audio-started fires before the
+  // listener registers, so we pull AudioState via invoke on mount.
+
+  it('queues headphones_on immediately when audio is already playing at mount (idle)', async () => {
+    mockInvokeAudioState(true)
+    const hx = await mountReaction('idle')
+    expect(hx.queueAnim).toHaveBeenCalledWith('headphones_on')
+  })
+
+  it('queues headphones_on immediately when audio is already playing at mount (click)', async () => {
+    mockInvokeAudioState(true)
+    const hx = await mountReaction('click')
+    expect(hx.queueAnim).toHaveBeenCalledWith('headphones_on')
+  })
+
+  it('does NOT queue when audio is already playing but pet is in music1', async () => {
+    mockInvokeAudioState(true)
+    const hx = await mountReaction('music1')
+    // Already in music — no need to re-enter via headphones_on.
+    expect(hx.queueAnim).not.toHaveBeenCalled()
+  })
+
+  it('does NOT queue when audio is already playing but pet is in music2', async () => {
+    mockInvokeAudioState(true)
+    const hx = await mountReaction('music2')
+    expect(hx.queueAnim).not.toHaveBeenCalled()
+  })
+
+  it('does NOT queue when audio is already playing but pet is in music3', async () => {
+    mockInvokeAudioState(true)
+    const hx = await mountReaction('music3')
+    expect(hx.queueAnim).not.toHaveBeenCalled()
+  })
+
+  it('does NOT queue when audio is already playing but pet is in music4', async () => {
+    mockInvokeAudioState(true)
+    const hx = await mountReaction('music4')
+    expect(hx.queueAnim).not.toHaveBeenCalled()
+  })
+
+  it('does NOT queue when audio is already playing but pet is entering via headphones_on', async () => {
+    mockInvokeAudioState(true)
+    const hx = await mountReaction('headphones_on')
+    expect(hx.queueAnim).not.toHaveBeenCalled()
+  })
+
+  it('does NOT queue when get_audio_state returns false (normal cold start)', async () => {
+    mockInvokeAudioState(false)
+    const hx = await mountReaction('idle')
+    expect(hx.queueAnim).not.toHaveBeenCalled()
+  })
+
+  it('live audio-started event still works normally after a false initial state', async () => {
+    mockInvokeAudioState(false)
+    const hx = await mountReaction('idle')
+    fire('audio-started')
+    expect(hx.queueAnim).toHaveBeenCalledWith('headphones_on')
     expect(hx.queueAnim).toHaveBeenCalledTimes(1)
   })
 })
