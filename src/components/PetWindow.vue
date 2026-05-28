@@ -20,6 +20,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import ChatBubble from './ChatBubble.vue'
 import PomodoroBadge from './PomodoroBadge.vue'
 import WeatherBadge from './WeatherBadge.vue'
+import BalloonPet from './BalloonPet.vue'
 
 const {
   currentSrc,
@@ -129,6 +130,7 @@ onUnmounted(() => {
       <ChatBubble ref="bubbleRef" />
     </div>
   </div>
+  <BalloonPet />
 </template>
 
 <style scoped>
