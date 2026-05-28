@@ -2,6 +2,7 @@ mod app_state;
 #[cfg(windows)]
 mod audio;
 mod cursor;
+mod idle;
 mod late_night;
 mod persistence;
 mod pomodoro;
@@ -71,6 +72,13 @@ pub fn run() {
         let stop_flag = Arc::new(AtomicBool::new(false));
         let _ = &stop_flag;
         cursor::spawn(app.handle().clone(), stop_flag);
+      }
+
+      // System idle monitor — emits `toggle-balloon-mode` events.
+      {
+        let stop_flag = Arc::new(AtomicBool::new(false));
+        let _ = &stop_flag;
+        idle::spawn(app.handle().clone(), stop_flag);
       }
 
       // Pet state + pomodoro ticker (also drives late-night reminder).
