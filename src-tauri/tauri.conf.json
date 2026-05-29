@@ -30,7 +30,7 @@
         "title": "Mutsumi · Settings",
         "url": "index.html?window=settings",
         "width": 360,
-        "height": 320,
+        "height": 440,
         "resizable": false,
         "fullscreen": false,
         "decorations": true,
