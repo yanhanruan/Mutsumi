@@ -7,7 +7,26 @@
 //!   - IdleVariant selects which idle animation to play based on the three
 //!     distinct low-status tiers (low energy only / low affection only / both).
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+
+// ── Context actions ────────────────────────────────────────────────
+
+/// Interactions available from the right-click context menu.
+///
+/// | Action        | Energy Δ | Affection Δ | Notes                          |
+/// |---------------|----------|-------------|--------------------------------|
+/// | PatHead       |    0     |    +5       | Pure affection                 |
+/// | Feed          |  +15     |   +10       | Treat — restores both          |
+/// | Sleep         |  +30     |    0        | Full rest — energy only        |
+/// | FastLearning  |  -10     |   +15       | Hard work, but feels rewarding |
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContextAction {
+    PatHead,
+    Feed,
+    Sleep,
+    FastLearning,
+}
 
 // ── Thresholds ─────────────────────────────────────────────────────
 /// Energy at or below this value is considered "low".
@@ -113,6 +132,26 @@ impl PetState {
         }
         self.recompute_mood();
     }
+
+    pub fn on_context_action(&mut self, action: ContextAction) {
+        match action {
+            ContextAction::PatHead => {
+                self.affection = (self.affection + 5.0).min(100.0);
+            }
+            ContextAction::Feed => {
+                self.energy    = (self.energy    + 15.0).min(100.0);
+                self.affection = (self.affection + 10.0).min(100.0);
+            }
+            ContextAction::Sleep => {
+                self.energy = (self.energy + 30.0).min(100.0);
+            }
+            ContextAction::FastLearning => {
+                self.energy    = (self.energy    - 10.0).max(0.0);
+                self.affection = (self.affection + 15.0).min(100.0);
+            }
+        }
+        self.recompute_mood();
+    }
 }
 
 // ── Tests ──────────────────────────────────────────────────────────
@@ -207,5 +246,64 @@ mod tests {
         p.on_click();
         assert!((p.energy    - 52.0).abs() < 0.001);
         assert!((p.affection - 41.0).abs() < 0.001);
+    }
+
+    // ── ContextAction ─────────────────────────────────────────────
+
+    #[test]
+    fn pat_head_raises_affection_only() {
+        let mut p = pet_with(50.0, 40.0);
+        p.on_context_action(ContextAction::PatHead);
+        assert!((p.energy    - 50.0).abs() < 0.001);
+        assert!((p.affection - 45.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn feed_raises_both_energy_and_affection() {
+        let mut p = pet_with(50.0, 40.0);
+        p.on_context_action(ContextAction::Feed);
+        assert!((p.energy    - 65.0).abs() < 0.001);
+        assert!((p.affection - 50.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn sleep_raises_energy_only() {
+        let mut p = pet_with(50.0, 40.0);
+        p.on_context_action(ContextAction::Sleep);
+        assert!((p.energy    - 80.0).abs() < 0.001);
+        assert!((p.affection - 40.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn fast_learning_lowers_energy_raises_affection() {
+        let mut p = pet_with(50.0, 40.0);
+        p.on_context_action(ContextAction::FastLearning);
+        assert!((p.energy    - 40.0).abs() < 0.001);
+        assert!((p.affection - 55.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn context_actions_clamp_at_100() {
+        let mut p = pet_with(95.0, 95.0);
+        p.on_context_action(ContextAction::Feed);
+        assert_eq!(p.energy,    100.0);
+        assert_eq!(p.affection, 100.0);
+    }
+
+    #[test]
+    fn fast_learning_clamps_energy_at_zero() {
+        let mut p = pet_with(5.0, 40.0);
+        p.on_context_action(ContextAction::FastLearning);
+        assert_eq!(p.energy, 0.0);
+    }
+
+    #[test]
+    fn context_action_recomputes_mood_and_variant() {
+        // Start exhausted; feed should push out of exhausted.
+        let mut p = pet_with(20.0, 15.0);
+        assert_eq!(p.idle_variant, IdleVariant::Exhausted);
+        p.on_context_action(ContextAction::Feed);
+        // energy 20+15=35 > 30; affection 15+10=25 == threshold (≤ 25 is low)
+        assert_eq!(p.idle_variant, IdleVariant::LowAffection);
     }
 }

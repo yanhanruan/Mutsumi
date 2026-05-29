@@ -22,6 +22,7 @@ import ChatBubble from './ChatBubble.vue'
 import PomodoroBadge from './PomodoroBadge.vue'
 import WeatherBadge from './WeatherBadge.vue'
 import BalloonPet from './BalloonPet.vue'
+import ContextMenu, { type MenuAction } from './ContextMenu.vue'
 
 const {
   currentSrc,
@@ -42,7 +43,8 @@ useHitTest(getCurrentImage)
 // Animations during which click animation is suppressed (bubble still shows).
 const MUSIC_MODE = new Set(['headphones_on', 'headphones_off', 'music1', 'music2', 'music3', 'music4'])
 
-const bubbleRef = ref<InstanceType<typeof ChatBubble> | null>(null)
+const bubbleRef  = ref<InstanceType<typeof ChatBubble> | null>(null)
+const contextRef = ref<InstanceType<typeof ContextMenu> | null>(null)
 
 const CLICK_PHRASES = [
   "I'm not a toy, you know!",
@@ -51,6 +53,14 @@ const CLICK_PHRASES = [
   "Eek! That tickles!",
   "H-Hey! Stop that!",
 ]
+
+// Context menu action → chat-bubble response phrase.
+const CONTEXT_PHRASES: Record<MenuAction, string> = {
+  pat_head:      'Ehehe~ that feels nice ♪',
+  feed:          'Matcha parfait!! My favourite! 🍵',
+  sleep:         'Zzz… (snoozin\' away…)',
+  fast_learning: 'I-I\'ll study extra hard! 📚✨',
+}
 
 // ── Mouse interaction ──────────────────────────────────────────────
 const DRAG_THRESHOLD = 5
@@ -102,6 +112,18 @@ function onMouseUp(e: MouseEvent) {
   didDrag = false
 }
 
+// ── Right-click context menu ───────────────────────────────────────
+
+function onContextMenu(e: MouseEvent) {
+  e.preventDefault()
+  contextRef.value?.open(e.clientX, e.clientY)
+}
+
+async function onContextAction(action: MenuAction) {
+  await invoke('pet_context_action', { action })
+  bubbleRef.value?.show(CONTEXT_PHRASES[action])
+}
+
 // ── Late-night reminder ────────────────────────────────────────────
 // The backend fires `late-night-reminder` once per night when the local
 // hour first crosses into [00:00, 04:59). Show the Japanese phrase.
@@ -125,6 +147,7 @@ onUnmounted(() => {
     @mousedown="onMouseDown"
     @mousemove="onMouseMove"
     @mouseup="onMouseUp"
+    @contextmenu="onContextMenu"
   >
     <img v-if="currentSrc" :src="currentSrc" class="frame" draggable="false" />
     <PomodoroBadge />
@@ -133,6 +156,7 @@ onUnmounted(() => {
       <ChatBubble ref="bubbleRef" />
     </div>
   </div>
+  <ContextMenu ref="contextRef" @action="onContextAction" />
   <BalloonPet />
 </template>
 

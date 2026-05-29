@@ -13,7 +13,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::late_night::LateNightReminder;
 use crate::pomodoro::PomodoroState;
-use crate::state::PetState;
+use crate::state::{PetState, ContextAction};
 
 #[derive(Debug, Default)]
 pub struct AppState {
@@ -165,6 +165,27 @@ pub fn pet_reset(app: AppHandle, shared: State<SharedState>) {
         g.pet = PetState::default();
     }
     persist(&app, shared.inner());
+}
+
+/// Dispatch a context-menu action.  Returns a short localisation key
+/// (e.g. `"pat_head"`) so the frontend can look up the response phrase.
+#[tauri::command]
+pub fn pet_context_action(
+    app: AppHandle,
+    shared: State<SharedState>,
+    action: ContextAction,
+) -> &'static str {
+    {
+        let mut g = shared.0.lock().unwrap();
+        g.pet.on_context_action(action);
+    }
+    persist(&app, shared.inner());
+    match action {
+        ContextAction::PatHead       => "pat_head",
+        ContextAction::Feed          => "feed",
+        ContextAction::Sleep         => "sleep",
+        ContextAction::FastLearning  => "fast_learning",
+    }
 }
 
 // Suppress unused warning for AppHandle::path in modules that re-import it.

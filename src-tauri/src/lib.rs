@@ -34,6 +34,7 @@ pub fn run() {
       app_state::pet_click,
       app_state::pet_drag_end,
       app_state::pet_reset,
+      app_state::pet_context_action,
       app_state::pom_start,
       app_state::pom_pause,
       app_state::pom_stop,
