@@ -83,7 +83,7 @@ impl Default for PetState {
     fn default() -> Self {
         Self {
             energy:       100.0,
-            affection:    50.0,
+            affection:    100.0,
             mood:         Mood::Content,
             idle_variant: IdleVariant::Normal,
         }
@@ -112,9 +112,8 @@ impl PetState {
     }
 
     /// Called every 5 seconds by the ticker thread.
+    /// Stats do not decay passively — only FastLearning (learning mode) costs energy.
     pub fn tick(&mut self) {
-        self.energy    = (self.energy    - 0.8).max(0.0);
-        self.affection = (self.affection - 0.3).max(0.0);
         self.recompute_mood();
     }
 
@@ -225,19 +224,19 @@ mod tests {
     }
 
     #[test]
-    fn tick_decrements_energy_and_affection() {
+    fn tick_does_not_change_energy_or_affection() {
         let mut p = PetState::default();
         p.tick();
-        assert!((p.energy    - 99.2).abs() < 0.001);
-        assert!((p.affection - 49.7).abs() < 0.001);
+        assert_eq!(p.energy,    100.0);
+        assert_eq!(p.affection, 100.0);
     }
 
     #[test]
-    fn values_clamp_at_zero() {
-        let mut p = pet_with(0.5, 0.2);
+    fn tick_on_low_stats_leaves_them_unchanged() {
+        let mut p = pet_with(5.0, 3.0);
         p.tick();
-        assert_eq!(p.energy,    0.0);
-        assert_eq!(p.affection, 0.0);
+        assert!((p.energy    - 5.0).abs() < 0.001);
+        assert!((p.affection - 3.0).abs() < 0.001);
     }
 
     #[test]

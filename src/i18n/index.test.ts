@@ -119,15 +119,16 @@ describe('useI18n', () => {
     }
   })
 
-  it('has all 4 context menu items for each locale', () => {
-    const keys = ['pat_head', 'feed', 'sleep', 'fast_learning'] as const
+  it('has all 5 context menu items for each locale', () => {
+    const actionKeys = ['pat_head', 'feed', 'sleep', 'fast_learning'] as const
     for (const l of ['en', 'zh', 'ja'] as Locale[]) {
       setLocale(l)
       const { t } = useI18n()
-      for (const k of keys) {
+      for (const k of actionKeys) {
         expect(t.value.contextMenuItems[k]).toBeTruthy()
         expect(t.value.contextResponses[k]).toBeTruthy()
       }
+      expect(t.value.contextMenuItems.hide).toBeTruthy()
     }
   })
 
@@ -158,15 +159,35 @@ describe('locale bundle completeness', () => {
     }
   })
 
-  it('en contextMenuItems has all 4 actions', () => {
-    expect(Object.keys(en.contextMenuItems)).toHaveLength(4)
+  it('en contextMenuItems has all 5 actions (including hide)', () => {
+    expect(Object.keys(en.contextMenuItems)).toHaveLength(5)
   })
 
-  it('zh contextMenuItems has all 4 actions', () => {
-    expect(Object.keys(zh.contextMenuItems)).toHaveLength(4)
+  it('zh contextMenuItems has all 5 actions (including hide)', () => {
+    expect(Object.keys(zh.contextMenuItems)).toHaveLength(5)
   })
 
-  it('ja contextMenuItems has all 4 actions', () => {
-    expect(Object.keys(ja.contextMenuItems)).toHaveLength(4)
+  it('ja contextMenuItems has all 5 actions (including hide)', () => {
+    expect(Object.keys(ja.contextMenuItems)).toHaveLength(5)
+  })
+
+  it('all locales have character size labels', () => {
+    for (const bundle of [en, zh, ja]) {
+      expect(bundle.characterSize).toBeTruthy()
+      expect(bundle.charSizeSmall).toBeTruthy()
+      expect(bundle.charSizeMedium).toBeTruthy()
+      expect(bundle.charSizeLarge).toBeTruthy()
+    }
+  })
+
+  it('all locales have showWeather label', () => {
+    for (const bundle of [en, zh, ja]) {
+      expect(bundle.showWeather).toBeTruthy()
+    }
+  })
+
+  it('EN petStatus no longer contains "Pet"', () => {
+    expect(en.petStatus).not.toContain('Pet')
+    expect(en.resetPet).not.toContain('pet')
   })
 })

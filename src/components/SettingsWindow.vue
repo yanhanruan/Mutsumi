@@ -8,11 +8,12 @@
  *
  * Primary theme: #779977 (sage green).
  */
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { enable, disable, isEnabled } from '@tauri-apps/plugin-autostart'
 import { useI18n } from '../i18n'
+import { useAppConfig, type CharacterSize } from '../composables/useAppConfig'
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -38,14 +39,41 @@ interface StateSnapshot {
 // ── State ──────────────────────────────────────────────────────────
 
 const { t } = useI18n()
+const { config, updateConfig } = useAppConfig()
 
-const focusMins = ref(25)
-const breakMins = ref(5)
-const energy    = ref(100)
-const affection = ref(50)
-const mood      = ref('content')
-const status    = ref('')
-const autostart = ref(false)
+const focusMins    = ref(25)
+const breakMins    = ref(5)
+const energy       = ref(100)
+const affection    = ref(50)
+const mood         = ref('content')
+const status       = ref('')
+const autostart    = ref(false)
+
+// ── Character size (Task 3) ────────────────────────────────────────
+const SIZE_OPTIONS: { key: CharacterSize; labelKey: 'charSizeSmall' | 'charSizeMedium' | 'charSizeLarge' }[] = [
+  { key: 'small',  labelKey: 'charSizeSmall'  },
+  { key: 'medium', labelKey: 'charSizeMedium' },
+  { key: 'large',  labelKey: 'charSizeLarge'  },
+]
+
+const localSize = ref<CharacterSize>(config.value.characterSize)
+
+// Keep in sync if config changes from another source (e.g. future presets).
+watch(() => config.value.characterSize, v => { localSize.value = v })
+
+async function setSize(s: CharacterSize) {
+  localSize.value = s
+  await updateConfig({ characterSize: s })
+}
+
+// ── Weather visibility (Task 4) ────────────────────────────────────
+const localShowWeather = ref<boolean>(config.value.showWeather)
+
+watch(() => config.value.showWeather, v => { localShowWeather.value = v })
+
+async function toggleWeather() {
+  await updateConfig({ showWeather: localShowWeather.value })
+}
 
 // ── Window controls ────────────────────────────────────────────────
 
@@ -200,6 +228,24 @@ onMounted(async () => {
         </div>
       </section>
 
+      <!-- Character size (Task 3) -->
+      <section class="card">
+        <h2 class="card-title">
+          <span class="card-icon">🪟</span>{{ t.characterSize }}
+        </h2>
+        <div class="size-group">
+          <button
+            v-for="opt in SIZE_OPTIONS"
+            :key="opt.key"
+            class="size-btn"
+            :class="{ active: localSize === opt.key }"
+            @click="setSize(opt.key)"
+          >
+            {{ t[opt.labelKey] }}
+          </button>
+        </div>
+      </section>
+
       <!-- System -->
       <section class="card">
         <h2 class="card-title">
@@ -218,19 +264,34 @@ onMounted(async () => {
             <span class="thumb" />
           </label>
         </div>
+
+        <!-- Weather visibility (Task 4) -->
+        <div class="field-row" style="margin-top: 6px;">
+          <label for="weather-toggle">{{ t.showWeather }}</label>
+          <label class="toggle">
+            <input
+              id="weather-toggle"
+              type="checkbox"
+              v-model="localShowWeather"
+              @change="toggleWeather"
+            />
+            <span class="thumb" />
+          </label>
+        </div>
       </section>
 
-      <!-- Actions -->
-      <div class="actions">
-        <button class="btn btn-primary" @click="save">{{ t.save }}</button>
-        <button class="btn btn-ghost"   @click="reset">{{ t.resetPet }}</button>
-        <button class="btn btn-subtle"  @click="closeContent">{{ t.close }}</button>
-      </div>
+      <!-- Actions + inline status toast -->
+      <div class="action-row">
+        <div class="actions">
+          <button class="btn btn-primary" @click="save">{{ t.save }}</button>
+          <button class="btn btn-ghost"   @click="reset">{{ t.resetPet }}</button>
+          <button class="btn btn-subtle"  @click="closeContent">{{ t.close }}</button>
+        </div>
 
-      <!-- Status toast -->
-      <Transition name="toast">
-        <p v-if="status" class="toast">{{ status }}</p>
-      </Transition>
+        <Transition name="toast">
+          <p v-if="status" class="toast">{{ status }}</p>
+        </Transition>
+      </div>
 
     </div>
   </div>
@@ -517,7 +578,15 @@ onMounted(async () => {
 .toggle input:checked + .thumb::before          { transform: translateX(18px); }
 
 /* ── Action buttons ──────────────────────────────────────── */
-.actions { display: flex; gap: 7px; align-items: center; margin-top: 2px; flex-wrap: wrap; }
+/* Outer row: buttons on the left, toast fills the remaining space */
+.action-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+.actions { display: flex; gap: 7px; align-items: center; flex-shrink: 0; }
 .btn {
   padding: 7px 14px; font-size: 12px; font-weight: 600;
   border-radius: 9px; cursor: pointer;
@@ -553,10 +622,44 @@ onMounted(async () => {
 
 /* ── Status toast ────────────────────────────────────────── */
 .toast {
-  margin: 0; text-align: center;
-  font-size: 11px; font-weight: 500;
-  color: #466646; padding: 3px 0;
+  margin: 0;
+  flex: 1;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 500;
+  color: #466646;
 }
 .toast-enter-active, .toast-leave-active { transition: opacity 240ms ease, transform 240ms ease; }
 .toast-enter-from, .toast-leave-to       { opacity: 0; transform: translateY(4px); }
+
+/* ── Character size segmented control ────────────────────── */
+.size-group {
+  display: flex;
+  gap: 5px;
+}
+
+.size-btn {
+  flex: 1;
+  padding: 5px 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  border-radius: 8px;
+  cursor: pointer;
+  border: 1.5px solid rgba(119, 153, 119, 0.30);
+  background: rgba(255, 255, 255, 0.38);
+  color: rgba(44, 78, 44, 0.65);
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.size-btn:hover {
+  background: rgba(255, 255, 255, 0.60);
+  border-color: rgba(119, 153, 119, 0.50);
+  color: #2c4e2c;
+}
+
+.size-btn.active {
+  background: linear-gradient(135deg, #779977, #5a8060);
+  border-color: transparent;
+  color: white;
+}
 </style>

@@ -7,25 +7,34 @@ export const ja: Translations = {
   focusLabel:        '集中',
   breakLabel:        '休憩',
   minuteUnit:        '分',
-  petStatus:         'ペットの状態',
+  petStatus:         '若葉睦の状態',
   energy:            'エネルギー',
   affection:         '愛情度',
   mood:              '気分',
   system:            'システム',
   launchOnStartup:   '起動時に自動起動',
   save:              '保存',
-  resetPet:          'ペットをリセット',
+  resetPet:          '若葉睦をリセット',
   close:             '閉じる',
   savedMsg:          '保存しました。',
   resetMsg:          'リセットしました。',
   autostartOnMsg:    '自動起動を有効にしました。',
   autostartOffMsg:   '自動起動を無効にしました。',
 
+  // ── Character size ────────────────────────────────────────────────
+  characterSize:   'キャラクターサイズ',
+  charSizeSmall:   '小',
+  charSizeMedium:  '中',
+  charSizeLarge:   '大',
+
+  // ── Weather visibility ────────────────────────────────────────────
+  showWeather: '天気を表示',
+
   // ── Pomodoro badge ────────────────────────────────────────────────
   pomFocus: '集中',
   pomBreak: '休憩',
 
-  // ── Pet click reactions ───────────────────────────────────────────
+  // ── Click reactions ───────────────────────────────────────────────
   clickPhrases: [
     'おもちゃじゃないんだから！',
     'あっ〜やさしくして！',
@@ -40,6 +49,7 @@ export const ja: Translations = {
     feed:          '抹茶パフェをあげる',
     sleep:         'おやすみ',
     fast_learning: '速習モード',
+    hide:          'アプリを隠す',
   },
 
   // ── Context-menu response bubbles ─────────────────────────────────

@@ -7,25 +7,34 @@ export const zh: Translations = {
   focusLabel:        '专注',
   breakLabel:        '休息',
   minuteUnit:        '分钟',
-  petStatus:         '宠物状态',
+  petStatus:         '若叶睦状态',
   energy:            '能量',
   affection:         '亲密度',
   mood:              '心情',
   system:            '系统',
   launchOnStartup:   '开机启动',
   save:              '保存',
-  resetPet:          '重置宠物',
+  resetPet:          '重置若叶睦',
   close:             '关闭',
   savedMsg:          '已保存。',
   resetMsg:          '已重置。',
   autostartOnMsg:    '已开启开机启动。',
   autostartOffMsg:   '已关闭开机启动。',
 
+  // ── Character size ────────────────────────────────────────────────
+  characterSize:   '角色大小',
+  charSizeSmall:   '小',
+  charSizeMedium:  '中',
+  charSizeLarge:   '大',
+
+  // ── Weather visibility ────────────────────────────────────────────
+  showWeather: '显示天气',
+
   // ── Pomodoro badge ────────────────────────────────────────────────
   pomFocus: '专注',
   pomBreak: '休息',
 
-  // ── Pet click reactions ───────────────────────────────────────────
+  // ── Click reactions ───────────────────────────────────────────────
   clickPhrases: [
     '我不是玩具哦！',
     '啊~轻点嘛！',
@@ -40,6 +49,7 @@ export const zh: Translations = {
     feed:          '投喂抹茶芭菲',
     sleep:         '睡觉',
     fast_learning: '快速学习',
+    hide:          '隐藏应用',
   },
 
   // ── Context-menu response bubbles ─────────────────────────────────
@@ -51,5 +61,5 @@ export const zh: Translations = {
   },
 
   // ── Late-night reminder ───────────────────────────────────────────
-  lateNightReminder: '夜更かしは健康によくない！',
+  lateNightReminder: '都这么晚了，早点睡吧！',
 }

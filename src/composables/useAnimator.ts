@@ -106,9 +106,9 @@ export const DEFAULT_ANIMATIONS: Record<AnimationName, AnimationDef> = {
   // ── Idle-variant placeholders ──────────────────────────────────────────
   // These fall back to the normal `idle` directory until dedicated animation
   // assets are added. To activate: update `dir` (and `count` if different).
-  idle_low_energy:    { dir: 'idle',           count: 234, fps: 24, loop: true  },
-  idle_low_affection: { dir: 'idle',           count: 234, fps: 24, loop: true  },
-  idle_exhausted:     { dir: 'idle',           count: 234, fps: 24, loop: true  },
+  idle_low_energy:    { dir: 'idle',           count: 419, fps: 24, loop: true  },
+  idle_low_affection: { dir: 'idle',           count: 419, fps: 24, loop: true  },
+  idle_exhausted:     { dir: 'idle',           count: 419, fps: 24, loop: true  },
   // ─────────────────────────────────────────────────────────────────────
   click:               { dir: 'click_matched',  count: 156, fps: 24, loop: false },
   headphones_on:       { dir: 'headphones_on',  count: 185, fps: 24, loop: false },
@@ -116,7 +116,7 @@ export const DEFAULT_ANIMATIONS: Record<AnimationName, AnimationDef> = {
   music1:              { dir: 'music1',         count: 185, fps: 24, loop: true  },
   music2:              { dir: 'music2',         count: 185, fps: 24, loop: false,
                          buildSequence: f => buildPingPongSequence(f,  81, 104, odd(31)) },
-  music3:              { dir: 'music3',         count: 330, fps: 24, loop: true  },
+  music3:              { dir: 'music3',         count: 330, fps: 18, loop: true  },
   music4:              { dir: 'music4',         count: 185, fps: 24, loop: false,
                          buildSequence: f => buildPingPongSequence(f, 105, 161, odd(13)) },
 }

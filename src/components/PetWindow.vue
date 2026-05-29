@@ -10,20 +10,22 @@
  * - Chat bubble is absolutely positioned above the pet so the pet fills the
  *   entire window.
  */
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { useAnimator } from '../composables/useAnimator'
 import { useAudioReaction } from '../composables/useAudioReaction'
 import { useHitTest } from '../composables/useHitTest'
 import { usePetStatus } from '../composables/usePetStatus'
 import { useI18n } from '../i18n'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { LogicalSize } from '@tauri-apps/api/dpi'
 import { invoke } from '@tauri-apps/api/core'
+import { useAppConfig, CHAR_SIZE_DIMS } from '../composables/useAppConfig'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import ChatBubble from './ChatBubble.vue'
 import PomodoroBadge from './PomodoroBadge.vue'
 import WeatherBadge from './WeatherBadge.vue'
 import BalloonPet from './BalloonPet.vue'
-import ContextMenu, { type MenuAction } from './ContextMenu.vue'
+import ContextMenu, { type MenuAction, type ContextActionKey } from './ContextMenu.vue'
 
 const {
   currentSrc,
@@ -45,6 +47,19 @@ useHitTest(getCurrentImage)
 const MUSIC_MODE = new Set(['headphones_on', 'headphones_off', 'music1', 'music2', 'music3', 'music4'])
 
 const { t } = useI18n()
+const { config } = useAppConfig()
+
+// ── Window sizing (Task 3) ─────────────────────────────────────────
+// Resize the main window whenever the user changes the character size
+// in the settings. `immediate: true` applies it on first mount too.
+watch(
+  () => config.value.characterSize,
+  size => {
+    const [w, h] = CHAR_SIZE_DIMS[size]
+    getCurrentWindow().setSize(new LogicalSize(w, h))
+  },
+  { immediate: true },
+)
 
 const bubbleRef  = ref<InstanceType<typeof ChatBubble> | null>(null)
 const contextRef = ref<InstanceType<typeof ContextMenu> | null>(null)
@@ -108,8 +123,13 @@ function onContextMenu(e: MouseEvent) {
 }
 
 async function onContextAction(action: MenuAction) {
+  // Task 5: hide is frontend-only — no backend command, no bubble.
+  if (action === 'hide') {
+    await getCurrentWindow().hide()
+    return
+  }
   await invoke('pet_context_action', { action })
-  bubbleRef.value?.show(t.value.contextResponses[action])
+  bubbleRef.value?.show(t.value.contextResponses[action as ContextActionKey])
 }
 
 // ── Late-night reminder ────────────────────────────────────────────
@@ -138,7 +158,7 @@ onUnmounted(() => {
   >
     <img v-if="currentSrc" :src="currentSrc" class="frame" draggable="false" />
     <PomodoroBadge />
-    <WeatherBadge />
+    <WeatherBadge v-if="config.showWeather" />
     <div class="bubble-anchor">
       <ChatBubble ref="bubbleRef" />
     </div>

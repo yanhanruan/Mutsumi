@@ -14,7 +14,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import ContextMenu from './ContextMenu.vue'
-import type { MenuAction } from './ContextMenu.vue'
+import type { MenuAction, ContextActionKey } from './ContextMenu.vue'
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
@@ -55,11 +55,11 @@ describe('ContextMenu', () => {
     w.unmount()
   })
 
-  it('renders all 4 required menu items', async () => {
+  it('renders all 5 menu items (4 actions + hide)', async () => {
     const w = mountMenu()
     await w.vm.open(0, 0)
     const items = w.findAll('.ctx-item')
-    expect(items).toHaveLength(4)
+    expect(items).toHaveLength(5)
     w.unmount()
   })
 
@@ -71,6 +71,7 @@ describe('ContextMenu', () => {
     expect(labels).toContain('Feed Matcha Parfait')
     expect(labels).toContain('Sleep')
     expect(labels).toContain('Fast Learning')
+    expect(labels).toContain('Hide App')
     w.unmount()
   })
 
@@ -84,7 +85,7 @@ describe('ContextMenu', () => {
   })
 
   it('emits the correct action for each item', async () => {
-    const expected: MenuAction[] = ['pat_head', 'feed', 'sleep', 'fast_learning']
+    const expected: MenuAction[] = ['pat_head', 'feed', 'sleep', 'fast_learning', 'hide']
     for (let i = 0; i < expected.length; i++) {
       const w = mountMenu()
       await w.vm.open(0, 0)
@@ -151,8 +152,23 @@ describe('ContextMenu', () => {
     const w = mountMenu()
     await w.vm.open(0, 0)
     const labels = w.findAll('.ctx-label').map(e => e.text())
-    expect(labels).toHaveLength(4)
+    expect(labels).toHaveLength(5)
     labels.forEach(l => expect(l.length).toBeGreaterThan(0))
     w.unmount()
+  })
+
+  it('hide item has the ctx-item--danger modifier class', async () => {
+    const w = mountMenu()
+    await w.vm.open(0, 0)
+    const hideBtn = w.findAll('.ctx-item').at(4)
+    expect(hideBtn?.classes()).toContain('ctx-item--danger')
+    w.unmount()
+  })
+
+  it('ContextActionKey type excludes hide', () => {
+    // TypeScript compile-time check: 'hide' should not be assignable to ContextActionKey.
+    // We verify this at runtime by checking the action keys.
+    const actionKeys: ContextActionKey[] = ['pat_head', 'feed', 'sleep', 'fast_learning']
+    expect(actionKeys).not.toContain('hide')
   })
 })

@@ -14,9 +14,13 @@ import { useI18n } from '../i18n'
 
 // ── Types ────────────────────────────────────────────────────────────
 
-export type MenuAction = 'pat_head' | 'feed' | 'sleep' | 'fast_learning'
+/** Actions that invoke a backend command and show a bubble response. */
+export type ContextActionKey = 'pat_head' | 'feed' | 'sleep' | 'fast_learning'
 
-const ACTIONS: MenuAction[] = ['pat_head', 'feed', 'sleep', 'fast_learning']
+/** Full set of menu actions, including frontend-only ones. */
+export type MenuAction = ContextActionKey | 'hide'
+
+const ACTIONS: MenuAction[] = ['pat_head', 'feed', 'sleep', 'fast_learning', 'hide']
 
 const { t } = useI18n()
 
@@ -51,8 +55,9 @@ async function open(x: number, y: number) {
   const { width, height } = el.getBoundingClientRect()
   const vw = window.innerWidth
   const vh = window.innerHeight
-  if (x + width  > vw) menuX.value = x - width
-  if (y + height > vh) menuY.value = y - height
+  // Clamp so the menu never overflows any edge (simple flip can go negative).
+  menuX.value = Math.max(0, Math.min(x, vw - width))
+  menuY.value = Math.max(0, Math.min(y, vh - height))
 }
 
 function close() {
@@ -90,7 +95,7 @@ defineExpose({ open, close })
     <div
       v-if="visible"
       ref="menuRef"
-      class="ctx-menu"
+      class="ctx-menu pet-ui-overlay"
       :style="{ left: `${menuX}px`, top: `${menuY}px` }"
       @contextmenu.prevent
     >
@@ -98,9 +103,10 @@ defineExpose({ open, close })
         v-for="item in items"
         :key="item.action"
         class="ctx-item"
+        :class="{ 'ctx-item--danger': item.action === 'hide' }"
         @click="onItemClick(item.action)"
       >
-        {{ item.label }}
+        <span class="ctx-label">{{ item.label }}</span>
       </button>
     </div>
   </Transition>
@@ -116,16 +122,14 @@ defineExpose({ open, close })
   padding: 3px;
   border-radius: 10px;
 
-  background: rgba(246, 244, 255, 0.97);
-  backdrop-filter: blur(32px) saturate(210%);
-  -webkit-backdrop-filter: blur(32px) saturate(210%);
+  background: rgba(240, 248, 240, 0.96);
+  backdrop-filter: blur(32px) saturate(180%);
+  -webkit-backdrop-filter: blur(32px) saturate(180%);
 
-  border: 1px solid rgba(190, 165, 235, 0.38);
-  /* single crisp inner highlight — no heavy outer shadow */
+  border: 1px solid rgba(148, 185, 148, 0.40);
   box-shadow:
-    0 6px 24px rgba(50, 20, 90, 0.16),
-    0 2px  6px rgba(0,   0,  0, 0.08),
-    inset 0 1px 0 rgba(255, 255, 255, 0.85);
+    0 4px 12px rgba(60, 90, 60, 0.10),
+    inset 0 1px 0 rgba(255, 255, 255, 0.70);
 
   display: flex;
   flex-direction: column;
@@ -146,7 +150,7 @@ defineExpose({ open, close })
   font-family: system-ui, "Segoe UI", "Noto Sans SC", "Noto Sans JP", sans-serif;
   font-size: 11.5px;
   font-weight: 520;
-  color: rgba(28, 14, 52, 0.88);
+  color: rgba(38, 62, 38, 0.85);
   line-height: 1.4;
   white-space: nowrap;
 
@@ -154,12 +158,23 @@ defineExpose({ open, close })
 }
 
 .ctx-item:hover {
-  background: rgba(140, 100, 210, 0.10);
+  background: rgba(148, 185, 148, 0.18);
 }
 
 .ctx-item:active {
-  background: rgba(120, 80, 200, 0.18);
+  background: rgba(105, 145, 105, 0.28);
   transform: scale(0.98);
+}
+
+/* Hide item — subtle muted style to distinguish it */
+.ctx-item--danger .ctx-label {
+  color: rgba(38, 62, 38, 0.52);
+}
+.ctx-item--danger:hover {
+  background: rgba(180, 60, 60, 0.08);
+}
+.ctx-item--danger:hover .ctx-label {
+  color: rgba(160, 40, 40, 0.80);
 }
 
 /* Pop-in from cursor */

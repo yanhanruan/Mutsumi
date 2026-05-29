@@ -140,7 +140,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
                         WebviewUrl::App("index.html?window=settings".into()),
                     )
                     .title("Mutsumi · Settings")
-                    .inner_size(360.0, 460.0)
+                    .inner_size(360.0, 490.0)
                     .resizable(false)
                     // Custom Vue titlebar takes over — no OS chrome.
                     .decorations(false)

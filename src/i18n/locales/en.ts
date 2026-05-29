@@ -7,25 +7,34 @@ export const en: Translations = {
   focusLabel:        'Focus',
   breakLabel:        'Break',
   minuteUnit:        'min',
-  petStatus:         'Pet status',
+  petStatus:         'Mutsumi status',
   energy:            'Energy',
   affection:         'Affection',
   mood:              'Mood',
   system:            'System',
   launchOnStartup:   'Launch on startup',
   save:              'Save',
-  resetPet:          'Reset pet',
+  resetPet:          'Reset Mutsumi',
   close:             'Close',
   savedMsg:          'Saved.',
   resetMsg:          'Reset.',
   autostartOnMsg:    'Launch on startup enabled.',
   autostartOffMsg:   'Launch on startup disabled.',
 
+  // ── Character size ────────────────────────────────────────────────
+  characterSize:   'Character Size',
+  charSizeSmall:   'Small',
+  charSizeMedium:  'Medium',
+  charSizeLarge:   'Large',
+
+  // ── Weather visibility ────────────────────────────────────────────
+  showWeather: 'Show Weather',
+
   // ── Pomodoro badge ────────────────────────────────────────────────
   pomFocus: 'Focus',
   pomBreak: 'Break',
 
-  // ── Pet click reactions ───────────────────────────────────────────
+  // ── Click reactions ───────────────────────────────────────────────
   clickPhrases: [
     "I'm not a toy, you know!",
     'Ahh~ be gentle!',
@@ -40,6 +49,7 @@ export const en: Translations = {
     feed:          'Feed Matcha Parfait',
     sleep:         'Sleep',
     fast_learning: 'Fast Learning',
+    hide:          'Hide App',
   },
 
   // ── Context-menu response bubbles ─────────────────────────────────

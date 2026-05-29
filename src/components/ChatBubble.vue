@@ -55,13 +55,17 @@ defineExpose({ show, hide })
   max-width: 200px;
   margin: 0 auto;
   padding: 10px 14px;
-  background: rgba(255, 255, 255, 0.22);
-  backdrop-filter: blur(14px) saturate(180%);
-  -webkit-backdrop-filter: blur(14px) saturate(180%);
-  border: 1px solid rgba(255, 255, 255, 0.35);
+  /* Opaque enough to guarantee text contrast against any desktop background */
+  background: rgba(245, 250, 245, 0.94);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  border: 1px solid rgba(148, 185, 148, 0.45);
   border-radius: 14px;
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.15);
-  color: #2a1a3a;
+  /* Subtle shadow — just enough to lift off the pet, not dominate */
+  box-shadow:
+    0 2px 8px rgba(40, 70, 40, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.80);
+  color: #1a2e1a;
   font-size: 13px;
   line-height: 1.35;
   text-align: center;
@@ -69,7 +73,8 @@ defineExpose({ show, hide })
   pointer-events: none;
 }
 .text {
-  font-family: system-ui, "Segoe UI", sans-serif;
+  font-family: system-ui, "Segoe UI", "Noto Sans SC", "Noto Sans JP", sans-serif;
+  font-weight: 500;
 }
 .tail {
   position: absolute;
@@ -78,11 +83,9 @@ defineExpose({ show, hide })
   transform: translateX(-50%) rotate(45deg);
   width: 10px;
   height: 10px;
-  background: rgba(255, 255, 255, 0.22);
-  border-right: 1px solid rgba(255, 255, 255, 0.35);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.35);
-  backdrop-filter: blur(14px) saturate(180%);
-  -webkit-backdrop-filter: blur(14px) saturate(180%);
+  background: rgba(245, 250, 245, 0.94);
+  border-right: 1px solid rgba(148, 185, 148, 0.45);
+  border-bottom: 1px solid rgba(148, 185, 148, 0.45);
 }
 
 .bubble-enter-active,
