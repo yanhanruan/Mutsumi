@@ -35,9 +35,10 @@ pub fn load(app: &AppHandle) -> Option<(PetState, PomodoroState)> {
     let p: PersistedState = serde_json::from_slice(&bytes).ok()?;
 
     let mut pet = PetState {
-        energy:    p.energy.clamp(0.0, 100.0),
-        affection: p.affection.clamp(0.0, 100.0),
-        mood:      Mood::Content,
+        energy:       p.energy.clamp(0.0, 100.0),
+        affection:    p.affection.clamp(0.0, 100.0),
+        mood:         Mood::Content,
+        idle_variant: crate::state::IdleVariant::Normal,
     };
     pet.recompute_mood();
 

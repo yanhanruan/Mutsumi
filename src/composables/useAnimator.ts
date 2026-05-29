@@ -32,6 +32,9 @@ export interface AnimationDef {
 
 export type AnimationName =
   | 'idle'
+  | 'idle_low_energy'    // low energy only  (placeholder — swap dir when assets arrive)
+  | 'idle_low_affection' // low affection only
+  | 'idle_exhausted'     // both low
   | 'click'
   | 'headphones_on'
   | 'headphones_off'
@@ -39,6 +42,11 @@ export type AnimationName =
   | 'music2'
   | 'music3'
   | 'music4'
+
+/** All animation names that represent an "idle" state (any tier). */
+export const IDLE_VARIANTS: ReadonlySet<AnimationName> = new Set([
+  'idle', 'idle_low_energy', 'idle_low_affection', 'idle_exhausted',
+])
 
 interface LoadedAnimation {
   frames:    HTMLImageElement[]
@@ -94,16 +102,23 @@ export function buildPingPongSequence(
 // ── Default registry (matches Python original) ──────────────────────
 
 export const DEFAULT_ANIMATIONS: Record<AnimationName, AnimationDef> = {
-  idle:           { dir: 'idle',           count: 234, fps: 24, loop: true  },
-  click:          { dir: 'click_matched',  count: 156, fps: 24, loop: false },
-  headphones_on:  { dir: 'headphones_on',  count: 185, fps: 24, loop: false },
-  headphones_off: { dir: 'headphones_off', count: 185, fps: 24, loop: false },
-  music1:         { dir: 'music1',         count: 185, fps: 24, loop: true  },
-  music2:         { dir: 'music2',         count: 185, fps: 24, loop: false,
-                    buildSequence: f => buildPingPongSequence(f,  81, 104, odd(31)) },
-  music3:         { dir: 'music3',         count: 330, fps: 24, loop: true  },
-  music4:         { dir: 'music4',         count: 185, fps: 24, loop: false,
-                    buildSequence: f => buildPingPongSequence(f, 105, 161, odd(13)) },
+  idle:                { dir: 'idle',           count: 234, fps: 24, loop: true  },
+  // ── Idle-variant placeholders ──────────────────────────────────────────
+  // These fall back to the normal `idle` directory until dedicated animation
+  // assets are added. To activate: update `dir` (and `count` if different).
+  idle_low_energy:    { dir: 'idle',           count: 234, fps: 24, loop: true  },
+  idle_low_affection: { dir: 'idle',           count: 234, fps: 24, loop: true  },
+  idle_exhausted:     { dir: 'idle',           count: 234, fps: 24, loop: true  },
+  // ─────────────────────────────────────────────────────────────────────
+  click:               { dir: 'click_matched',  count: 156, fps: 24, loop: false },
+  headphones_on:       { dir: 'headphones_on',  count: 185, fps: 24, loop: false },
+  headphones_off:      { dir: 'headphones_off', count: 185, fps: 24, loop: false },
+  music1:              { dir: 'music1',         count: 185, fps: 24, loop: true  },
+  music2:              { dir: 'music2',         count: 185, fps: 24, loop: false,
+                         buildSequence: f => buildPingPongSequence(f,  81, 104, odd(31)) },
+  music3:              { dir: 'music3',         count: 330, fps: 24, loop: true  },
+  music4:              { dir: 'music4',         count: 185, fps: 24, loop: false,
+                         buildSequence: f => buildPingPongSequence(f, 105, 161, odd(13)) },
 }
 
 // ── Composable ─────────────────────────────────────────────────────
@@ -123,6 +138,8 @@ export function useAnimator(registry: Record<AnimationName, AnimationDef> = DEFA
   let pendingAnim: AnimationName | null = null
   let lastFrameT   = 0
   let rafId        = 0
+  // Which idle-variant to play. Updated by setIdleVariant() from pet-status events.
+  let idleAnimName: AnimationName = 'idle'
 
   // ── Preload ────────────────────────────────────────────────────
   function preloadAnim(def: AnimationDef): Promise<HTMLImageElement[]> {
@@ -216,11 +233,26 @@ export function useAnimator(registry: Record<AnimationName, AnimationDef> = DEFA
     if (cur === 'music2')         return 'music3'
     if (cur === 'music3')         return 'music4'
     if (cur === 'music4')         return 'music1'
-    if (cur === 'headphones_off') return 'idle'
-    // Loop or fall back to idle for one-shots.
+    // Exit animations and one-shots fall back to the current idle variant.
+    if (cur === 'headphones_off') return idleAnimName
     const def = loaded.value[cur]
     if (def?.loop) return cur
-    return 'idle'
+    return idleAnimName
+  }
+
+  /**
+   * Update which idle-variant animation to play.
+   * Called by usePetStatus when the backend reports a pet-state-update.
+   *
+   * If the pet is currently in any idle variant, immediately switches to
+   * the new variant. Does nothing while in music/click/headphones animations
+   * — idleAnimName is simply remembered and used when those end.
+   */
+  function setIdleVariant(name: AnimationName) {
+    idleAnimName = name
+    if (IDLE_VARIANTS.has(currentName.value) && currentName.value !== name) {
+      setAnim(name)
+    }
   }
 
   // ── RAF loop ──────────────────────────────────────────────────
@@ -255,7 +287,7 @@ export function useAnimator(registry: Record<AnimationName, AnimationDef> = DEFA
   // ── Lifecycle ─────────────────────────────────────────────────
   onMounted(async () => {
     await preloadAll()
-    setAnim('music2')
+    setAnim('idle')
     rafId = requestAnimationFrame(tick)
   })
 
@@ -272,5 +304,6 @@ export function useAnimator(registry: Record<AnimationName, AnimationDef> = DEFA
     getPending,
     cancelPending,
     getCurrentImage,
+    setIdleVariant,
   }
 }

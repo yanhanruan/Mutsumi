@@ -14,6 +14,7 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { useAnimator } from '../composables/useAnimator'
 import { useAudioReaction } from '../composables/useAudioReaction'
 import { useHitTest } from '../composables/useHitTest'
+import { usePetStatus } from '../composables/usePetStatus'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
@@ -30,8 +31,10 @@ const {
   getPending,
   cancelPending,
   getCurrentImage,
+  setIdleVariant,
 } = useAnimator()
 useAudioReaction(queueAnim, currentName, getPending, cancelPending)
+usePetStatus(setIdleVariant)
 // Per-pixel click-through: transparent regions of the pet pass clicks
 // through to whatever is behind the window.
 useHitTest(getCurrentImage)
