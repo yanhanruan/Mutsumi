@@ -6,7 +6,7 @@
 
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -50,13 +50,20 @@ pub fn spawn_ticker(app: AppHandle, shared: SharedState) {
         use chrono::{Local, Timelike};
         let mut sec_count: u64 = 0;
         let mut late_night = LateNightReminder::new();
-        // Seed the reminder with the current hour so a startup at 02:00 fires
-        // immediately on the first minute-tick (rather than only after we've
-        // observed an out-of-window hour first).
-        // Note: observe() consumes the "fire" if currently in window; that's
-        // exactly the behavior we want for the first observation post-startup.
+
+        // Fixed-step Instant scheduler: we advance `next_tick` by exactly 1 s
+        // each iteration so OS sleep overshoot never accumulates into drift.
+        // Equivalent to a "locked-step clock" — the same pattern used in the
+        // animation RAF loop.
+        let mut next_tick = Instant::now() + Duration::from_secs(1);
+
         loop {
-            thread::sleep(Duration::from_secs(1));
+            // Sleep only for the remaining time until the next scheduled tick.
+            let now = Instant::now();
+            if next_tick > now {
+                thread::sleep(next_tick - now);
+            }
+            next_tick += Duration::from_secs(1);
             sec_count += 1;
 
             // ── Tick state under lock ──
