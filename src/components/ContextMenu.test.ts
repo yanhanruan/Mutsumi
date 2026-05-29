@@ -60,15 +60,17 @@ describe('ContextMenu', () => {
     await w.vm.open(0, 0)
     const items = w.findAll('.ctx-item')
     expect(items).toHaveLength(4)
+    w.unmount()
+  })
 
-    const actions: MenuAction[] = ['pat_head', 'feed', 'sleep', 'fast_learning']
-    // Each item triggers the correct action when clicked (checked in later tests).
-    // Here just verify count and that labels are present.
-    const labels = items.map(i => i.find('.ctx-label').text())
-    expect(labels).toContain('摸头')
-    expect(labels).toContain('投喂抹茶芭菲')
-    expect(labels).toContain('睡觉')
-    expect(labels).toContain('快速学习')
+  it('renders EN labels by default', async () => {
+    const w = mountMenu()
+    await w.vm.open(0, 0)
+    const labels = w.findAll('.ctx-label').map(e => e.text())
+    expect(labels).toContain('Pat Head')
+    expect(labels).toContain('Feed Matcha Parfait')
+    expect(labels).toContain('Sleep')
+    expect(labels).toContain('Fast Learning')
     w.unmount()
   })
 
@@ -145,14 +147,12 @@ describe('ContextMenu', () => {
     w.unmount()
   })
 
-  it('subtext labels are present for all items', async () => {
+  it('each item has a non-empty label', async () => {
     const w = mountMenu()
     await w.vm.open(0, 0)
-    const subs = w.findAll('.ctx-sub').map(e => e.text())
-    expect(subs).toContain('Pat Head')
-    expect(subs).toContain('Feed Matcha Parfait')
-    expect(subs).toContain('Sleep')
-    expect(subs).toContain('Fast Learning')
+    const labels = w.findAll('.ctx-label').map(e => e.text())
+    expect(labels).toHaveLength(4)
+    labels.forEach(l => expect(l.length).toBeGreaterThan(0))
     w.unmount()
   })
 })

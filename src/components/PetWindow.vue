@@ -15,6 +15,7 @@ import { useAnimator } from '../composables/useAnimator'
 import { useAudioReaction } from '../composables/useAudioReaction'
 import { useHitTest } from '../composables/useHitTest'
 import { usePetStatus } from '../composables/usePetStatus'
+import { useI18n } from '../i18n'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
@@ -43,24 +44,10 @@ useHitTest(getCurrentImage)
 // Animations during which click animation is suppressed (bubble still shows).
 const MUSIC_MODE = new Set(['headphones_on', 'headphones_off', 'music1', 'music2', 'music3', 'music4'])
 
+const { t } = useI18n()
+
 const bubbleRef  = ref<InstanceType<typeof ChatBubble> | null>(null)
 const contextRef = ref<InstanceType<typeof ContextMenu> | null>(null)
-
-const CLICK_PHRASES = [
-  "I'm not a toy, you know!",
-  "Ahh~ be gentle!",
-  "What do you want~?",
-  "Eek! That tickles!",
-  "H-Hey! Stop that!",
-]
-
-// Context menu action → chat-bubble response phrase.
-const CONTEXT_PHRASES: Record<MenuAction, string> = {
-  pat_head:      'Ehehe~ that feels nice ♪',
-  feed:          'Matcha parfait!! My favourite! 🍵',
-  sleep:         'Zzz… (snoozin\' away…)',
-  fast_learning: 'I-I\'ll study extra hard! 📚✨',
-}
 
 // ── Mouse interaction ──────────────────────────────────────────────
 const DRAG_THRESHOLD = 5
@@ -105,7 +92,8 @@ function onMouseUp(e: MouseEvent) {
       setAnim('click')   // immediate switch — no pending-anim delay
     }
     void invoke('pet_click')
-    const phrase = CLICK_PHRASES[Math.floor(Math.random() * CLICK_PHRASES.length)]
+    const phrases = t.value.clickPhrases
+    const phrase = phrases[Math.floor(Math.random() * phrases.length)]
     bubbleRef.value?.show(phrase)
   }
   pressed = false
@@ -121,18 +109,17 @@ function onContextMenu(e: MouseEvent) {
 
 async function onContextAction(action: MenuAction) {
   await invoke('pet_context_action', { action })
-  bubbleRef.value?.show(CONTEXT_PHRASES[action])
+  bubbleRef.value?.show(t.value.contextResponses[action])
 }
 
 // ── Late-night reminder ────────────────────────────────────────────
 // The backend fires `late-night-reminder` once per night when the local
-// hour first crosses into [00:00, 04:59). Show the Japanese phrase.
-const LATE_NIGHT_PHRASE = '夜更かしは健康によくない！'
+// hour first crosses into [00:00, 04:59). Show the locale-appropriate phrase.
 let unlistenLateNight: UnlistenFn | null = null
 
 onMounted(async () => {
   unlistenLateNight = await listen('late-night-reminder', () => {
-    bubbleRef.value?.show(LATE_NIGHT_PHRASE)
+    bubbleRef.value?.show(t.value.lateNightReminder)
   })
 })
 

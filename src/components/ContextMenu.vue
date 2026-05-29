@@ -11,25 +11,33 @@
  *   menuRef.value?.open(x, y)    // call from right-click handler
  */
 
-import { ref, nextTick } from 'vue'
+import { ref, nextTick, computed } from 'vue'
+import { useI18n } from '../i18n'
 
 // ── Types ────────────────────────────────────────────────────────────
 
 export type MenuAction = 'pat_head' | 'feed' | 'sleep' | 'fast_learning'
 
-export interface MenuItem {
-  action:  MenuAction
-  emoji:   string
-  label:   string
-  subtext: string
+interface MenuItemDef {
+  action: MenuAction
+  emoji:  string
 }
 
-const ITEMS: MenuItem[] = [
-  { action: 'pat_head',      emoji: '🤗', label: '摸头',      subtext: 'Pat Head'           },
-  { action: 'feed',          emoji: '🍵', label: '投喂抹茶芭菲', subtext: 'Feed Matcha Parfait' },
-  { action: 'sleep',         emoji: '😴', label: '睡觉',      subtext: 'Sleep'              },
-  { action: 'fast_learning', emoji: '📚', label: '快速学习',   subtext: 'Fast Learning'      },
+const ITEM_DEFS: MenuItemDef[] = [
+  { action: 'pat_head',      emoji: '🤗' },
+  { action: 'feed',          emoji: '🍵' },
+  { action: 'sleep',         emoji: '😴' },
+  { action: 'fast_learning', emoji: '📚' },
 ]
+
+const { t } = useI18n()
+
+const items = computed(() =>
+  ITEM_DEFS.map(d => ({
+    ...d,
+    label: t.value.contextMenuItems[d.action],
+  }))
+)
 
 // ── State ────────────────────────────────────────────────────────────
 
@@ -104,16 +112,13 @@ defineExpose({ open, close })
       @contextmenu.prevent
     >
       <button
-        v-for="item in ITEMS"
+        v-for="item in items"
         :key="item.action"
         class="ctx-item"
         @click="onItemClick(item.action)"
       >
         <span class="ctx-emoji">{{ item.emoji }}</span>
-        <span class="ctx-text">
-          <span class="ctx-label">{{ item.label }}</span>
-          <span class="ctx-sub">{{ item.subtext }}</span>
-        </span>
+        <span class="ctx-label">{{ item.label }}</span>
       </button>
     </div>
   </Transition>

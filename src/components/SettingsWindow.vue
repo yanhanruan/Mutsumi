@@ -9,6 +9,7 @@ import { onMounted, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { enable, disable, isEnabled } from '@tauri-apps/plugin-autostart'
+import { useI18n } from '../i18n'
 
 interface PetStateSnapshot {
   energy:    number
@@ -28,6 +29,8 @@ interface StateSnapshot {
   pet:      PetStateSnapshot
   pomodoro: PomodoroSnapshot
 }
+
+const { t } = useI18n()
 
 const focusMins   = ref(25)
 const breakMins   = ref(5)
@@ -61,7 +64,7 @@ async function toggleAutostart() {
     } else {
       await disable()
     }
-    status.value = autostart.value ? 'Launch on startup enabled.' : 'Launch on startup disabled.'
+    status.value = autostart.value ? t.value.autostartOnMsg : t.value.autostartOffMsg
     setTimeout(() => { status.value = '' }, 1800)
   } catch (e) {
     console.error('autostart toggle failed', e)
@@ -74,14 +77,14 @@ async function save() {
     focusMins: Math.max(1, Math.round(focusMins.value)),
     breakMins: Math.max(1, Math.round(breakMins.value)),
   })
-  status.value = 'Saved.'
+  status.value = t.value.savedMsg
   setTimeout(() => { status.value = '' }, 1800)
 }
 
 async function reset() {
   await invoke('pet_reset')
   await refresh()
-  status.value = 'Reset.'
+  status.value = t.value.resetMsg
   setTimeout(() => { status.value = '' }, 1800)
 }
 
@@ -106,36 +109,36 @@ onMounted(async () => {
       <div class="header">
         <span class="logo">🌸</span>
         <h1>Mutsumi</h1>
-        <span class="version">settings</span>
+        <span class="version">{{ t.settingsTitle }}</span>
       </div>
 
       <!-- Pomodoro card -->
       <div class="card">
-        <h3>Pomodoro</h3>
+        <h3>{{ t.pomodoro }}</h3>
         <div class="row">
-          <label>Focus</label>
+          <label>{{ t.focusLabel }}</label>
           <div class="input-group">
             <input type="number" v-model="focusMins" min="1" max="180" />
-            <span class="unit">min</span>
+            <span class="unit">{{ t.minuteUnit }}</span>
           </div>
         </div>
         <div class="row">
-          <label>Break</label>
+          <label>{{ t.breakLabel }}</label>
           <div class="input-group">
             <input type="number" v-model="breakMins" min="1" max="60" />
-            <span class="unit">min</span>
+            <span class="unit">{{ t.minuteUnit }}</span>
           </div>
         </div>
       </div>
 
       <!-- Pet status card -->
       <div class="card">
-        <h3>Pet status</h3>
+        <h3>{{ t.petStatus }}</h3>
         <div class="stat-grid">
           <div class="stat-item">
             <span class="stat-icon">⚡</span>
             <div class="stat-body">
-              <span class="stat-label">Energy</span>
+              <span class="stat-label">{{ t.energy }}</span>
               <div class="bar-track">
                 <div class="bar-fill energy" :style="{ width: energy + '%' }" />
               </div>
@@ -145,7 +148,7 @@ onMounted(async () => {
           <div class="stat-item">
             <span class="stat-icon">💜</span>
             <div class="stat-body">
-              <span class="stat-label">Affection</span>
+              <span class="stat-label">{{ t.affection }}</span>
               <div class="bar-track">
                 <div class="bar-fill affection" :style="{ width: affection + '%' }" />
               </div>
@@ -154,7 +157,7 @@ onMounted(async () => {
           </div>
           <div class="stat-item mood-row">
             <span class="stat-icon">✨</span>
-            <span class="stat-label">Mood</span>
+            <span class="stat-label">{{ t.mood }}</span>
             <span class="mood-badge">{{ mood }}</span>
           </div>
         </div>
@@ -162,9 +165,9 @@ onMounted(async () => {
 
       <!-- System card -->
       <div class="card">
-        <h3>System</h3>
+        <h3>{{ t.system }}</h3>
         <div class="row">
-          <label for="autostart-toggle">Launch on startup</label>
+          <label for="autostart-toggle">{{ t.launchOnStartup }}</label>
           <label class="toggle">
             <input
               id="autostart-toggle"
@@ -179,9 +182,9 @@ onMounted(async () => {
 
       <!-- Actions -->
       <div class="actions">
-        <button class="btn primary" @click="save">Save</button>
-        <button class="btn" @click="reset">Reset pet</button>
-        <button class="btn ghost" @click="close">Close</button>
+        <button class="btn primary" @click="save">{{ t.save }}</button>
+        <button class="btn" @click="reset">{{ t.resetPet }}</button>
+        <button class="btn ghost" @click="close">{{ t.close }}</button>
       </div>
 
       <Transition name="fade">

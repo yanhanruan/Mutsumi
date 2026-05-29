@@ -11,6 +11,7 @@
 import { onMounted, onUnmounted, ref, computed } from 'vue'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
+import { useI18n } from '../i18n'
 
 interface PomodoroSnapshot {
   phase:           string
@@ -24,6 +25,8 @@ interface StateSnapshot {
   pet:      unknown
   pomodoro: PomodoroSnapshot
 }
+
+const { t } = useI18n()
 
 const phase     = ref<string>('idle')
 const remaining = ref<number>(0)
@@ -39,7 +42,7 @@ const label = computed(() => {
 })
 
 const phaseLabel = computed(() =>
-  phase.value === 'break' ? 'Break' : 'Focus'
+  phase.value === 'break' ? t.value.pomBreak : t.value.pomFocus
 )
 
 const bgColor = computed(() =>
