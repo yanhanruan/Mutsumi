@@ -24,21 +24,6 @@
         "skipTaskbar": true,
         "shadow": false,
         "dragDropEnabled": false
-      },
-      {
-        "label": "settings",
-        "title": "Mutsumi · Settings",
-        "url": "index.html?window=settings",
-        "width": 360,
-        "height": 440,
-        "resizable": false,
-        "fullscreen": false,
-        "decorations": true,
-        "transparent": false,
-        "alwaysOnTop": false,
-        "skipTaskbar": false,
-        "visible": false,
-        "center": true
       }
     ],
     "security": {

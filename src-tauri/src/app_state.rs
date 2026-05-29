@@ -188,6 +188,14 @@ pub fn pet_context_action(
     }
 }
 
+/// Update the system tray menu labels to match the frontend-detected locale.
+/// Called from App.vue on mount once navigator.language is known.
+/// Supported values: "en" | "zh" | "ja" (anything else falls back to "en").
+#[tauri::command]
+pub fn set_tray_locale(app: AppHandle, locale: String) {
+    crate::tray::rebuild_tray(&app, &locale);
+}
+
 // Suppress unused warning for AppHandle::path in modules that re-import it.
 #[allow(dead_code)]
 fn _unused_path(app: &AppHandle) -> Option<()> {

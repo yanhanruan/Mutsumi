@@ -41,6 +41,7 @@ pub fn run() {
       app_state::pom_set_durations,
       weather::get_weather,
       audio::get_audio_state,
+      app_state::set_tray_locale,
     ])
     .setup(move |app| {
       if cfg!(debug_assertions) {
