@@ -1,20 +1,38 @@
 /**
- * ContextMenu.vue — unit tests.
+ * ContextMenu.vue — unit tests (vertical glass bubble panel).
  *
  * Verifies:
- *  1. Menu is hidden by default.
- *  2. open(x, y) makes it visible at the given position.
- *  3. Clicking a menu item emits the correct action and hides the menu.
- *  4. close() hides the menu.
- *  5. Escape key dismisses the menu.
- *  6. Clicking outside dismisses the menu.
- *  7. All 4 required menu items are present.
+ *  1.  Menu is hidden by default.
+ *  2.  open() makes the bubble panel visible.
+ *  3.  open() accepts x/y for API compat but ignores them (panel is always on the left).
+ *  4.  All 5 bubbles are rendered.
+ *  5.  Each bubble has a non-empty icon.
+ *  6.  Hovering a bubble shows its label tooltip.
+ *  7.  EN labels are correct.
+ *  8.  Clicking a bubble emits the correct action.
+ *  9.  Clicking a bubble closes the menu (after exit-animation delay).
+ *  10. close() hides the menu.
+ *  11. Escape key dismisses the menu.
+ *  12. Clicking outside dismisses the menu.
+ *  13. Clicking inside does NOT dismiss the menu.
+ *  14. Hide bubble has the .bubble--hide modifier class.
+ *  15. ContextActionKey excludes 'hide'.
+ *  16. Each bubble-wrap carries the pet-ui-overlay class (click-through guard).
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import ContextMenu from './ContextMenu.vue'
 import type { MenuAction, ContextActionKey } from './ContextMenu.vue'
+
+// Mock useAppConfig so tests can control characterSize.
+const mockCharacterSize = { value: 'large' as 'small' | 'medium' | 'large' }
+vi.mock('../composables/useAppConfig', () => ({
+  useAppConfig: () => ({
+    config: { value: { characterSize: mockCharacterSize.value, showWeather: true } },
+    updateConfig: vi.fn(),
+  }),
+}))
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
@@ -22,153 +40,296 @@ function mountMenu() {
   return mount(ContextMenu, { attachTo: document.body })
 }
 
+/** Advance fake timers AND flush Vue's microtask queue. */
+async function tickClose() {
+  vi.runAllTimers()
+  await flushPromises()
+}
+
+/**
+ * Open the menu and flush the requestAnimationFrame that registers
+ * the outside-click / Escape document listeners.
+ * (vi.useFakeTimers() stubs RAF, so we must explicitly drain it.)
+ */
+async function openAndArm(w: ReturnType<typeof mountMenu>) {
+  await w.vm.open()
+  await flushPromises()
+  vi.runAllTimers()   // fires the rAF → document.addEventListener calls
+  await flushPromises()
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────
 
-describe('ContextMenu', () => {
+describe('ContextMenu (vertical glass bubble panel)', () => {
   beforeEach(() => {
-    // Ensure document event listeners from previous tests are cleaned up
-    // by always mounting fresh components.
+    vi.useFakeTimers()
   })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  // ── Visibility ──────────────────────────────────────────────────────
 
   it('is hidden on initial mount', () => {
     const w = mountMenu()
-    expect(w.find('.ctx-menu').exists()).toBe(false)
+    expect(w.find('.bubble-panel').exists()).toBe(false)
     w.unmount()
   })
 
   it('becomes visible after open()', async () => {
     const w = mountMenu()
-    await w.vm.open(100, 200)
-    expect(w.find('.ctx-menu').exists()).toBe(true)
+    await w.vm.open()
+    expect(w.find('.bubble-panel').exists()).toBe(true)
     w.unmount()
   })
 
-  it('positions the menu at the given coordinates', async () => {
+  it('open() accepts x/y for API compat but has no positional style', async () => {
     const w = mountMenu()
     await w.vm.open(80, 120)
-    const el = w.find('.ctx-menu')
-    // The style is set as `left: 80px; top: 120px` — check the inline style.
-    // (Overflow correction only fires when getBoundingClientRect returns a
-    //  non-zero size, which jsdom doesn't simulate, so no clamping here.)
-    expect(el.attributes('style')).toContain('left: 80px')
-    expect(el.attributes('style')).toContain('top: 120px')
+    const menu = w.find('.bubble-panel')
+    expect(menu.exists()).toBe(true)
+    // Bubbles are always fixed on the left — no inline left/top positioning from x/y args.
+    const style = menu.attributes('style') ?? ''
+    expect(style).not.toContain('left: 80px')
+    expect(style).not.toContain('top: 120px')
     w.unmount()
   })
 
-  it('renders all 5 menu items (4 actions + hide)', async () => {
+  // ── Bubble count & structure ─────────────────────────────────────────
+
+  it('renders exactly 5 bubbles', async () => {
     const w = mountMenu()
-    await w.vm.open(0, 0)
-    const items = w.findAll('.ctx-item')
-    expect(items).toHaveLength(5)
+    await w.vm.open()
+    expect(w.findAll('.bubble-wrap')).toHaveLength(5)
+    expect(w.findAll('.bubble')).toHaveLength(5)
     w.unmount()
   })
 
-  it('renders EN labels by default', async () => {
+  it('each bubble has a non-empty icon', async () => {
     const w = mountMenu()
-    await w.vm.open(0, 0)
-    const labels = w.findAll('.ctx-label').map(e => e.text())
-    expect(labels).toContain('Pat Head')
-    expect(labels).toContain('Feed Matcha Parfait')
-    expect(labels).toContain('Sleep')
-    expect(labels).toContain('Fast Learning')
-    expect(labels).toContain('Hide App')
+    await w.vm.open()
+    const icons = w.findAll('.bubble-icon').map(el => el.text().trim())
+    expect(icons).toHaveLength(5)
+    icons.forEach(icon => expect(icon.length).toBeGreaterThan(0))
     w.unmount()
   })
 
-  it('emits "action" with correct payload when an item is clicked', async () => {
+  it('each bubble-wrap carries an --i stagger CSS variable', async () => {
     const w = mountMenu()
-    await w.vm.open(0, 0)
-    await w.findAll('.ctx-item')[0].trigger('click') // pat_head
+    await w.vm.open()
+    const wraps = w.findAll('.bubble-wrap')
+    wraps.forEach((wrap, i) => {
+      expect(wrap.attributes('style')).toContain(`--i: ${i}`)
+    })
+    w.unmount()
+  })
+
+  // ── Labels / tooltips ────────────────────────────────────────────────
+
+  it('hovering a bubble shows its label tooltip', async () => {
+    const w = mountMenu()
+    await w.vm.open()
+    const wrap = w.findAll('.bubble-wrap')[0]
+    await wrap.trigger('mouseenter')
+    expect(w.find('.bubble-tip').exists()).toBe(true)
+    await wrap.trigger('mouseleave')
+    w.unmount()
+  })
+
+  it('renders correct EN labels on hover', async () => {
+    const w = mountMenu()
+    await w.vm.open()
+    const expectedLabels = [
+      'Pat Head',
+      'Feed Matcha Parfait',
+      'Sleep',
+      'Fast Learning',
+      'Hide App',
+    ]
+    const wraps = w.findAll('.bubble-wrap')
+    for (let i = 0; i < wraps.length; i++) {
+      await wraps[i].trigger('mouseenter')
+      const tip = w.find('.bubble-tip')
+      expect(tip.exists()).toBe(true)
+      expect(tip.text()).toBe(expectedLabels[i])
+      await wraps[i].trigger('mouseleave')
+    }
+    w.unmount()
+  })
+
+  // ── Emit & click ─────────────────────────────────────────────────────
+
+  it('emits "action" with correct payload when a bubble is clicked', async () => {
+    const w = mountMenu()
+    await w.vm.open()
+    await w.findAll('.bubble')[0].trigger('click') // pat_head
     expect(w.emitted('action')).toBeTruthy()
     expect(w.emitted('action')![0]).toEqual(['pat_head'])
     w.unmount()
   })
 
-  it('emits the correct action for each item', async () => {
+  it('emits the correct action for each bubble', async () => {
     const expected: MenuAction[] = ['pat_head', 'feed', 'sleep', 'fast_learning', 'hide']
     for (let i = 0; i < expected.length; i++) {
       const w = mountMenu()
-      await w.vm.open(0, 0)
-      await w.findAll('.ctx-item')[i].trigger('click')
+      await w.vm.open()
+      await w.findAll('.bubble')[i].trigger('click')
       expect(w.emitted('action')![0]).toEqual([expected[i]])
       w.unmount()
     }
   })
 
-  it('hides the menu after an item is clicked', async () => {
+  it('hides the menu after a bubble is clicked', async () => {
     const w = mountMenu()
-    await w.vm.open(0, 0)
-    await w.findAll('.ctx-item')[0].trigger('click')
-    await flushPromises()
-    expect(w.find('.ctx-menu').exists()).toBe(false)
+    await w.vm.open()
+    await w.findAll('.bubble')[0].trigger('click')
+    await tickClose()
+    expect(w.find('.bubble-panel').exists()).toBe(false)
     w.unmount()
   })
 
-  it('close() hides the menu', async () => {
+  // ── Toggle behaviour ────────────────────────────────────────────────
+
+  it('open() while visible closes the panel (toggle)', async () => {
     const w = mountMenu()
-    await w.vm.open(0, 0)
+    await w.vm.open()
+    expect(w.find('.bubble-panel').exists()).toBe(true)
+    // Second open() call should close.
+    w.vm.open()
+    await tickClose()
+    expect(w.find('.bubble-panel').exists()).toBe(false)
+    w.unmount()
+  })
+
+  it('open() after close re-opens the panel', async () => {
+    const w = mountMenu()
+    await w.vm.open()
     w.vm.close()
-    await flushPromises()
-    expect(w.find('.ctx-menu').exists()).toBe(false)
+    await tickClose()
+    await w.vm.open()
+    expect(w.find('.bubble-panel').exists()).toBe(true)
+    w.unmount()
+  })
+
+  // ── Dismiss paths ────────────────────────────────────────────────────
+
+  it('close() hides the menu after exit-animation delay', async () => {
+    const w = mountMenu()
+    await w.vm.open()
+    w.vm.close()
+    await tickClose()
+    expect(w.find('.bubble-panel').exists()).toBe(false)
+    w.unmount()
+  })
+
+  it('every bubble-wrap carries pet-ui-overlay (click-through guard)', async () => {
+    // pet-ui-overlay must be on elements with pointer-events: auto so that
+    // useHitTest's elementsFromPoint check reliably detects the panel.
+    const w = mountMenu()
+    await w.vm.open()
+    const wraps = w.findAll('.bubble-wrap')
+    expect(wraps).toHaveLength(5)
+    wraps.forEach(wrap => {
+      expect(wrap.classes()).toContain('pet-ui-overlay')
+    })
     w.unmount()
   })
 
   it('Escape key dismisses the menu', async () => {
     const w = mountMenu()
-    await w.vm.open(0, 0)
-    expect(w.find('.ctx-menu').exists()).toBe(true)
+    await openAndArm(w)   // open + flush rAF so listeners are registered
+    expect(w.find('.bubble-panel').exists()).toBe(true)
 
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
-    await flushPromises()
-    expect(w.find('.ctx-menu').exists()).toBe(false)
+    await tickClose()
+    expect(w.find('.bubble-panel').exists()).toBe(false)
     w.unmount()
   })
 
-  it('clicking outside the menu dismisses it', async () => {
+  it('left-clicking outside the menu dismisses it', async () => {
     const w = mountMenu()
-    await w.vm.open(0, 0)
-    expect(w.find('.ctx-menu').exists()).toBe(true)
+    await openAndArm(w)
+    expect(w.find('.bubble-panel').exists()).toBe(true)
 
-    // Simulate mousedown on document body (outside the menu element).
-    document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+    document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }))
+    await tickClose()
+    expect(w.find('.bubble-panel').exists()).toBe(false)
+    w.unmount()
+  })
+
+  it('right-clicking outside the menu does NOT dismiss it (contextmenu handles toggle)', async () => {
+    const w = mountMenu()
+    await openAndArm(w)
+    expect(w.find('.bubble-panel').exists()).toBe(true)
+
+    // button=2 mousedown fires before contextmenu — must not close the panel
+    document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 2 }))
     await flushPromises()
-    expect(w.find('.ctx-menu').exists()).toBe(false)
+    expect(w.find('.bubble-panel').exists()).toBe(true)
     w.unmount()
   })
 
   it('clicking inside the menu does not dismiss it', async () => {
     const w = mountMenu()
-    await w.vm.open(0, 0)
-    // Trigger mousedown on the menu element itself.
-    const menuEl = w.find('.ctx-menu')
-    await menuEl.trigger('mousedown')
+    await w.vm.open()
+    await w.find('.bubble-panel').trigger('mousedown')
     await flushPromises()
-    // Menu should still be visible since click was inside.
-    expect(w.find('.ctx-menu').exists()).toBe(true)
+    expect(w.find('.bubble-panel').exists()).toBe(true)
     w.unmount()
   })
 
-  it('each item has a non-empty label', async () => {
+  // ── Size scaling ────────────────────────────────────────────────────
+
+  it('sets --bubble-size to 36px for large', async () => {
+    mockCharacterSize.value = 'large'
     const w = mountMenu()
-    await w.vm.open(0, 0)
-    const labels = w.findAll('.ctx-label').map(e => e.text())
-    expect(labels).toHaveLength(5)
-    labels.forEach(l => expect(l.length).toBeGreaterThan(0))
+    await w.vm.open()
+    expect(w.find('.bubble-panel').attributes('style')).toContain('--bubble-size: 36px')
     w.unmount()
   })
 
-  it('hide item has the ctx-item--danger modifier class', async () => {
+  it('sets --bubble-size to 31px for medium', async () => {
+    mockCharacterSize.value = 'medium'
     const w = mountMenu()
-    await w.vm.open(0, 0)
-    const hideBtn = w.findAll('.ctx-item').at(4)
-    expect(hideBtn?.classes()).toContain('ctx-item--danger')
+    await w.vm.open()
+    expect(w.find('.bubble-panel').attributes('style')).toContain('--bubble-size: 31px')
     w.unmount()
   })
+
+  it('sets --bubble-size to 25px for small', async () => {
+    mockCharacterSize.value = 'small'
+    const w = mountMenu()
+    await w.vm.open()
+    expect(w.find('.bubble-panel').attributes('style')).toContain('--bubble-size: 25px')
+    w.unmount()
+  })
+
+  // ── Style modifiers ──────────────────────────────────────────────────
+
+  it('hide bubble (index 4) carries the .bubble--hide class', async () => {
+    const w = mountMenu()
+    await w.vm.open()
+    const hideBubble = w.findAll('.bubble').at(4)
+    expect(hideBubble?.classes()).toContain('bubble--hide')
+    w.unmount()
+  })
+
+  it('non-hide bubbles do not carry .bubble--hide', async () => {
+    const w = mountMenu()
+    await w.vm.open()
+    const bubbles = w.findAll('.bubble')
+    bubbles.slice(0, 4).forEach(b => {
+      expect(b.classes()).not.toContain('bubble--hide')
+    })
+    w.unmount()
+  })
+
+  // ── Type-level checks ────────────────────────────────────────────────
 
   it('ContextActionKey type excludes hide', () => {
-    // TypeScript compile-time check: 'hide' should not be assignable to ContextActionKey.
-    // We verify this at runtime by checking the action keys.
     const actionKeys: ContextActionKey[] = ['pat_head', 'feed', 'sleep', 'fast_learning']
     expect(actionKeys).not.toContain('hide')
+    expect(actionKeys).toHaveLength(4)
   })
 })

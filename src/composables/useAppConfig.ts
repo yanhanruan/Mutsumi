@@ -36,11 +36,11 @@ export const CHAR_SIZE_DIMS: Record<CharacterSize, [number, number]> = {
 
 // ── Storage ──────────────────────────────────────────────────────────
 
-const STORAGE_KEY  = 'mutsumi_app_config'
+const STORAGE_KEY  = 'mutsumi_app_config_v2'
 const EVENT_NAME   = 'app-config-changed'
 
 const DEFAULT_CONFIG: AppConfig = {
-  characterSize: 'large',
+  characterSize: 'medium',
   showWeather:   true,
 }
 

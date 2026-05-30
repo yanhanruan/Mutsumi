@@ -20,6 +20,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import { LogicalSize } from '@tauri-apps/api/dpi'
 import { invoke } from '@tauri-apps/api/core'
 import { useAppConfig, CHAR_SIZE_DIMS } from '../composables/useAppConfig'
+import { useWeatherAvailable } from '../composables/useWeatherAvailable'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import ChatBubble from './ChatBubble.vue'
 import PomodoroBadge from './PomodoroBadge.vue'
@@ -48,6 +49,7 @@ const MUSIC_MODE = new Set(['headphones_on', 'headphones_off', 'music1', 'music2
 
 const { t } = useI18n()
 const { config } = useAppConfig()
+const { weatherAvailable } = useWeatherAvailable()
 
 // ── Window sizing (Task 3) ─────────────────────────────────────────
 // Resize the main window whenever the user changes the character size
@@ -158,7 +160,7 @@ onUnmounted(() => {
   >
     <img v-if="currentSrc" :src="currentSrc" class="frame" draggable="false" />
     <PomodoroBadge />
-    <WeatherBadge v-if="config.showWeather" />
+    <WeatherBadge v-if="config.showWeather && weatherAvailable !== false" />
     <div class="bubble-anchor">
       <ChatBubble ref="bubbleRef" />
     </div>

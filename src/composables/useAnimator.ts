@@ -113,7 +113,7 @@ export const DEFAULT_ANIMATIONS: Record<AnimationName, AnimationDef> = {
   click:               { dir: 'click_matched',  count: 156, fps: 24, loop: false },
   headphones_on:       { dir: 'headphones_on',  count: 185, fps: 24, loop: false },
   headphones_off:      { dir: 'headphones_off', count: 185, fps: 24, loop: false },
-  music1:              { dir: 'music1',         count: 185, fps: 24, loop: true  },
+  music1:              { dir: 'music1/temp',         count: 185, fps: 24, loop: true  },
   music2:              { dir: 'music2',         count: 185, fps: 24, loop: false,
                          buildSequence: f => buildPingPongSequence(f,  81, 104, odd(31)) },
   music3:              { dir: 'music3',         count: 330, fps: 18, loop: true  },
@@ -287,7 +287,7 @@ export function useAnimator(registry: Record<AnimationName, AnimationDef> = DEFA
   // ── Lifecycle ─────────────────────────────────────────────────
   onMounted(async () => {
     await preloadAll()
-    setAnim('idle')
+    setAnim('music1')
     rafId = requestAnimationFrame(tick)
   })
 

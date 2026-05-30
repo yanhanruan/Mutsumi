@@ -1,76 +1,93 @@
 <script setup lang="ts">
 /**
- * ContextMenu — glassmorphic right-click menu for pet interactions.
+ * ContextMenu — Vertical Glass Bubble Panel.
  *
- * No emojis — plain text labels only, tightly packed.
- * Positioned at the cursor location within the pet window. Automatically
- * flips up/left if the menu would overflow the viewport. Dismissed on
- * outside-click or after an item is selected.
+ * Five frosted-glass bubbles on the left edge of the window.
+ * Vue <Transition> owns enter/leave timing — no manual closing state,
+ * no setTimeout, no !important overrides.
  */
-
-import { ref, nextTick, computed } from 'vue'
-import { watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useI18n } from '../i18n'
+import { useAppConfig } from '../composables/useAppConfig'
 
 // ── Types ────────────────────────────────────────────────────────────
 
-/** Actions that invoke a backend command and show a bubble response. */
 export type ContextActionKey = 'pat_head' | 'feed' | 'sleep' | 'fast_learning'
-
-/** Full set of menu actions, including frontend-only ones. */
 export type MenuAction = ContextActionKey | 'hide'
 
-const ACTIONS: MenuAction[] = ['pat_head', 'feed', 'sleep', 'fast_learning', 'hide']
+interface BubbleDef {
+  action: MenuAction
+  icon:   string
+}
 
-const { t } = useI18n()
-
-const items = computed(() =>
-  ACTIONS.map(action => ({
-    action,
-    label: t.value.contextMenuItems[action],
-  }))
-)
+const BUBBLE_DEFS: BubbleDef[] = [
+  { action: 'pat_head',      icon: '✋' },
+  { action: 'feed',          icon: '🍵' },
+  { action: 'sleep',         icon: '💤' },
+  { action: 'fast_learning', icon: '📚' },
+  { action: 'hide',          icon: '👻' },
+]
 
 // ── State ────────────────────────────────────────────────────────────
 
-const emit = defineEmits<{
-  action: [action: MenuAction]
-}>()
+const { t } = useI18n()
+const { config } = useAppConfig()
+const emit = defineEmits<{ action: [action: MenuAction] }>()
 
-const visible = ref(false)
-const menuX   = ref(0)
-const menuY   = ref(0)
-const menuRef = ref<HTMLElement | null>(null)
+// ── Size scaling ─────────────────────────────────────────────────────
+// Bubble dimensions scale with the character size setting.
+// Base (large): 36 px bubble. Scale factors match window-width ratios:
+//   small 140/200 = 0.70 → 25 px  |  medium 170/200 = 0.85 → 31 px
+
+const BUBBLE_PX: Record<string, number> = { small: 25, medium: 31, large: 36 }
+
+const panelStyle = computed(() => {
+  const px = BUBBLE_PX[config.value.characterSize] ?? 36
+  return { '--bubble-size': `${px}px` }
+})
+
+const visible       = ref(false)
+const hoveredAction = ref<MenuAction | null>(null)
+
+const items = computed(() =>
+  BUBBLE_DEFS.map(b => ({
+    ...b,
+    label: t.value.contextMenuItems[b.action],
+  }))
+)
 
 // ── Public API ───────────────────────────────────────────────────────
 
-async function open(x: number, y: number) {
-  visible.value = true
-  menuX.value   = x
-  menuY.value   = y
-
-  await nextTick()
-  const el = menuRef.value
-  if (!el) return
-  const { width, height } = el.getBoundingClientRect()
-  const vw = window.innerWidth
-  const vh = window.innerHeight
-  // Clamp so the menu never overflows any edge (simple flip can go negative).
-  menuX.value = Math.max(0, Math.min(x, vw - width))
-  menuY.value = Math.max(0, Math.min(y, vh - height))
+function open(_x = 0, _y = 0) {
+  if (visible.value) {
+    close()
+  } else {
+    visible.value = true
+  }
 }
 
 function close() {
+  if (!visible.value) return
+  hoveredAction.value = null
   visible.value = false
+  document.removeEventListener('mousedown', onDocumentClick, true)
+  document.removeEventListener('keydown',   onKeyDown,       true)
 }
 
-function onItemClick(action: MenuAction) {
+function onBubbleClick(action: MenuAction) {
   emit('action', action)
   close()
 }
 
+// ── Outside-click / Escape ───────────────────────────────────────────
+
 function onDocumentClick(e: MouseEvent) {
-  if (!menuRef.value?.contains(e.target as Node)) close()
+  // Right-click (button 2) fires mousedown before contextmenu.
+  // If we closed here, open() would immediately re-open — toggle would never work.
+  // Let contextmenu handle the right-click toggle; we only dismiss on left-click outside.
+  if (e.button !== 0) return
+  const el = document.querySelector('.bubble-panel')
+  if (!el?.contains(e.target as Node)) close()
 }
 
 function onKeyDown(e: KeyboardEvent) {
@@ -79,11 +96,12 @@ function onKeyDown(e: KeyboardEvent) {
 
 watch(visible, v => {
   if (v) {
-    document.addEventListener('mousedown', onDocumentClick, true)
-    document.addEventListener('keydown',   onKeyDown,       true)
-  } else {
-    document.removeEventListener('mousedown', onDocumentClick, true)
-    document.removeEventListener('keydown',   onKeyDown,       true)
+    // One frame delay so the right-click mousedown that opened the panel
+    // is not immediately caught as an outside click.
+    requestAnimationFrame(() => {
+      document.addEventListener('mousedown', onDocumentClick, true)
+      document.addEventListener('keydown',   onKeyDown,       true)
+    })
   }
 })
 
@@ -91,99 +109,183 @@ defineExpose({ open, close })
 </script>
 
 <template>
-  <Transition name="ctx">
-    <div
-      v-if="visible"
-      ref="menuRef"
-      class="ctx-menu pet-ui-overlay"
-      :style="{ left: `${menuX}px`, top: `${menuY}px` }"
-      @contextmenu.prevent
-    >
-      <button
-        v-for="item in items"
+  <!-- duration: enter covers stagger (4×45ms) + transition (300ms) = 480ms → 520ms;
+       leave matches transition duration (160ms) → 180ms -->
+  <Transition name="panel" :duration="{ enter: 520, leave: 180 }">
+    <div v-if="visible" class="bubble-panel" :style="panelStyle">
+      <div
+        v-for="(item, i) in items"
         :key="item.action"
-        class="ctx-item"
-        :class="{ 'ctx-item--danger': item.action === 'hide' }"
-        @click="onItemClick(item.action)"
+        class="bubble-wrap pet-ui-overlay"
+        :style="{ '--i': i }"
+        @mouseenter="hoveredAction = item.action"
+        @mouseleave="hoveredAction = null"
       >
-        <span class="ctx-label">{{ item.label }}</span>
-      </button>
+        <button
+          class="bubble"
+          :class="{ 'bubble--hide': item.action === 'hide' }"
+          @click.stop="onBubbleClick(item.action)"
+        >
+          <span class="bubble-icon">{{ item.icon }}</span>
+        </button>
+
+        <Transition name="tip">
+          <div v-if="hoveredAction === item.action" class="bubble-tip">
+            {{ item.label }}
+          </div>
+        </Transition>
+      </div>
     </div>
   </Transition>
 </template>
 
 <style scoped>
-.ctx-menu {
+/* ── Panel ───────────────────────────────────────────────────────── */
+/* --bubble-size drives all size-sensitive values via calc().
+   Default (36px) matches the "large" character setting.             */
+.bubble-panel {
+  --bubble-size: 36px; /* overridden by inline :style per size tier  */
+
   position: fixed;
+  left: calc(var(--bubble-size) * 0.22);   /* ~8 px at large */
+  top: 50%;
+  transform: translateY(-50%);
   z-index: 999;
-  /* width is driven by content; constrain to viewport */
-  width: max-content;
-  max-width: 170px;
-  padding: 3px;
-  border-radius: 10px;
-
-  background: rgba(240, 248, 240, 0.96);
-  backdrop-filter: blur(32px) saturate(180%);
-  -webkit-backdrop-filter: blur(32px) saturate(180%);
-
-  border: 1px solid rgba(148, 185, 148, 0.40);
-  box-shadow:
-    0 4px 12px rgba(60, 90, 60, 0.10),
-    inset 0 1px 0 rgba(255, 255, 255, 0.70);
-
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: calc(var(--bubble-size) * 0.19);    /* ~7 px at large */
+  pointer-events: none;
 }
 
-.ctx-item {
-  display: block;
-  width: 100%;
-  padding: 6px 12px;
-  border: none;
-  background: transparent;
-  border-radius: 7px;
+/* ── Enter ───────────────────────────────────────────────────────── */
+/* Explicit initial state — applied synchronously on DOM insertion,
+   so no flash before the transition starts.                         */
+.panel-enter-from .bubble-wrap {
+  opacity: 0;
+  transform: translateX(-14px);
+}
+/* Staggered transition to natural (visible) state.
+   Suppress .bubble hover transition so it can't compete.            */
+.panel-enter-active .bubble-wrap {
+  transition:
+    opacity  300ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 300ms cubic-bezier(0.22, 1, 0.36, 1);
+  transition-delay: calc(var(--i, 0) * 45ms);
+}
+.panel-enter-active .bubble { transition: none; }
+
+/* ── Leave ───────────────────────────────────────────────────────── */
+/* All bubbles fade-slide out together; no hover interaction.        */
+.panel-leave-active .bubble-wrap {
+  transition:
+    opacity  160ms ease-in,
+    transform 160ms ease-in;
+  pointer-events: none;
+}
+.panel-leave-active .bubble { transition: none; }
+.panel-leave-to .bubble-wrap {
+  opacity: 0;
+  transform: translateX(-10px);
+}
+
+/* ── Bubble wrapper ──────────────────────────────────────────────── */
+.bubble-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  pointer-events: auto;
+}
+
+/* ── Circular button ─────────────────────────────────────────────── */
+.bubble {
+  width:  var(--bubble-size);
+  height: var(--bubble-size);
+  border-radius: 50%;
+  border: 1px solid rgba(119, 153, 119, 0.28);
   cursor: pointer;
-  text-align: left;
-  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+
+  background: rgba(228, 242, 228, 0.72);
+  backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  box-shadow:
+    0 2px 10px rgba(40, 70, 40, 0.10),
+    inset 0 1px 0 rgba(255, 255, 255, 0.68);
+
+  transition:
+    transform    260ms cubic-bezier(0.34, 0, 0.24, 1),
+    background   180ms ease,
+    box-shadow   180ms ease,
+    border-color 180ms ease;
+}
+
+.bubble:hover {
+  transform: translateX(5px) scale(1.08);
+  background: rgba(240, 250, 240, 0.90);
+  border-color: rgba(119, 153, 119, 0.50);
+  box-shadow:
+    0 6px 20px rgba(40, 70, 40, 0.16),
+    0 0 0 2.5px rgba(119, 153, 119, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.80);
+}
+
+.bubble:active {
+  transform: translateX(3px) scale(0.93);
+  transition-duration: 80ms;
+}
+
+/* Hide bubble — cool neutral, shifts warm-red on hover */
+.bubble--hide {
+  background: rgba(235, 235, 240, 0.68);
+  border-color: rgba(150, 150, 168, 0.28);
+}
+
+.bubble--hide:hover {
+  background: rgba(255, 242, 242, 0.90);
+  border-color: rgba(200, 110, 110, 0.42);
+  box-shadow:
+    0 6px 20px rgba(160, 50, 50, 0.12),
+    0 0 0 2.5px rgba(200, 100, 100, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.80);
+}
+
+/* ── Icon ────────────────────────────────────────────────────────── */
+.bubble-icon {
+  font-size: calc(var(--bubble-size) * 0.44);  /* ~16 px at large */
+  line-height: 1;
+  user-select: none;
+  pointer-events: none;
+}
+
+/* ── Tooltip (slides in to the right) ───────────────────────────── */
+.bubble-tip {
+  position: absolute;
+  left: calc(100% + calc(var(--bubble-size) * 0.22));  /* gap = left offset */
+  top: 50%;
+  transform: translateY(-50%);
+  white-space: nowrap;
+  pointer-events: none;
+
+  background: rgba(236, 246, 236, 0.92);
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  border: 1px solid rgba(119, 153, 119, 0.30);
+  border-radius: 7px;
+  padding: 3px 9px;
 
   font-family: system-ui, "Segoe UI", "Noto Sans SC", "Noto Sans JP", sans-serif;
-  font-size: 11.5px;
-  font-weight: 520;
-  color: rgba(38, 62, 38, 0.85);
-  line-height: 1.4;
-  white-space: nowrap;
-
-  transition: background 90ms ease;
+  font-size: calc(var(--bubble-size) * 0.275);  /* ~10 px at large */
+  font-weight: 600;
+  color: rgba(30, 52, 30, 0.85);
+  letter-spacing: 0.01em;
+  box-shadow: 0 2px 8px rgba(40, 70, 40, 0.10);
 }
 
-.ctx-item:hover {
-  background: rgba(148, 185, 148, 0.18);
-}
-
-.ctx-item:active {
-  background: rgba(105, 145, 105, 0.28);
-  transform: scale(0.98);
-}
-
-/* Hide item — subtle muted style to distinguish it */
-.ctx-item--danger .ctx-label {
-  color: rgba(38, 62, 38, 0.52);
-}
-.ctx-item--danger:hover {
-  background: rgba(180, 60, 60, 0.08);
-}
-.ctx-item--danger:hover .ctx-label {
-  color: rgba(160, 40, 40, 0.80);
-}
-
-/* Pop-in from cursor */
-.ctx-enter-active {
-  transition: opacity 120ms ease, transform 120ms cubic-bezier(0.18, 1.4, 0.52, 1);
-}
-.ctx-leave-active {
-  transition: opacity 70ms ease;
-}
-.ctx-enter-from { opacity: 0; transform: scale(0.86) translateY(-4px); }
-.ctx-leave-to   { opacity: 0; }
+.tip-enter-active { transition: opacity 150ms ease, transform 150ms cubic-bezier(0.22, 1, 0.36, 1); }
+.tip-leave-active { transition: opacity 100ms ease; }
+.tip-enter-from   { opacity: 0; transform: translateY(-50%) translateX(-6px); }
+.tip-leave-to     { opacity: 0; }
 </style>

@@ -14,6 +14,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import { enable, disable, isEnabled } from '@tauri-apps/plugin-autostart'
 import { useI18n } from '../i18n'
 import { useAppConfig, type CharacterSize } from '../composables/useAppConfig'
+import { useWeatherAvailable } from '../composables/useWeatherAvailable'
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -66,7 +67,8 @@ async function setSize(s: CharacterSize) {
   await updateConfig({ characterSize: s })
 }
 
-// ── Weather visibility (Task 4) ────────────────────────────────────
+// ── Weather visibility ────────────────────────────────────────────
+const { weatherAvailable } = useWeatherAvailable()
 const localShowWeather = ref<boolean>(config.value.showWeather)
 
 watch(() => config.value.showWeather, v => { localShowWeather.value = v })
@@ -265,14 +267,18 @@ onMounted(async () => {
           </label>
         </div>
 
-        <!-- Weather visibility (Task 4) -->
+        <!-- Weather visibility — disabled when service is unavailable -->
         <div class="field-row" style="margin-top: 6px;">
-          <label for="weather-toggle">{{ t.showWeather }}</label>
-          <label class="toggle">
+          <label
+            for="weather-toggle"
+            :style="weatherAvailable === false ? 'opacity: 0.4' : ''"
+          >{{ t.showWeather }}</label>
+          <label class="toggle" :style="weatherAvailable === false ? 'opacity: 0.4; cursor: not-allowed' : ''">
             <input
               id="weather-toggle"
               type="checkbox"
               v-model="localShowWeather"
+              :disabled="weatherAvailable === false"
               @change="toggleWeather"
             />
             <span class="thumb" />

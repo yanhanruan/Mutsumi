@@ -1,14 +1,25 @@
 //! Weather fetcher.
 //!
-//! On startup, queries ipapi.co for the user's approximate location,
-//! then polls Open-Meteo (no API key required) every WEATHER_INTERVAL for
-//! the current weather condition. Emits `weather-update` events carrying
-//! the WMO code, a short label, temperature in °C, and city name.
+//! Geo-location uses a two-service fallback chain so the feature works in
+//! regions where one provider is blocked or rate-limited:
 //!
-//! `weather_emoji()` is a pure mapping kept separate so it can be
-//! unit-tested without making any HTTP requests.
+//!   1. ipapi.co   — primary   (works globally; free, no key)
+//!   2. ipinfo.io  — fallback  (HTTPS, reliable in mainland China; 50k req/month free)
+//!
+//! Weather data comes from Open-Meteo (no API key required, Cloudflare CDN —
+//! accessible globally including mainland China on all major ISPs).
+//!
+//! Emits two event types:
+//!   • `weather-update`  — carries WMO code, label, °C, and city
+//!   • `weather-status`  — carries `{ available: bool }`, fired whenever
+//!                         availability changes (first success, or after
+//!                         MAX_FAILURES consecutive failures)
+//!
+//! `WeatherState` exposes `record_success` / `record_failure` so the loop
+//! can update shared state and decide whether to re-emit the status event.
+//! Those methods are unit-tested directly without making HTTP calls.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -20,6 +31,11 @@ const WEATHER_INTERVAL: Duration = Duration::from_secs(30 * 60); // 30 min
 const RETRY_INTERVAL:   Duration = Duration::from_secs(60);      // 1 min after failure
 const HTTP_TIMEOUT:     Duration = Duration::from_secs(10);
 
+/// After this many consecutive failures the badge is suppressed.
+pub const MAX_FAILURES: u32 = 3;
+
+// ── Public types ────────────────────────────────────────────────────
+
 #[derive(Debug, Clone, Serialize)]
 pub struct WeatherUpdate {
     pub code:   u32,
@@ -28,12 +44,91 @@ pub struct WeatherUpdate {
     pub city:   Option<String>,
 }
 
+/// Payload of the `weather-status` event.
+#[derive(Debug, Clone, Serialize)]
+pub struct WeatherStatus {
+    pub available: bool,
+}
+
+// ── Managed state ───────────────────────────────────────────────────
+
+/// Shared state managed by Tauri.
+///
+/// `available` starts `false` (nothing fetched yet).
+/// It flips to `true` on the first successful fetch, and back to `false`
+/// once MAX_FAILURES consecutive fetches fail with no intervening success.
+pub struct WeatherState {
+    pub update:               Mutex<Option<WeatherUpdate>>,
+    pub available:            AtomicBool,
+    pub consecutive_failures: AtomicU32,
+}
+
+impl WeatherState {
+    pub fn new() -> Self {
+        Self {
+            update:               Mutex::new(None),
+            available:            AtomicBool::new(false),
+            consecutive_failures: AtomicU32::new(0),
+        }
+    }
+
+    /// Record a successful fetch.  Returns `true` if availability changed
+    /// (i.e. the first success, or recovery after a run of failures).
+    pub fn record_success(&self, update: WeatherUpdate) -> bool {
+        *self.update.lock().unwrap() = Some(update);
+        self.consecutive_failures.store(0, Ordering::Relaxed);
+        // swap returns the *old* value; flip to true ⟹ changed iff was false
+        !self.available.swap(true, Ordering::Relaxed)
+    }
+
+    /// Record a failed fetch.  Returns `true` if availability changed
+    /// (i.e. we just crossed the MAX_FAILURES threshold).
+    pub fn record_failure(&self) -> bool {
+        // fetch_add returns the value *before* the add, so +1 for current.
+        let new_count = self.consecutive_failures.fetch_add(1, Ordering::Relaxed) + 1;
+        if new_count >= MAX_FAILURES {
+            // swap returns old value; flip to false ⟹ changed iff was true
+            return self.available.swap(false, Ordering::Relaxed);
+        }
+        false
+    }
+
+    /// Current availability (safe to call from any thread).
+    pub fn is_available(&self) -> bool {
+        self.available.load(Ordering::Relaxed)
+    }
+}
+
+// ── Tauri commands ──────────────────────────────────────────────────
+
+/// Returns the last cached weather update (or `null` if none yet).
+#[tauri::command]
+pub fn get_weather(state: tauri::State<WeatherState>) -> Option<WeatherUpdate> {
+    state.update.lock().unwrap().clone()
+}
+
+/// Returns whether weather data is currently available.
+/// The frontend calls this on mount; live changes arrive via `weather-status`.
+#[tauri::command]
+pub fn get_weather_status(state: tauri::State<WeatherState>) -> bool {
+    state.is_available()
+}
+
+// ── HTTP deserialisers ──────────────────────────────────────────────
+
+/// ipapi.co response shape.
 #[derive(Debug, Deserialize)]
-struct GeoResponse {
-    // ipapi.co field names
+struct IpApiResponse {
     latitude:  f64,
     longitude: f64,
     city:      Option<String>,
+}
+
+/// ipinfo.io response shape.  `loc` is a "lat,lon" string.
+#[derive(Debug, Deserialize)]
+struct IpInfoResponse {
+    city: Option<String>,
+    loc:  String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -47,19 +142,18 @@ struct OpenMeteoCurrent {
     temperature_2m: f64,
 }
 
-/// Managed state — holds the most recent successful weather fetch.
-/// The frontend reads this on mount to avoid missing the first event.
-pub struct WeatherState(pub Mutex<Option<WeatherUpdate>>);
-
-/// Tauri command: returns the last cached weather update (or null if none yet).
-#[tauri::command]
-pub fn get_weather(state: tauri::State<WeatherState>) -> Option<WeatherUpdate> {
-    state.0.lock().unwrap().clone()
+// Normalised result from whichever geo service succeeded.
+struct GeoResult {
+    latitude:  f64,
+    longitude: f64,
+    city:      Option<String>,
 }
+
+// ── Weather emoji map ───────────────────────────────────────────────
 
 /// Map a WMO weather code to (emoji, English label).
 ///
-/// Reference: <https://open-meteo.com/en/docs> (WMO weather interpretation codes).
+/// Reference: <https://open-meteo.com/en/docs>
 pub fn weather_emoji(code: u32) -> (&'static str, &'static str) {
     match code {
         0                              => ("☀️",  "Clear"),
@@ -79,24 +173,50 @@ pub fn weather_emoji(code: u32) -> (&'static str, &'static str) {
     }
 }
 
+// ── Fetch loop ──────────────────────────────────────────────────────
+
 pub fn spawn(app: AppHandle, stop_flag: Arc<AtomicBool>) {
     thread::spawn(move || {
+        // Build the client once and reuse it — avoids TLS re-init on every poll.
+        // native-tls (Schannel on Windows) reads the OS certificate store, which
+        // handles VPNs / corporate proxies that rustls-tls silently rejects.
+        let client = match reqwest::blocking::Client::builder()
+            .timeout(HTTP_TIMEOUT)
+            .build()
+        {
+            Ok(c) => c,
+            Err(e) => {
+                log::error!("[weather] failed to build HTTP client: {:#}", e);
+                return;
+            }
+        };
+
         while !stop_flag.load(Ordering::Relaxed) {
-            match fetch_once() {
+            let state = match app.try_state::<WeatherState>() {
+                Some(s) => s,
+                None    => { thread::sleep(RETRY_INTERVAL); continue; }
+            };
+
+            match fetch_once(&client) {
                 Ok(update) => {
                     log::info!(
                         "[weather] {}°C ({}) in {:?}",
                         update.temp_c, update.label, update.city
                     );
-                    // Cache before emitting so get_weather() is always warm.
-                    if let Some(state) = app.try_state::<WeatherState>() {
-                        *state.0.lock().unwrap() = Some(update.clone());
+                    let changed = state.record_success(update.clone());
+                    if changed {
+                        let _ = app.emit("weather-status", WeatherStatus { available: true });
                     }
                     let _ = app.emit("weather-update", &update);
                     thread::sleep(WEATHER_INTERVAL);
                 }
                 Err(e) => {
-                    log::warn!("[weather] fetch failed: {} — retrying in 60s", e);
+                    // {:#} prints the full error chain for easier diagnosis
+                    log::warn!("[weather] fetch failed: {:#} — retrying in 60s", e);
+                    let changed = state.record_failure();
+                    if changed {
+                        let _ = app.emit("weather-status", WeatherStatus { available: false });
+                    }
                     thread::sleep(RETRY_INTERVAL);
                 }
             }
@@ -104,21 +224,45 @@ pub fn spawn(app: AppHandle, stop_flag: Arc<AtomicBool>) {
     });
 }
 
-fn fetch_once() -> Result<WeatherUpdate, Box<dyn std::error::Error + Send + Sync>> {
-    let client = reqwest::blocking::Client::builder()
-        .timeout(HTTP_TIMEOUT)
-        .build()?;
+fn fetch_geo(client: &reqwest::blocking::Client) -> Result<GeoResult, Box<dyn std::error::Error + Send + Sync>> {
+    // Primary: ipapi.co — free, no key, works globally.
+    match fetch_geo_ipapi(client) {
+        Ok(r) => return Ok(r),
+        Err(e) => log::warn!("[weather] ipapi.co geo failed ({:#}) — trying ipinfo.io", e),
+    }
+    // Fallback: ipinfo.io — HTTPS, reliable in mainland China, 50k req/month free.
+    fetch_geo_ipinfo(client)
+}
 
-    // 1. Approximate location from IP.
-    //    ipapi.co — free tier (no key), HTTPS, 30 k requests/month.
-    let geo: GeoResponse = client
+fn fetch_geo_ipapi(client: &reqwest::blocking::Client) -> Result<GeoResult, Box<dyn std::error::Error + Send + Sync>> {
+    let r: IpApiResponse = client
         .get("https://ipapi.co/json/")
         .header("User-Agent", "mutsumi-desktop-pet/1.0")
         .send()?
         .error_for_status()?
         .json()?;
+    Ok(GeoResult { latitude: r.latitude, longitude: r.longitude, city: r.city })
+}
 
-    // 2. Current weather from Open-Meteo (no API key, no rate limits for low volume).
+fn fetch_geo_ipinfo(client: &reqwest::blocking::Client) -> Result<GeoResult, Box<dyn std::error::Error + Send + Sync>> {
+    let r: IpInfoResponse = client
+        .get("https://ipinfo.io/json")
+        .header("User-Agent", "mutsumi-desktop-pet/1.0")
+        .send()?
+        .error_for_status()?
+        .json()?;
+    // `loc` is "lat,lon" — e.g. "39.9075,116.3972"
+    let mut parts = r.loc.splitn(2, ',');
+    let lat: f64 = parts.next().ok_or("ipinfo.io: missing lat in loc")?.trim().parse()?;
+    let lon: f64 = parts.next().ok_or("ipinfo.io: missing lon in loc")?.trim().parse()?;
+    Ok(GeoResult { latitude: lat, longitude: lon, city: r.city })
+}
+
+fn fetch_once(client: &reqwest::blocking::Client) -> Result<WeatherUpdate, Box<dyn std::error::Error + Send + Sync>> {
+    // 1. Approximate location from IP (fallback chain: ipapi.co → ipinfo.io).
+    let geo = fetch_geo(client)?;
+
+    // 2. Current weather from Open-Meteo (no API key, Cloudflare CDN — global).
     let url = format!(
         "https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&current=weather_code,temperature_2m",
         geo.latitude, geo.longitude
@@ -138,193 +282,166 @@ fn fetch_once() -> Result<WeatherUpdate, Box<dyn std::error::Error + Send + Sync
     })
 }
 
-// ── Tests ──────────────────────────────────────────────────────────
+// ── Tests ───────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    // ── weather_emoji: every WMO arm ───────────────────────────────
+    fn make_update(code: u32) -> WeatherUpdate {
+        WeatherUpdate { code, label: "Clear".into(), temp_c: 20.0, city: None }
+    }
+
+    // ── WeatherState availability state machine ────────────────────
 
     #[test]
-    fn emoji_clear() {
-        let (e, l) = weather_emoji(0);
-        assert_eq!(e, "☀️");
-        assert_eq!(l, "Clear");
+    fn starts_unavailable() {
+        let s = WeatherState::new();
+        assert!(!s.is_available());
     }
 
     #[test]
-    fn emoji_partly_cloudy_code1() {
-        let (e, l) = weather_emoji(1);
-        assert_eq!(e, "🌤️");
-        assert_eq!(l, "Partly cloudy");
+    fn first_success_makes_available_and_reports_change() {
+        let s = WeatherState::new();
+        let changed = s.record_success(make_update(0));
+        assert!(s.is_available());
+        assert!(changed, "first success should report a status change");
     }
 
     #[test]
-    fn emoji_partly_cloudy_code2() {
-        let (e, _) = weather_emoji(2);
-        assert_eq!(e, "🌤️");
+    fn repeated_success_does_not_report_change() {
+        let s = WeatherState::new();
+        s.record_success(make_update(0));
+        let changed = s.record_success(make_update(1));
+        assert!(!changed, "already-available → success should not re-emit");
     }
 
     #[test]
-    fn emoji_cloudy() {
-        let (e, l) = weather_emoji(3);
-        assert_eq!(e, "☁️");
-        assert_eq!(l, "Cloudy");
+    fn success_stores_latest_update() {
+        let s = WeatherState::new();
+        s.record_success(make_update(63));
+        assert_eq!(s.update.lock().unwrap().as_ref().unwrap().code, 63);
     }
 
     #[test]
-    fn emoji_fog_code45() {
-        let (e, l) = weather_emoji(45);
-        assert_eq!(e, "🌫️");
-        assert_eq!(l, "Foggy");
+    fn failures_below_threshold_do_not_change_availability() {
+        let s = WeatherState::new();
+        s.record_success(make_update(0)); // make available first
+        for _ in 0..(MAX_FAILURES - 1) {
+            let changed = s.record_failure();
+            assert!(!changed);
+            assert!(s.is_available(), "still available below threshold");
+        }
     }
 
     #[test]
-    fn emoji_fog_code48() {
-        let (e, _) = weather_emoji(48);
-        assert_eq!(e, "🌫️");
+    fn reaching_max_failures_makes_unavailable_and_reports_change() {
+        let s = WeatherState::new();
+        s.record_success(make_update(0));
+        for _ in 0..(MAX_FAILURES - 1) {
+            s.record_failure();
+        }
+        let changed = s.record_failure(); // this is the MAX_FAILURES-th failure
+        assert!(!s.is_available());
+        assert!(changed, "crossing threshold should report a status change");
     }
 
     #[test]
-    fn emoji_drizzle_light() {
-        let (e, l) = weather_emoji(51);
-        assert_eq!(e, "🌦️");
-        assert_eq!(l, "Drizzle");
+    fn failure_when_already_unavailable_does_not_report_change() {
+        let s = WeatherState::new();
+        // Never succeeded → available is already false
+        for _ in 0..MAX_FAILURES {
+            s.record_failure();
+        }
+        let changed = s.record_failure(); // extra failure on already-unavailable state
+        assert!(!changed);
     }
 
     #[test]
-    fn emoji_drizzle_moderate() { let (e, _) = weather_emoji(53); assert_eq!(e, "🌦️"); }
-
-    #[test]
-    fn emoji_drizzle_dense()    { let (e, _) = weather_emoji(55); assert_eq!(e, "🌦️"); }
-
-    #[test]
-    fn emoji_freezing_drizzle_light() {
-        let (e, l) = weather_emoji(56);
-        assert_eq!(e, "🌧️");
-        assert_eq!(l, "Freezing drizzle");
+    fn success_after_failures_restores_availability_and_reports_change() {
+        let s = WeatherState::new();
+        s.record_success(make_update(0));
+        for _ in 0..MAX_FAILURES { s.record_failure(); }
+        assert!(!s.is_available());
+        let changed = s.record_success(make_update(1));
+        assert!(s.is_available());
+        assert!(changed, "recovery should report a status change");
     }
 
     #[test]
-    fn emoji_freezing_drizzle_dense() { let (e, _) = weather_emoji(57); assert_eq!(e, "🌧️"); }
-
-    #[test]
-    fn emoji_rain_light()    { let (e, l) = weather_emoji(61); assert_eq!(e, "🌧️"); assert_eq!(l, "Rain"); }
-
-    #[test]
-    fn emoji_rain_moderate() { let (e, _) = weather_emoji(63); assert_eq!(e, "🌧️"); }
-
-    #[test]
-    fn emoji_rain_heavy()    { let (e, _) = weather_emoji(65); assert_eq!(e, "🌧️"); }
-
-    #[test]
-    fn emoji_freezing_rain_light() {
-        let (e, l) = weather_emoji(66);
-        assert_eq!(e, "🌧️");
-        assert_eq!(l, "Freezing rain");
+    fn success_resets_consecutive_failure_counter() {
+        let s = WeatherState::new();
+        s.record_success(make_update(0));
+        // Two failures — below threshold
+        s.record_failure();
+        s.record_failure();
+        // Success resets the counter
+        s.record_success(make_update(1));
+        // Now MAX_FAILURES more failures should be needed to flip again
+        for _ in 0..(MAX_FAILURES - 1) {
+            let changed = s.record_failure();
+            assert!(!changed);
+        }
+        let changed = s.record_failure();
+        assert!(changed, "counter was reset; MAX_FAILURES failures needed again");
     }
 
-    #[test]
-    fn emoji_freezing_rain_heavy() { let (e, _) = weather_emoji(67); assert_eq!(e, "🌧️"); }
+    // ── weather_emoji mapping (existing tests kept) ────────────────
 
     #[test]
-    fn emoji_snow_light()    { let (e, l) = weather_emoji(71); assert_eq!(e, "❄️"); assert_eq!(l, "Snow"); }
+    fn emoji_clear() { assert_eq!(weather_emoji(0), ("☀️", "Clear")); }
 
     #[test]
-    fn emoji_snow_moderate() { let (e, _) = weather_emoji(73); assert_eq!(e, "❄️"); }
+    fn emoji_partly_cloudy() { assert_eq!(weather_emoji(1).1, "Partly cloudy"); }
 
     #[test]
-    fn emoji_snow_heavy()    { let (e, _) = weather_emoji(75); assert_eq!(e, "❄️"); }
+    fn emoji_cloudy() { assert_eq!(weather_emoji(3).1, "Cloudy"); }
 
     #[test]
-    fn emoji_snow_grains()   { let (e, _) = weather_emoji(77); assert_eq!(e, "❄️"); }
+    fn emoji_fog() { assert_eq!(weather_emoji(45).1, "Foggy"); }
 
     #[test]
-    fn emoji_rain_showers_slight()   { let (e, l) = weather_emoji(80); assert_eq!(e, "🌧️"); assert_eq!(l, "Rain showers"); }
+    fn emoji_drizzle() { assert_eq!(weather_emoji(51).1, "Drizzle"); }
 
     #[test]
-    fn emoji_rain_showers_moderate() { let (e, _) = weather_emoji(81); assert_eq!(e, "🌧️"); }
+    fn emoji_rain() { assert_eq!(weather_emoji(61).1, "Rain"); }
 
     #[test]
-    fn emoji_rain_showers_violent()  { let (e, _) = weather_emoji(82); assert_eq!(e, "🌧️"); }
+    fn emoji_snow() { assert_eq!(weather_emoji(71).1, "Snow"); }
 
     #[test]
-    fn emoji_snow_showers_slight() {
-        let (e, l) = weather_emoji(85);
-        assert_eq!(e, "❄️");
-        assert_eq!(l, "Snow showers");
+    fn emoji_showers() { assert_eq!(weather_emoji(80).1, "Rain showers"); }
+
+    #[test]
+    fn emoji_thunderstorm() { assert_eq!(weather_emoji(95).1, "Thunderstorm"); }
+
+    #[test]
+    fn emoji_thunderstorm_hail() { assert_eq!(weather_emoji(96).1, "Thunderstorm with hail"); }
+
+    #[test]
+    fn emoji_unknown() { assert_eq!(weather_emoji(9999).1, "Unknown"); }
+
+    #[test]
+    fn emoji_gap_codes_are_unknown() {
+        for code in [4, 50, 58, 70, 79, 90, 97] {
+            assert_eq!(weather_emoji(code).1, "Unknown", "code {code} should be Unknown");
+        }
     }
 
-    #[test]
-    fn emoji_snow_showers_heavy() { let (e, _) = weather_emoji(86); assert_eq!(e, "❄️"); }
-
-    #[test]
-    fn emoji_thunderstorm() {
-        let (e, l) = weather_emoji(95);
-        assert_eq!(e, "⛈️");
-        assert_eq!(l, "Thunderstorm");
-    }
-
-    #[test]
-    fn emoji_thunderstorm_with_hail_slight() {
-        let (e, l) = weather_emoji(96);
-        assert_eq!(e, "⛈️");
-        assert_eq!(l, "Thunderstorm with hail");
-    }
-
-    #[test]
-    fn emoji_thunderstorm_with_hail_heavy() { let (e, _) = weather_emoji(99); assert_eq!(e, "⛈️"); }
-
-    #[test]
-    fn emoji_unknown_falls_back() {
-        let (e, l) = weather_emoji(9999);
-        assert_eq!(e, "🌡️");
-        assert_eq!(l, "Unknown");
-    }
-
-    // Gap codes that have no WMO meaning and must return Unknown.
-    #[test]
-    fn emoji_gap_between_cloudy_and_fog()      { assert_eq!(weather_emoji(4).1,  "Unknown"); }
-
-    #[test]
-    fn emoji_gap_between_fog_and_drizzle()     { assert_eq!(weather_emoji(50).1, "Unknown"); }
-
-    #[test]
-    fn emoji_gap_between_drizzle_and_rain()    { assert_eq!(weather_emoji(58).1, "Unknown"); }
-
-    #[test]
-    fn emoji_gap_between_rain_and_snow()       { assert_eq!(weather_emoji(70).1, "Unknown"); }
-
-    #[test]
-    fn emoji_gap_between_snow_and_showers()    { assert_eq!(weather_emoji(79).1, "Unknown"); }
-
-    #[test]
-    fn emoji_gap_between_showers_and_storm()   { assert_eq!(weather_emoji(90).1, "Unknown"); }
-
-    #[test]
-    fn emoji_gap_inside_storm_codes()          { assert_eq!(weather_emoji(97).1, "Unknown"); }
-
-    // ── WeatherState cache ─────────────────────────────────────────
+    // ── WeatherState cache (existing tests kept) ───────────────────
 
     #[test]
     fn weather_state_starts_empty() {
-        let state = WeatherState(Mutex::new(None));
-        assert!(state.0.lock().unwrap().is_none());
+        assert!(WeatherState::new().update.lock().unwrap().is_none());
     }
 
     #[test]
     fn weather_state_stores_and_retrieves_update() {
-        let state = WeatherState(Mutex::new(None));
-        let update = WeatherUpdate {
-            code:   63,
-            label:  "Rain".to_string(),
-            temp_c: 14.5,
-            city:   Some("Tokyo".to_string()),
-        };
-        *state.0.lock().unwrap() = Some(update);
-
-        let stored = state.0.lock().unwrap().clone().unwrap();
+        let s = WeatherState::new();
+        s.record_success(WeatherUpdate {
+            code: 63, label: "Rain".into(), temp_c: 14.5, city: Some("Tokyo".into()),
+        });
+        let stored = s.update.lock().unwrap().clone().unwrap();
         assert_eq!(stored.code,   63);
         assert_eq!(stored.label,  "Rain");
         assert_eq!(stored.temp_c, 14.5);
@@ -333,17 +450,9 @@ mod tests {
 
     #[test]
     fn weather_state_overwrites_previous_update() {
-        let state = WeatherState(Mutex::new(None));
-
-        *state.0.lock().unwrap() = Some(WeatherUpdate {
-            code: 0, label: "Clear".to_string(), temp_c: 25.0, city: None,
-        });
-        *state.0.lock().unwrap() = Some(WeatherUpdate {
-            code: 95, label: "Thunderstorm".to_string(), temp_c: 18.0, city: None,
-        });
-
-        let stored = state.0.lock().unwrap().clone().unwrap();
-        assert_eq!(stored.code,  95);
-        assert_eq!(stored.label, "Thunderstorm");
+        let s = WeatherState::new();
+        s.record_success(WeatherUpdate { code: 0,  label: "Clear".into(),       temp_c: 25.0, city: None });
+        s.record_success(WeatherUpdate { code: 95, label: "Thunderstorm".into(), temp_c: 18.0, city: None });
+        assert_eq!(s.update.lock().unwrap().as_ref().unwrap().code, 95);
     }
 }

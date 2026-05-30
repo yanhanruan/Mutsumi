@@ -11,14 +11,14 @@ mod tray;
 mod weather;
 
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use app_state::SharedState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   let shared = SharedState::new();
-  let weather_state = weather::WeatherState(Mutex::new(None));
+  let weather_state = weather::WeatherState::new();
   let audio_state   = audio::AudioState(AtomicBool::new(false));
 
   tauri::Builder::default()
@@ -40,6 +40,7 @@ pub fn run() {
       app_state::pom_stop,
       app_state::pom_set_durations,
       weather::get_weather,
+      weather::get_weather_status,
       audio::get_audio_state,
       app_state::set_tray_locale,
     ])

@@ -14,8 +14,8 @@
       {
         "label": "main",
         "title": "Mutsumi",
-        "width": 200,
-        "height": 340,
+        "width": 170,
+        "height": 289,
         "resizable": false,
         "fullscreen": false,
         "decorations": false,

@@ -61,10 +61,10 @@ function mountComposable(setIdleVariant: (name: AnimationName) => void) {
 // Captures the listener callback registered by listen('pet-state-update', cb)
 function captureListener(): (payload: PetStatusSnapshot) => void {
   const call = (mockListen as Mock).mock.calls.find(
-    ([event]: [string]) => event === 'pet-state-update',
+    (args: unknown[]) => args[0] === 'pet-state-update',
   )
   expect(call).toBeDefined()
-  return (payload: PetStatusSnapshot) => call[1]({ payload })
+  return (payload: PetStatusSnapshot) => call![1]({ payload })
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────
@@ -214,7 +214,7 @@ describe('usePetStatus', () => {
     const { wrapper } = mountComposable(setIdleVariant)
     await flushPromises()
     const petStateListeners = (mockListen as Mock).mock.calls.filter(
-      ([event]: [string]) => event === 'pet-state-update',
+      (args: unknown[]) => args[0] === 'pet-state-update',
     )
     expect(petStateListeners).toHaveLength(1)
     wrapper.unmount()

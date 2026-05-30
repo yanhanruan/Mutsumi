@@ -111,7 +111,7 @@ describe('useAppConfig', () => {
   it('updateConfig persists to localStorage', async () => {
     const { updateConfig } = useAppConfig()
     await updateConfig({ characterSize: 'medium' })
-    const stored = JSON.parse(localStorageMock.getItem('mutsumi_app_config') ?? '{}')
+    const stored = JSON.parse(localStorageMock.getItem('mutsumi_app_config_v2') ?? '{}')
     expect(stored.characterSize).toBe('medium')
   })
 
