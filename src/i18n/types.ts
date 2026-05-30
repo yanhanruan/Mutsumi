@@ -39,9 +39,6 @@ export interface Translations {
   pomFocus:  string
   pomBreak:  string
 
-  // ── Pet click reactions ─────────────────────────────────────────
-  clickPhrases: readonly string[]
-
   // ── Context-menu action labels ──────────────────────────────────
   contextMenuItems: {
     pat_head:      string

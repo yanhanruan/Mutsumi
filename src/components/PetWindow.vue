@@ -16,6 +16,7 @@ import { useAudioReaction } from '../composables/useAudioReaction'
 import { useHitTest } from '../composables/useHitTest'
 import { usePetStatus } from '../composables/usePetStatus'
 import { useI18n } from '../i18n'
+import { MUTSUMI_ALL_QUOTES } from '../data/mutsumiQuotes'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { LogicalSize } from '@tauri-apps/api/dpi'
 import { invoke } from '@tauri-apps/api/core'
@@ -47,7 +48,7 @@ useHitTest(getCurrentImage)
 // Animations during which click animation is suppressed (bubble still shows).
 const MUSIC_MODE = new Set(['headphones_on', 'headphones_off', 'music1', 'music2', 'music3', 'music4'])
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const { config } = useAppConfig()
 const { weatherAvailable } = useWeatherAvailable()
 
@@ -109,9 +110,8 @@ function onMouseUp(e: MouseEvent) {
       setAnim('click')   // immediate switch — no pending-anim delay
     }
     void invoke('pet_click')
-    const phrases = t.value.clickPhrases
-    const phrase = phrases[Math.floor(Math.random() * phrases.length)]
-    bubbleRef.value?.show(phrase)
+    const quote = MUTSUMI_ALL_QUOTES[Math.floor(Math.random() * MUTSUMI_ALL_QUOTES.length)]
+    bubbleRef.value?.show(quote[locale.value])
   }
   pressed = false
   didDrag = false

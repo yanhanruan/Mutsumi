@@ -34,15 +34,6 @@ export const en: Translations = {
   pomFocus: 'Focus',
   pomBreak: 'Break',
 
-  // ── Click reactions ───────────────────────────────────────────────
-  clickPhrases: [
-    "I'm not a toy, you know!",
-    'Ahh~ be gentle!',
-    'What do you want~?',
-    'Eek! That tickles!',
-    'H-Hey! Stop that!',
-  ],
-
   // ── Context-menu action labels ────────────────────────────────────
   contextMenuItems: {
     pat_head:      'Pat Head',

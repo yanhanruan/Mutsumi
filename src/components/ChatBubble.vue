@@ -71,6 +71,7 @@ defineExpose({ show, hide })
   text-align: center;
   user-select: none;
   pointer-events: none;
+  z-index: 2;
 }
 .text {
   font-family: system-ui, "Segoe UI", "Noto Sans SC", "Noto Sans JP", sans-serif;

@@ -34,15 +34,6 @@ export const ja: Translations = {
   pomFocus: '集中',
   pomBreak: '休憩',
 
-  // ── Click reactions ───────────────────────────────────────────────
-  clickPhrases: [
-    'おもちゃじゃないんだから！',
-    'あっ〜やさしくして！',
-    'なに、なに〜？',
-    'ひゃ！くすぐったい！',
-    'ちょっと！やめてよ！',
-  ],
-
   // ── Context-menu action labels ────────────────────────────────────
   contextMenuItems: {
     pat_head:      'なでなで',

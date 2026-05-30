@@ -34,15 +34,6 @@ export const zh: Translations = {
   pomFocus: '专注',
   pomBreak: '休息',
 
-  // ── Click reactions ───────────────────────────────────────────────
-  clickPhrases: [
-    '我不是玩具哦！',
-    '啊~轻点嘛！',
-    '你想要什么呀~？',
-    '哎！好痒！',
-    '喂喂！别这样！',
-  ],
-
   // ── Context-menu action labels ────────────────────────────────────
   contextMenuItems: {
     pat_head:      '摸头',
