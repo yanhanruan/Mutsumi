@@ -40,6 +40,7 @@ export type AnimationName =
   | 'idle_low_affection' // low affection only
   | 'idle_exhausted'     // both low
   | 'click'
+  | 'pat_head'
   | 'headphones_on'
   | 'headphones_off'
   | 'music1'
@@ -115,6 +116,7 @@ export const DEFAULT_ANIMATIONS: Record<AnimationName, AnimationDef> = {
   idle_exhausted:     { dir: 'idle',           count: 419, fps: 24, loop: true  },
   // ─────────────────────────────────────────────────────────────────────
   click:               { dir: 'click_matched',  count: 156, fps: 24, loop: false },
+  pat_head:            { dir: 'pat_head',       count: 192, fps: 24, loop: false },
   headphones_on:       { dir: 'headphones_on',  count: 185, fps: 24, loop: false },
   headphones_off:      { dir: 'headphones_off', count: 185, fps: 24, loop: false },
   music1:              { dir: 'music1',         count: 185, fps: 24, loop: true  },

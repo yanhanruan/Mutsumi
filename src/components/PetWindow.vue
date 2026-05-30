@@ -47,8 +47,14 @@ usePetStatus(setIdleVariant)
 // through to whatever is behind the window.
 useHitTest(getCurrentImage)
 
-// Animations during which click animation is suppressed (bubble still shows).
-const MUSIC_MODE = new Set(['headphones_on', 'headphones_off', 'music1', 'music2', 'music3', 'music4'])
+// Animations that must not be interrupted by a click (bubble still shows).
+// pat_head: mid-animation abort would look jarring.
+// Music chain: interrupting headphones/music breaks the hardwired sequence.
+const NO_CLICK_INTERRUPT = new Set([
+  'pat_head',
+  'headphones_on', 'headphones_off',
+  'music1', 'music2', 'music3', 'music4',
+])
 
 const { t, locale } = useI18n()
 const { config } = useAppConfig()
@@ -108,7 +114,7 @@ function onMouseUp(e: MouseEvent) {
     // True click — no movement.
     // Suppress the click animation while in music mode so it doesn't
     // interrupt headphones/music playback. The bubble still shows.
-    if (!MUSIC_MODE.has(currentName.value)) {
+    if (!NO_CLICK_INTERRUPT.has(currentName.value)) {
       setAnim('click')   // immediate switch — no pending-anim delay
     }
     void invoke('pet_click')
@@ -131,6 +137,10 @@ async function onContextAction(action: MenuAction) {
   if (action === 'hide') {
     await getCurrentWindow().hide()
     return
+  }
+  // Play the pat_head animation immediately (like click — no pending delay).
+  if (action === 'pat_head') {
+    setAnim('pat_head')
   }
   await invoke('pet_context_action', { action })
   bubbleRef.value?.show(t.value.contextResponses[action as ContextActionKey])
