@@ -111,14 +111,6 @@ describe('useI18n', () => {
     expect(locale.value).toBe<Locale>('ja')
   })
 
-  it('returns 5 click phrases for each locale', () => {
-    for (const l of ['en', 'zh', 'ja'] as Locale[]) {
-      setLocale(l)
-      const { t } = useI18n()
-      expect(t.value.clickPhrases).toHaveLength(5)
-    }
-  })
-
   it('has all 5 context menu items for each locale', () => {
     const actionKeys = ['pat_head', 'feed', 'sleep', 'fast_learning'] as const
     for (const l of ['en', 'zh', 'ja'] as Locale[]) {

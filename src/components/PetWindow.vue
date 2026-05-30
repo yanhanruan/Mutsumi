@@ -11,7 +11,7 @@
  *   entire window.
  */
 import { ref, onMounted, onUnmounted, watch } from 'vue'
-import { useAnimator } from '../composables/useAnimator'
+import { useAnimator, DEFAULT_ANIMATIONS } from '../composables/useAnimator'
 import { useAudioReaction } from '../composables/useAudioReaction'
 import { useHitTest } from '../composables/useHitTest'
 import { usePetStatus } from '../composables/usePetStatus'
@@ -29,16 +29,18 @@ import WeatherBadge from './WeatherBadge.vue'
 import BalloonPet from './BalloonPet.vue'
 import ContextMenu, { type MenuAction, type ContextActionKey } from './ContextMenu.vue'
 
+const imgRef = ref<HTMLImageElement | null>(null)
+
 const {
-  currentSrc,
   currentName,
+  ready,
   queueAnim,
   setAnim,
   getPending,
   cancelPending,
   getCurrentImage,
   setIdleVariant,
-} = useAnimator()
+} = useAnimator(DEFAULT_ANIMATIONS, imgRef)
 useAudioReaction(queueAnim, currentName, getPending, cancelPending)
 usePetStatus(setIdleVariant)
 // Per-pixel click-through: transparent regions of the pet pass clicks
@@ -158,7 +160,7 @@ onUnmounted(() => {
     @mouseup="onMouseUp"
     @contextmenu="onContextMenu"
   >
-    <img v-if="currentSrc" :src="currentSrc" class="frame" draggable="false" />
+    <img v-show="ready" ref="imgRef" class="frame" draggable="false" />
     <PomodoroBadge />
     <WeatherBadge v-if="config.showWeather && weatherAvailable !== false" />
     <div class="bubble-anchor">

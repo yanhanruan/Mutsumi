@@ -9,8 +9,12 @@
  *
  * Timing uses a locked-step clock with a 2× lag clamp, the same pattern that
  * fixed the smoothness/catch-up issues in the Python original.
+ *
+ * Rendering writes directly to the <img> element's .src property via an
+ * optional imgRef parameter — bypasses Vue's reactive proxy on the hot path
+ * so the scheduler never runs on a frame advance.
  */
-import { onMounted, onUnmounted, ref, shallowRef } from 'vue'
+import { onMounted, onUnmounted, ref, shallowRef, type Ref } from 'vue'
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -113,7 +117,7 @@ export const DEFAULT_ANIMATIONS: Record<AnimationName, AnimationDef> = {
   click:               { dir: 'click_matched',  count: 156, fps: 24, loop: false },
   headphones_on:       { dir: 'headphones_on',  count: 185, fps: 24, loop: false },
   headphones_off:      { dir: 'headphones_off', count: 185, fps: 24, loop: false },
-  music1:              { dir: 'music1/temp',         count: 185, fps: 24, loop: true  },
+  music1:              { dir: 'music1',         count: 185, fps: 24, loop: true  },
   music2:              { dir: 'music2',         count: 185, fps: 24, loop: false,
                          buildSequence: f => buildPingPongSequence(f,  81, 104, odd(31)) },
   music3:              { dir: 'music3',         count: 330, fps: 18, loop: true  },
@@ -123,23 +127,38 @@ export const DEFAULT_ANIMATIONS: Record<AnimationName, AnimationDef> = {
 
 // ── Composable ─────────────────────────────────────────────────────
 
-export function useAnimator(registry: Record<AnimationName, AnimationDef> = DEFAULT_ANIMATIONS) {
+/**
+ * @param registry  Animation definitions (defaults to DEFAULT_ANIMATIONS).
+ * @param imgRef    Optional ref to the <img> element. When provided, frame
+ *                  advances are applied as direct `.src` writes — bypassing
+ *                  Vue's reactive scheduler entirely on the 60 Hz hot path.
+ */
+export function useAnimator(
+  registry: Record<AnimationName, AnimationDef> = DEFAULT_ANIMATIONS,
+  imgRef?:  Ref<HTMLImageElement | null>,
+) {
   // Loaded animations populated by preload(); kept in a shallowRef so Vue
   // doesn't try to deeply proxy the image arrays.
   const loaded = shallowRef<Partial<Record<AnimationName, LoadedAnimation>>>({})
 
   // Current state
-  const currentName  = ref<AnimationName>('idle')
-  const currentSrc   = ref<string>('')
-  const ready        = ref(false)
+  const currentName = ref<AnimationName>('idle')
+  const ready       = ref(false)
 
   // Internal state (not reactive — touched 60+ times/sec)
-  let frameIx      = 0
+  let frameIx     = 0
   let pendingAnim: AnimationName | null = null
-  let lastFrameT   = 0
-  let rafId        = 0
+  let lastFrameT  = 0
+  let rafId       = 0
   // Which idle-variant to play. Updated by setIdleVariant() from pet-status events.
   let idleAnimName: AnimationName = 'idle'
+
+  // ── Direct DOM paint (hot path) ────────────────────────────────
+  // Writing .src directly on the element is invisible to Vue's scheduler —
+  // no proxy trap, no dependency tracking, no queued re-render.
+  function paintFrame(img: HTMLImageElement): void {
+    if (imgRef?.value) imgRef.value.src = img.src
+  }
 
   // ── Preload ────────────────────────────────────────────────────
   function preloadAnim(def: AnimationDef): Promise<HTMLImageElement[]> {
@@ -161,22 +180,38 @@ export function useAnimator(registry: Record<AnimationName, AnimationDef> = DEFA
 
   async function preloadAll(): Promise<void> {
     const entries = Object.entries(registry) as [AnimationName, AnimationDef][]
-    // Preload idle first so we can start showing it before the rest finishes.
     const idleDef = registry.idle
-    const idleFrames = await preloadAnim(idleDef)
-    loaded.value = { ...loaded.value, idle: { frames: idleFrames, fps: idleDef.fps, loop: idleDef.loop } }
-    currentSrc.value = idleFrames[0].src
-    ready.value = true
 
-    // Preload the rest in parallel.
-    await Promise.all(
-      entries
+    // ── Step 1: show the very first frame as soon as it has loaded ────────
+    // Load frame_001 alone so the pet appears immediately instead of waiting
+    // for all 234 idle frames to download.
+    const firstFrame = new Image()
+    firstFrame.src = `/assets/${idleDef.dir}/frame_001.webp`
+    await new Promise<void>(res => {
+      firstFrame.onload  = () => res()
+      firstFrame.onerror = () => res()
+    })
+    // Seed the idle animation with a single-frame array so the RAF loop can
+    // start. `ready` gates the <img v-show> — set it true then paint directly
+    // (imgRef.value is always available with v-show; no nextTick needed).
+    loaded.value = { idle: { frames: [firstFrame], fps: idleDef.fps, loop: idleDef.loop } }
+    ready.value = true
+    paintFrame(firstFrame)
+
+    // ── Step 2: load all remaining frames concurrently ────────────────────
+    await Promise.all([
+      // Full idle array — overwrites the single-frame seed when complete.
+      preloadAnim(idleDef).then(frames => {
+        loaded.value = { ...loaded.value, idle: { frames, fps: idleDef.fps, loop: idleDef.loop } }
+      }),
+      // All other animations.
+      ...entries
         .filter(([name]) => name !== 'idle')
         .map(async ([name, def]) => {
           const frames = await preloadAnim(def)
           loaded.value = { ...loaded.value, [name]: { frames, fps: def.fps, loop: def.loop } }
-        })
-    )
+        }),
+    ])
   }
 
   // ── State machine ─────────────────────────────────────────────
@@ -185,8 +220,8 @@ export function useAnimator(registry: Record<AnimationName, AnimationDef> = DEFA
     if (!def) return                 // not loaded yet — silently ignore
     currentName.value = name
     frameIx = 0
-    currentSrc.value = def.frames[0].src
     lastFrameT = performance.now()
+    paintFrame(def.frames[0])        // direct DOM write — no reactive overhead
   }
 
   /**
@@ -276,18 +311,14 @@ export function useAnimator(registry: Record<AnimationName, AnimationDef> = DEFA
       const nxt = nextAnimAfterEnd()
       setAnim(nxt)
     } else {
-      const next = def.frames[frameIx]
-      // Same-pixmap guard equivalent: only update src if the image object
-      // actually differs (currently never triggers since indexes are
-      // unique, but enables future hold-frame patterns).
-      if (next.src !== currentSrc.value) currentSrc.value = next.src
+      paintFrame(def.frames[frameIx])  // direct DOM write, no Vue overhead
     }
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────
   onMounted(async () => {
     await preloadAll()
-    setAnim('music1')
+    setAnim('idle')
     rafId = requestAnimationFrame(tick)
   })
 
@@ -297,7 +328,6 @@ export function useAnimator(registry: Record<AnimationName, AnimationDef> = DEFA
 
   return {
     currentName,
-    currentSrc,
     ready,
     queueAnim,
     setAnim,

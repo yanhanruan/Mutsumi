@@ -94,6 +94,9 @@ export function useHitTest(getCurrentImage: () => HTMLImageElement | null) {
   let unlisten: UnlistenFn | null = null
   let ignoring = false       // current setIgnoreCursorEvents state
   let resizeTimer: number | null = null
+  // Cache: skip the canvas redraw + getImageData readback when the
+  // animation frame hasn't changed since the last cursor event.
+  let lastDrawnImg: HTMLImageElement | null = null
 
   function syncCanvasSize() {
     const w = window.innerWidth
@@ -101,12 +104,15 @@ export function useHitTest(getCurrentImage: () => HTMLImageElement | null) {
     if (canvas.width !== w || canvas.height !== h) {
       canvas.width  = w
       canvas.height = h
+      lastDrawnImg  = null  // invalidate cache — pixel layout changed
     }
   }
 
   function redrawCurrentFrame() {
     const img = getCurrentImage()
     if (!img || !img.complete || img.naturalWidth === 0) return
+    // Same frame as last time — skip the canvas clear+draw and GPU readback.
+    if (img === lastDrawnImg) return
     syncCanvasSize()
 
     const { dx, dy, dw, dh } = computeContainPlacement(
@@ -115,6 +121,7 @@ export function useHitTest(getCurrentImage: () => HTMLImageElement | null) {
     )
     ctx.clearRect(0, 0, canvas.width, canvas.height)
     ctx.drawImage(img, dx, dy, dw, dh)
+    lastDrawnImg = img  // mark this frame as cached
   }
 
   async function setIgnore(ignore: boolean) {
