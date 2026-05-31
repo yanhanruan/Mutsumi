@@ -1,8 +1,7 @@
 <p align="center">
-  <img src="app-icon-cucumber-puppy-transparent.png" alt="Mutsumi Logo" width="120" />
+  <img src="app-icon-cucumber-puppy-transparent-compress.png" alt="Mutsumi Logo" width="120" />
   <!-- 建议这里放一张角色的透明底头像 -->
 </p>
-
 
 <h1 align="center">Mutsumi (睦) — Desktop Companion</h1>
 

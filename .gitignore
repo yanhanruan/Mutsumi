@@ -30,8 +30,9 @@ Thumbs.db
 # Claude Code local config
 .claude/
 
-# Raw input frames and intermediate PNGs (not needed after WebP conversion)
+# Raw input frames and intermediate PNGs (exclude the logo image)
 *.png
+!app-icon-cucumber-puppy-transparent-compress.png
 frames_raw/**/*
 !frames_raw/**/
 !frames_raw/**/.gitkeep
