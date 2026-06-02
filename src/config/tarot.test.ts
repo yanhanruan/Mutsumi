@@ -1,44 +1,56 @@
 /**
  * tarot config — table integrity tests.
  *
- * The card data is the feature's single source of truth, so guard its shape:
- *   - exactly 22 Major Arcana
- *   - ids are the complete 0–21 set, unique
- *   - every card has a non-empty name and fortune text
+ * Guards:
+ *   - exactly 78 cards (full deck: 22 Major + 56 Minor Arcana)
+ *   - ids are the complete unique 0–77 set
+ *   - every card has a name + upright + reversed, each populated in en/zh/ja
+ *   - all 78 EN names are distinct; all 156 EN interpretations are distinct
  *   - hue is a valid 0–360 degree
  */
 import { describe, it, expect } from 'vitest'
-import { MAJOR_ARCANA, TAROT_TIMINGS } from './tarot'
+import { TAROT_DECK, TAROT_TIMINGS, type LocalizedText } from './tarot'
 
-describe('MAJOR_ARCANA', () => {
-  it('contains exactly 22 cards', () => {
-    expect(MAJOR_ARCANA).toHaveLength(22)
+const LOCALES = ['en', 'zh', 'ja'] as const
+
+function allPopulated(txt: LocalizedText): boolean {
+  return LOCALES.every(l => typeof txt[l] === 'string' && txt[l].trim().length > 0)
+}
+
+describe('TAROT_DECK', () => {
+  it('contains exactly 78 cards', () => {
+    expect(TAROT_DECK).toHaveLength(78)
   })
 
-  it('ids are the complete unique 0–21 set', () => {
-    const ids = MAJOR_ARCANA.map(c => c.id).sort((a, b) => a - b)
-    expect(ids).toEqual(Array.from({ length: 22 }, (_, i) => i))
-    expect(new Set(ids).size).toBe(22)
+  it('ids are the complete unique 0–77 set', () => {
+    const ids = TAROT_DECK.map(c => c.id).sort((a, b) => a - b)
+    expect(ids).toEqual(Array.from({ length: 78 }, (_, i) => i))
+    expect(new Set(ids).size).toBe(78)
   })
 
-  it('every card has a non-empty name, upright text, and reversed text', () => {
-    for (const c of MAJOR_ARCANA) {
-      expect(c.card_name.trim().length).toBeGreaterThan(0)
-      expect(c.fortune_text.trim().length).toBeGreaterThan(0)
-      expect(c.reversed_text.trim().length).toBeGreaterThan(0)
+  it('every card has name + upright + reversed populated in all 3 locales', () => {
+    for (const c of TAROT_DECK) {
+      expect(allPopulated(c.card_name)).toBe(true)
+      expect(allPopulated(c.fortune_text)).toBe(true)
+      expect(allPopulated(c.reversed_text)).toBe(true)
     }
   })
 
-  it('all 44 interpretations are distinct (no accidental copy-paste)', () => {
+  it('all 78 English card names are distinct', () => {
+    const names = TAROT_DECK.map(c => c.card_name.en)
+    expect(new Set(names).size).toBe(78)
+  })
+
+  it('all 156 English interpretations are distinct (no copy-paste)', () => {
     const all = [
-      ...MAJOR_ARCANA.map(c => c.fortune_text),
-      ...MAJOR_ARCANA.map(c => c.reversed_text),
+      ...TAROT_DECK.map(c => c.fortune_text.en),
+      ...TAROT_DECK.map(c => c.reversed_text.en),
     ]
-    expect(new Set(all).size).toBe(44)
+    expect(new Set(all).size).toBe(156)
   })
 
   it('every card hue is within 0–360', () => {
-    for (const c of MAJOR_ARCANA) {
+    for (const c of TAROT_DECK) {
       expect(c.hue).toBeGreaterThanOrEqual(0)
       expect(c.hue).toBeLessThanOrEqual(360)
     }

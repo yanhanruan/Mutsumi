@@ -54,4 +54,14 @@ export const zh: Translations = {
 
   // ── Late-night reminder ───────────────────────────────────────────
   lateNightReminder: '都这么晚了，早点睡吧！',
+
+  // ── Tarot overlay UI chrome ───────────────────────────────────────
+  tarot: {
+    interpreting: '正在解读星象……',
+    hint:         '轻触卡牌，揭示你的运势。',
+    upright:      '正位',
+    reversed:     '逆位',
+    redraw:       '重抽',
+    close:        '关闭',
+  },
 }

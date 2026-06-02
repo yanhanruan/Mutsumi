@@ -54,4 +54,14 @@ export const en: Translations = {
 
   // ── Late-night reminder ───────────────────────────────────────────
   lateNightReminder: "You shouldn't stay up so late!",
+
+  // ── Tarot overlay UI chrome ───────────────────────────────────────
+  tarot: {
+    interpreting: 'Interpreting the stars…',
+    hint:         'Tap the card to reveal your fortune.',
+    upright:      'Upright',
+    reversed:     'Reversed',
+    redraw:       'Redraw',
+    close:        'Close',
+  },
 }

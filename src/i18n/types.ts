@@ -59,6 +59,17 @@ export interface Translations {
     fast_learning: string
   }
 
+  // ── Tarot overlay UI chrome ─────────────────────────────────────
+  // (Card names + interpretations are localized in src/config/tarot.ts.)
+  tarot: {
+    interpreting: string   // loading line while the reading "computes"
+    hint:         string   // prompt to tap the face-down card
+    upright:      string   // orientation badge
+    reversed:     string   // orientation badge
+    redraw:       string   // control button title
+    close:        string   // control button title
+  }
+
   // ── Late-night reminder ─────────────────────────────────────────
   lateNightReminder: string
 }

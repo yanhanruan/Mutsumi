@@ -21,15 +21,20 @@
  */
 import { ref, computed } from 'vue'
 import {
-  MAJOR_ARCANA, TAROT_ASSETS, TAROT_TIMINGS, type TarotCard,
+  TAROT_DECK, TAROT_ASSETS, TAROT_TIMINGS, type TarotCard, type LocalizedText,
 } from '../config/tarot'
+import { useI18n } from '../i18n'
 import { playDrawSound, playFlipSound } from '../composables/useTarotSound'
 
 const emit = defineEmits<{ close: [] }>()
 
+const { t, locale } = useI18n()
+/** Pick the active-locale string from a LocalizedText field. */
+const L = (txt: LocalizedText): string => txt[locale.value]
+
 // ── State ───────────────────────────────────────────────────────────────
 const visible    = ref(false)
-const card       = ref<TarotCard>(MAJOR_ARCANA[0])
+const card       = ref<TarotCard>(TAROT_DECK[0])
 const reversed   = ref(false)   // true = card drawn inverted (50 % chance)
 const flipped    = ref(false)
 const isFlipping = ref(false)
@@ -39,10 +44,12 @@ const drawKey    = ref(0)
 
 let loadingTimer: ReturnType<typeof setTimeout> | null = null
 
-// Active interpretation based on orientation.
+// Active interpretation: orientation × locale.
 const fortuneText = computed(() =>
-  reversed.value ? card.value.reversed_text : card.value.fortune_text,
+  L(reversed.value ? card.value.reversed_text : card.value.fortune_text),
 )
+// Localized card name for the active locale.
+const cardName = computed(() => L(card.value.card_name))
 
 // ── Card visuals (SVG image with gradient fallback) ─────────────────────
 function frontImage(c: TarotCard): string {
@@ -90,7 +97,7 @@ function spawnParticles(): void {
 
 // ── Draw / reset ────────────────────────────────────────────────────────
 function pickRandomCard(): TarotCard {
-  return MAJOR_ARCANA[Math.floor(Math.random() * MAJOR_ARCANA.length)]
+  return TAROT_DECK[Math.floor(Math.random() * TAROT_DECK.length)]
 }
 
 function resetToFaceDown(): void {
@@ -159,8 +166,8 @@ defineExpose({ open, dismiss })
     <div v-if="visible" class="tarot-overlay pet-ui-overlay" @click.self="requestClose">
       <!-- Controls -->
       <div class="tarot-controls">
-        <button class="ctrl" :disabled="isFlipping" title="Redraw" @click.stop="resetToFaceDown">↻</button>
-        <button class="ctrl" title="Close" @click.stop="requestClose">×</button>
+        <button class="ctrl" :disabled="isFlipping" :title="t.tarot.redraw" @click.stop="resetToFaceDown">↻</button>
+        <button class="ctrl" :title="t.tarot.close" @click.stop="requestClose">×</button>
       </div>
 
       <!-- Card stage (keyed → entrance animation replays on each draw) -->
@@ -194,18 +201,18 @@ defineExpose({ open, dismiss })
         <Transition name="tarot-fade" mode="out-in">
           <div v-if="loading" key="load" class="loading">
             <span class="dot" /><span class="dot" /><span class="dot" />
-            <span class="loading-text">Interpreting the stars…</span>
+            <span class="loading-text">{{ t.tarot.interpreting }}</span>
           </div>
           <div v-else-if="revealed" key="res" class="result">
             <div class="result-title">
-              {{ card.card_name }}
+              {{ cardName }}
               <span class="result-orientation" :class="reversed ? 'is-reversed' : 'is-upright'">
-                {{ reversed ? 'Reversed' : 'Upright' }}
+                {{ reversed ? t.tarot.reversed : t.tarot.upright }}
               </span>
             </div>
             <p class="result-text">{{ fortuneText }}</p>
           </div>
-          <div v-else key="hint" class="hint">Tap the card to reveal your fortune.</div>
+          <div v-else key="hint" class="hint">{{ t.tarot.hint }}</div>
         </Transition>
       </div>
     </div>

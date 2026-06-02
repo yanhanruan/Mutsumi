@@ -54,4 +54,14 @@ export const ja: Translations = {
 
   // ── Late-night reminder ───────────────────────────────────────────
   lateNightReminder: '夜更かしは健康によくない！',
+
+  // ── Tarot overlay UI chrome ───────────────────────────────────────
+  tarot: {
+    interpreting: '星を読み解いています…',
+    hint:         'カードをタップして運勢を表示。',
+    upright:      '正位置',
+    reversed:     '逆位置',
+    redraw:       '引き直す',
+    close:        '閉じる',
+  },
 }
