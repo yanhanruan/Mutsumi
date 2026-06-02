@@ -27,31 +27,40 @@ function getCtx(): AudioContext | null {
 }
 
 /**
- * Play a short sine beep as an audio placeholder.
- * @param freq    tone frequency in Hz
- * @param durMs   duration in milliseconds
+ * Schedule a single tone on the shared context.
+ * @param freqStart  starting frequency (Hz)
+ * @param atSec      offset from "now" to begin (s)
+ * @param durSec     tone duration (s)
+ * @param type       oscillator waveform
+ * @param peak       peak gain (0–1)
+ * @param freqEnd    optional end frequency for a glide (sweep)
  */
-function beep(freq: number, durMs: number): void {
-  const ctx = getCtx()
-  if (!ctx) return
-  // Resume if the context was suspended (common before the first gesture).
-  if (ctx.state === 'suspended') void ctx.resume()
-
+function tone(
+  ctx: AudioContext,
+  freqStart: number,
+  atSec: number,
+  durSec: number,
+  type: OscillatorType = 'sine',
+  peak = 0.16,
+  freqEnd?: number,
+): void {
   const osc  = ctx.createOscillator()
   const gain = ctx.createGain()
-  osc.type = 'sine'
-  osc.frequency.value = freq
+  osc.type = type
 
-  const now = ctx.currentTime
-  const dur = durMs / 1000
-  // Quick attack + exponential release so it sounds like a soft chime, not a click.
-  gain.gain.setValueAtTime(0.0001, now)
-  gain.gain.exponentialRampToValueAtTime(0.18, now + 0.01)
-  gain.gain.exponentialRampToValueAtTime(0.0001, now + dur)
+  const start = ctx.currentTime + atSec
+  osc.frequency.setValueAtTime(freqStart, start)
+  if (freqEnd !== undefined) {
+    osc.frequency.exponentialRampToValueAtTime(freqEnd, start + durSec)
+  }
+  // Soft attack + exponential release — chime-like, not a click.
+  gain.gain.setValueAtTime(0.0001, start)
+  gain.gain.exponentialRampToValueAtTime(peak, start + 0.012)
+  gain.gain.exponentialRampToValueAtTime(0.0001, start + durSec)
 
   osc.connect(gain).connect(ctx.destination)
-  osc.start(now)
-  osc.stop(now + dur)
+  osc.start(start)
+  osc.stop(start + durSec + 0.02)
 }
 
 /** Play a real audio file if a path is configured. Returns true if it tried. */
@@ -66,16 +75,27 @@ function playFile(path: string): boolean {
   }
 }
 
-/** Sound for drawing / dealing a new card. */
+/** Sound for drawing / dealing a new card — a soft ascending arpeggio. */
 export function playDrawSound(): void {
   console.log('[tarot] playDrawSound()')
   if (playFile(TAROT_ASSETS.audio.draw)) return
-  beep(523.25, 140) // C5
+  const ctx = getCtx()
+  if (!ctx) return
+  if (ctx.state === 'suspended') void ctx.resume()
+  // C5 → E5 → G5 plucks, lightly staggered like cards being dealt.
+  tone(ctx, 523.25, 0.00, 0.13, 'triangle', 0.13)
+  tone(ctx, 659.25, 0.06, 0.13, 'triangle', 0.13)
+  tone(ctx, 783.99, 0.12, 0.16, 'triangle', 0.15)
 }
 
-/** Sound for flipping a card face-up. */
+/** Sound for flipping a card face-up — a quick upward swish + chime. */
 export function playFlipSound(): void {
   console.log('[tarot] playFlipSound()')
   if (playFile(TAROT_ASSETS.audio.flip)) return
-  beep(783.99, 180) // G5
+  const ctx = getCtx()
+  if (!ctx) return
+  if (ctx.state === 'suspended') void ctx.resume()
+  // Rising swish (the flip) then a bright settle tone (the reveal).
+  tone(ctx, 420, 0.00, 0.18, 'sine', 0.12, 1100)
+  tone(ctx, 987.77, 0.16, 0.22, 'sine', 0.14) // B5 settle
 }

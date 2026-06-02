@@ -40,6 +40,7 @@ export const ja: Translations = {
     feed:          '抹茶パフェをあげる',
     sleep:         'おやすみ',
     fast_learning: '速習モード',
+    tarot:         'タロット占い',
     hide:          'アプリを隠す',
   },
 

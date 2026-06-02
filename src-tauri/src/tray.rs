@@ -23,7 +23,6 @@ struct TrayLabels {
     pom_start: &'static str,
     pom_pause: &'static str,
     pom_stop:  &'static str,
-    tarot:     &'static str,
     settings:  &'static str,
     quit:      &'static str,
 }
@@ -36,7 +35,6 @@ fn labels_for_locale(locale: &str) -> TrayLabels {
             pom_start: "番茄钟: 开始",
             pom_pause: "番茄钟: 暂停",
             pom_stop:  "番茄钟: 停止",
-            tarot:     "塔罗占卜…",
             settings:  "设置…",
             quit:      "退出",
         },
@@ -46,7 +44,6 @@ fn labels_for_locale(locale: &str) -> TrayLabels {
             pom_start: "ポモドーロ: 開始",
             pom_pause: "ポモドーロ: 一時停止",
             pom_stop:  "ポモドーロ: 停止",
-            tarot:     "タロット占い…",
             settings:  "設定…",
             quit:      "終了",
         },
@@ -56,7 +53,6 @@ fn labels_for_locale(locale: &str) -> TrayLabels {
             pom_start: "Pomodoro: Start",
             pom_pause: "Pomodoro: Pause",
             pom_stop:  "Pomodoro: Stop",
-            tarot:     "Tarot…",
             settings:  "Settings…",
             quit:      "Quit",
         },
@@ -76,7 +72,6 @@ fn build_tray_menu<R: Runtime>(
     let pom_pause     = MenuItem::with_id(app, "pom_pause", labels.pom_pause, true, None::<&str>)?;
     let pom_stop      = MenuItem::with_id(app, "pom_stop",  labels.pom_stop,  true, None::<&str>)?;
     let sep2          = PredefinedMenuItem::separator(app)?;
-    let tarot_item    = MenuItem::with_id(app, "tarot",     labels.tarot,     true, None::<&str>)?;
     let settings_item = MenuItem::with_id(app, "settings",  labels.settings,  true, None::<&str>)?;
     let sep3          = PredefinedMenuItem::separator(app)?;
     let quit_item     = MenuItem::with_id(app, "quit",      labels.quit,      true, None::<&str>)?;
@@ -88,7 +83,6 @@ fn build_tray_menu<R: Runtime>(
             &sep1,
             &pom_start, &pom_pause, &pom_stop,
             &sep2,
-            &tarot_item,
             &settings_item,
             &sep3,
             &quit_item,
@@ -133,28 +127,6 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
             "pom_stop" => {
                 let s: State<SharedState> = app.state();
                 s.0.lock().unwrap().pomodoro.stop();
-            }
-            "tarot" => {
-                // Show existing window or create on demand — never silently fails.
-                if let Some(w) = app.get_webview_window("tarot") {
-                    let _ = w.show();
-                    let _ = w.set_focus();
-                } else {
-                    let result = WebviewWindowBuilder::new(
-                        app,
-                        "tarot",
-                        WebviewUrl::App("index.html?window=tarot".into()),
-                    )
-                    .title("Mutsumi · Tarot")
-                    .inner_size(460.0, 640.0)
-                    .resizable(false)
-                    .center()
-                    .build();
-
-                    if let Ok(w) = result {
-                        let _ = w.set_focus();
-                    }
-                }
             }
             "settings" => {
                 // Show existing window or create on demand — never silently fails.

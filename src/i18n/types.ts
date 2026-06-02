@@ -45,6 +45,8 @@ export interface Translations {
     feed:          string
     sleep:         string
     fast_learning: string
+    /** Opens the in-pet tarot overlay (frontend-only). */
+    tarot:         string
     /** Task 5: hide the main window to tray. */
     hide:          string
   }

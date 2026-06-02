@@ -40,6 +40,7 @@ export const zh: Translations = {
     feed:          '投喂抹茶芭菲',
     sleep:         '睡觉',
     fast_learning: '快速学习',
+    tarot:         '塔罗占卜',
     hide:          '隐藏应用',
   },
 

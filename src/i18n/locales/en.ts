@@ -40,6 +40,7 @@ export const en: Translations = {
     feed:          'Feed Matcha Parfait',
     sleep:         'Sleep',
     fast_learning: 'Fast Learning',
+    tarot:         'Tarot Reading',
     hide:          'Hide App',
   },
 
