@@ -9,6 +9,7 @@ mod pomodoro;
 mod state;
 mod tray;
 mod weather;
+mod window_ops;
 
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -43,6 +44,7 @@ pub fn run() {
       weather::get_weather_status,
       audio::get_audio_state,
       app_state::set_tray_locale,
+      window_ops::set_window_bounds,
     ])
     .setup(move |app| {
       if cfg!(debug_assertions) {

@@ -10,14 +10,14 @@
  * - Chat bubble is absolutely positioned above the pet so the pet fills the
  *   entire window.
  */
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useAnimator, DEFAULT_ANIMATIONS } from '../composables/useAnimator'
 import { useAudioReaction } from '../composables/useAudioReaction'
 import { useHitTest } from '../composables/useHitTest'
 import { usePetStatus } from '../composables/usePetStatus'
 import { useI18n } from '../i18n'
 import { MUTSUMI_ALL_QUOTES } from '../data/mutsumiQuotes'
-import { getCurrentWindow } from '@tauri-apps/api/window'
+import { getCurrentWindow, currentMonitor } from '@tauri-apps/api/window'
 import { LogicalSize } from '@tauri-apps/api/dpi'
 import { invoke } from '@tauri-apps/api/core'
 import { useAppConfig, CHAR_SIZE_DIMS } from '../composables/useAppConfig'
@@ -92,23 +92,62 @@ const tarotRef   = ref<InstanceType<typeof TarotCard> | null>(null)
 // (tarotActive is declared above — the size watch reads it on its immediate run.)
 let savedPos: Awaited<ReturnType<ReturnType<typeof getCurrentWindow>['outerPosition']>> | null = null
 
+// Apply size + position in ONE atomic native op (set_window_bounds → SetWindowPos)
+// so the window lands at its final bounds in a single step. Two separate ops
+// (setSize then center) produced a visible grow-then-recenter jump and could
+// re-enter tao's paint flush and panic. Bounds are physical pixels.
+async function setBounds(win: ReturnType<typeof getCurrentWindow>, x: number, y: number, pw: number, ph: number) {
+  await invoke('set_window_bounds', { x: Math.round(x), y: Math.round(y), width: Math.round(pw), height: Math.round(ph) })
+}
+
+// Resolve after the browser has actually painted (two rAFs: the first schedules
+// before the next paint, the second confirms it happened). Used to guarantee
+// the overlay is on screen BEFORE we move the window, so the move never carries
+// a stale pet/bubble frame to the new position.
+const nextPaint = () => new Promise<void>(r =>
+  requestAnimationFrame(() => requestAnimationFrame(() => r())),
+)
+
+// Ordering: the overlay must be painted before the window moves, so a
+// wrongly-sized pet frame is never carried to the new centre.
 async function openTarot() {
   const win = getCurrentWindow()
-  try { savedPos = await win.outerPosition() } catch { savedPos = null }
-  tarotActive.value = true
+  try { savedPos = await win.outerPosition() } catch { savedPos = null }   // physical
   bubbleRef.value?.hide()
-  const [w, h] = TAROT_WINDOW_DIMS[config.value.characterSize]
-  await win.setSize(new LogicalSize(w, h))
-  await win.center()   // place the larger reading window pleasantly
-  tarotRef.value?.open()
+  tarotActive.value = true       // hide the pet sprite
+  tarotRef.value?.open()         // show the overlay BEFORE growing — it covers the window
+  await nextTick()               // flush the DOM update
+  await nextPaint()              // …and wait until the overlay has actually painted
+
+  const [lw, lh] = TAROT_WINDOW_DIMS[config.value.characterSize]
+  const sf  = await win.scaleFactor()
+  const mon = await currentMonitor()
+  const pw  = lw * sf
+  const ph  = lh * sf
+  // Centre on the monitor the pet sits on; fall back to growing in place.
+  let x = savedPos?.x ?? 0
+  let y = savedPos?.y ?? 0
+  if (mon) {
+    x = mon.position.x + (mon.size.width  - pw) / 2
+    y = mon.position.y + (mon.size.height - ph) / 2
+  }
+  await setBounds(win, x, y, pw, ph)
 }
 
 async function closeTarot() {
-  tarotActive.value = false
   const win = getCurrentWindow()
-  const [w, h] = CHAR_SIZE_DIMS[config.value.characterSize]
-  await win.setSize(new LogicalSize(w, h))
-  if (savedPos) { try { await win.setPosition(savedPos) } catch { /* ignore */ } }
+  const [lw, lh] = CHAR_SIZE_DIMS[config.value.characterSize]
+  const sf = await win.scaleFactor()
+  // Remove the card while the window is STILL centred (its correct place), and
+  // wait for that now-empty/transparent frame to paint — so no card lingers to
+  // flash at the pet's original position when we move the window back.
+  tarotRef.value?.dismiss()
+  await nextTick()
+  await nextPaint()
+  // The window is now empty/transparent; shrink + move it back invisibly.
+  await setBounds(win, savedPos?.x ?? 0, savedPos?.y ?? 0, lw * sf, lh * sf)
+  // Reveal the pet at the restored small position.
+  tarotActive.value = false
 }
 
 // ── Mouse interaction ──────────────────────────────────────────────

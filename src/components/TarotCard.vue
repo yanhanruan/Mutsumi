@@ -117,26 +117,41 @@ function onCardClick(): void {
   }, delay)
 }
 
+// When dismissing, skip the overlay's leave fade: PetWindow shrinks the window
+// back first, so a fade here would play at the pet's original spot and look
+// like a ghost card fading out. Removing instantly hard-cuts straight to the pet.
+const skipLeave = ref(false)
+
 // ── Public API (called by PetWindow) ────────────────────────────────────
 function open(): void {
+  skipLeave.value = false   // fade the overlay IN on open
   visible.value = true
   resetToFaceDown()
 }
-function close(): void {
-  visible.value = false
-  if (loadingTimer) { clearTimeout(loadingTimer); loadingTimer = null }
+/** User-initiated close request — PetWindow orchestrates the shrink + fade. */
+function requestClose(): void {
   emit('close')
 }
-defineExpose({ open, close })
+/**
+ * Unmount the overlay instantly (no leave fade). PetWindow calls this AFTER it
+ * has shrunk the window back, so there is no card lingering/fading at the pet's
+ * original position.
+ */
+function dismiss(): void {
+  if (loadingTimer) { clearTimeout(loadingTimer); loadingTimer = null }
+  skipLeave.value = true
+  visible.value = false
+}
+defineExpose({ open, dismiss })
 </script>
 
 <template>
-  <Transition name="tarot-fade">
-    <div v-if="visible" class="tarot-overlay pet-ui-overlay" @click.self="close">
+  <Transition name="tarot-fade" :css="!skipLeave">
+    <div v-if="visible" class="tarot-overlay pet-ui-overlay" @click.self="requestClose">
       <!-- Controls -->
       <div class="tarot-controls">
         <button class="ctrl" :disabled="isFlipping" title="Redraw" @click.stop="resetToFaceDown">↻</button>
-        <button class="ctrl" title="Close" @click.stop="close">×</button>
+        <button class="ctrl" title="Close" @click.stop="requestClose">×</button>
       </div>
 
       <!-- Card stage (keyed → entrance animation replays on each draw) -->
