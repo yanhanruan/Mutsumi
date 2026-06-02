@@ -12,11 +12,12 @@ import { computed, onMounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import PetWindow from './components/PetWindow.vue'
 import SettingsWindow from './components/SettingsWindow.vue'
+import TarotDraw from './components/TarotDraw.vue'
 import { detectLocale } from './i18n'
 
-const isSettings = computed(() => {
+const windowKind = computed(() => {
   const p = new URLSearchParams(window.location.search)
-  return p.get('window') === 'settings'
+  return p.get('window')   // 'settings' | 'tarot' | null (pet)
 })
 
 onMounted(async () => {
@@ -30,6 +31,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <SettingsWindow v-if="isSettings" />
+  <SettingsWindow v-if="windowKind === 'settings'" />
+  <TarotDraw v-else-if="windowKind === 'tarot'" />
   <PetWindow v-else />
 </template>
