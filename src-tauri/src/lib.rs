@@ -22,6 +22,16 @@ pub fn run() {
   let audio_state   = audio::AudioState(AtomicBool::new(false));
 
   tauri::Builder::default()
+    // ── Single-instance guard ─────────────────────────────────────────────
+    // If a second instance is launched while the app is already running, the
+    // plugin kills the second process and focuses the existing main window.
+    .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+      use tauri::Manager;
+      if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.set_focus();
+      }
+    }))
     .plugin(tauri_plugin_autostart::init(
       tauri_plugin_autostart::MacosLauncher::LaunchAgent,
       None,
