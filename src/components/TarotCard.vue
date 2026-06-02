@@ -30,6 +30,7 @@ const emit = defineEmits<{ close: [] }>()
 // ── State ───────────────────────────────────────────────────────────────
 const visible    = ref(false)
 const card       = ref<TarotCard>(MAJOR_ARCANA[0])
+const reversed   = ref(false)   // true = card drawn inverted (50 % chance)
 const flipped    = ref(false)
 const isFlipping = ref(false)
 const loading    = ref(false)
@@ -38,6 +39,11 @@ const drawKey    = ref(0)
 
 let loadingTimer: ReturnType<typeof setTimeout> | null = null
 
+// Active interpretation based on orientation.
+const fortuneText = computed(() =>
+  reversed.value ? card.value.reversed_text : card.value.fortune_text,
+)
+
 // ── Card visuals (SVG image with gradient fallback) ─────────────────────
 function frontImage(c: TarotCard): string {
   return c.image_placeholder || TAROT_ASSETS.cardFrontImage(c.id)
@@ -45,12 +51,14 @@ function frontImage(c: TarotCard): string {
 
 const frontStyle = computed(() => {
   const img = frontImage(card.value)
-  if (img) return { backgroundImage: `url("${img}")` }
-  const h = card.value.hue
-  return {
-    backgroundImage:
-      `linear-gradient(150deg, hsl(${h} 70% 62%), hsl(${(h + 40) % 360} 65% 42%))`,
-  }
+  const base = img
+    ? { backgroundImage: `url("${img}")` }
+    : (() => {
+        const h = card.value.hue
+        return { backgroundImage: `linear-gradient(150deg, hsl(${h} 70% 62%), hsl(${(h + 40) % 360} 65% 42%))` }
+      })()
+  // Reversed cards are displayed rotated 180° on the front face.
+  return reversed.value ? { ...base, transform: 'rotateY(180deg) rotate(180deg)' } : base
 })
 
 const backStyle = computed(() =>
@@ -93,6 +101,7 @@ function resetToFaceDown(): void {
   revealed.value   = false
   particles.value  = []
   card.value       = pickRandomCard()
+  reversed.value   = Math.random() < 0.5   // 50 % chance of reversed orientation
   drawKey.value++          // remount stage → entrance animation replays
   playDrawSound()
 }
@@ -188,8 +197,13 @@ defineExpose({ open, dismiss })
             <span class="loading-text">Interpreting the stars…</span>
           </div>
           <div v-else-if="revealed" key="res" class="result">
-            <div class="result-title">{{ card.card_name }}</div>
-            <p class="result-text">{{ card.fortune_text }}</p>
+            <div class="result-title">
+              {{ card.card_name }}
+              <span class="result-orientation" :class="reversed ? 'is-reversed' : 'is-upright'">
+                {{ reversed ? 'Reversed' : 'Upright' }}
+              </span>
+            </div>
+            <p class="result-text">{{ fortuneText }}</p>
           </div>
           <div v-else key="hint" class="hint">Tap the card to reveal your fortune.</div>
         </Transition>
@@ -357,6 +371,20 @@ defineExpose({ open, dismiss })
   font-family: Georgia, "Times New Roman", serif;
   font-size: 15px; font-weight: 700; color: #1a2e1a;
   margin-bottom: 5px; text-align: center;
+  display: flex; align-items: center; justify-content: center; gap: 7px; flex-wrap: wrap;
+}
+.result-orientation {
+  font-family: system-ui, "Segoe UI", sans-serif;
+  font-size: 10px; font-weight: 600; letter-spacing: 0.06em;
+  padding: 2px 7px; border-radius: 999px;
+}
+.result-orientation.is-upright {
+  background: rgba(86, 153, 86, 0.15); color: #2a6a2a;
+  border: 1px solid rgba(86, 153, 86, 0.35);
+}
+.result-orientation.is-reversed {
+  background: rgba(153, 86, 86, 0.13); color: #6a2a2a;
+  border: 1px solid rgba(153, 86, 86, 0.30);
 }
 .result-text {
   margin: 0;

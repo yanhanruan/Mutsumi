@@ -21,16 +21,20 @@ describe('MAJOR_ARCANA', () => {
     expect(new Set(ids).size).toBe(22)
   })
 
-  it('every card has a non-empty name and fortune text', () => {
+  it('every card has a non-empty name, upright text, and reversed text', () => {
     for (const c of MAJOR_ARCANA) {
       expect(c.card_name.trim().length).toBeGreaterThan(0)
       expect(c.fortune_text.trim().length).toBeGreaterThan(0)
+      expect(c.reversed_text.trim().length).toBeGreaterThan(0)
     }
   })
 
-  it('fortune texts are all distinct', () => {
-    const texts = MAJOR_ARCANA.map(c => c.fortune_text)
-    expect(new Set(texts).size).toBe(22)
+  it('all 44 interpretations are distinct (no accidental copy-paste)', () => {
+    const all = [
+      ...MAJOR_ARCANA.map(c => c.fortune_text),
+      ...MAJOR_ARCANA.map(c => c.reversed_text),
+    ]
+    expect(new Set(all).size).toBe(44)
   })
 
   it('every card hue is within 0–360', () => {
