@@ -32,6 +32,9 @@ export interface Translations {
   charSizeMedium:  string
   charSizeLarge:   string
 
+  // ── Language (manual override) ──────────────────────────────────
+  language: string
+
   // ── Weather visibility (Task 4) ─────────────────────────────────
   showWeather: string
 

@@ -12,7 +12,7 @@ import { onMounted, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { enable, disable, isEnabled } from '@tauri-apps/plugin-autostart'
-import { useI18n } from '../i18n'
+import { useI18n, setLocale, type Locale } from '../i18n'
 import { useAppConfig, type CharacterSize } from '../composables/useAppConfig'
 import { useWeatherAvailable } from '../composables/useWeatherAvailable'
 
@@ -39,8 +39,25 @@ interface StateSnapshot {
 
 // ── State ──────────────────────────────────────────────────────────
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const { config, updateConfig } = useAppConfig()
+
+// ── Language (manual override) ─────────────────────────────────────
+// Each language is shown in its own name (endonym) regardless of the
+// current UI locale, so the picker is recognisable in any language.
+const LANG_OPTIONS: { key: Locale; label: string }[] = [
+  { key: 'en', label: 'English' },
+  { key: 'zh', label: '中文' },
+  { key: 'ja', label: '日本語' },
+]
+
+async function setLanguage(l: Locale) {
+  setLocale(l)                              // switch the UI immediately
+  await updateConfig({ language: l })       // persist + broadcast to the pet window
+  try {
+    await invoke('set_tray_locale', { locale: l })   // relocalise the tray menu
+  } catch { /* tray update is best-effort */ }
+}
 
 const focusMins    = ref(25)
 const breakMins    = ref(5)
@@ -227,6 +244,24 @@ onMounted(async () => {
           <span class="stat-icon">✨</span>
           <span class="stat-name">{{ t.mood }}</span>
           <span class="mood-chip">{{ mood }}</span>
+        </div>
+      </section>
+
+      <!-- Language (manual override) -->
+      <section class="card">
+        <h2 class="card-title">
+          <span class="card-icon">🌐</span>{{ t.language }}
+        </h2>
+        <div class="size-group">
+          <button
+            v-for="opt in LANG_OPTIONS"
+            :key="opt.key"
+            class="size-btn"
+            :class="{ active: locale === opt.key }"
+            @click="setLanguage(opt.key)"
+          >
+            {{ opt.label }}
+          </button>
         </div>
       </section>
 

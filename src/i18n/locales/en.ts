@@ -27,6 +27,9 @@ export const en: Translations = {
   charSizeMedium:  'Medium',
   charSizeLarge:   'Large',
 
+  // ── Language ──────────────────────────────────────────────────────
+  language: 'Language',
+
   // ── Weather visibility ────────────────────────────────────────────
   showWeather: 'Show Weather',
 

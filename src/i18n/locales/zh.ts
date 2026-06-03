@@ -27,6 +27,9 @@ export const zh: Translations = {
   charSizeMedium:  '中',
   charSizeLarge:   '大',
 
+  // ── Language ──────────────────────────────────────────────────────
+  language: '语言',
+
   // ── Weather visibility ────────────────────────────────────────────
   showWeather: '显示天气',
 

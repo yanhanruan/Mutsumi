@@ -12,6 +12,7 @@
 
 import { ref } from 'vue'
 import { emit, listen } from '@tauri-apps/api/event'
+import type { Locale } from '../i18n'
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -20,6 +21,12 @@ export type CharacterSize = 'small' | 'medium' | 'large'
 export interface AppConfig {
   characterSize: CharacterSize
   showWeather:   boolean
+  /**
+   * Manually-chosen UI language. `null` (the default) means "follow the
+   * system" — the app uses navigator.language detection. Setting a locale
+   * here overrides detection and persists across restarts.
+   */
+  language:      Locale | null
 }
 
 // ── Size dimensions ──────────────────────────────────────────────────
@@ -42,6 +49,7 @@ const EVENT_NAME   = 'app-config-changed'
 const DEFAULT_CONFIG: AppConfig = {
   characterSize: 'medium',
   showWeather:   true,
+  language:      null,   // null → follow system locale
 }
 
 function loadConfig(): AppConfig {

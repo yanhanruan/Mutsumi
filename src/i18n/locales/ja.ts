@@ -27,6 +27,9 @@ export const ja: Translations = {
   charSizeMedium:  '中',
   charSizeLarge:   '大',
 
+  // ── Language ──────────────────────────────────────────────────────
+  language: '言語',
+
   // ── Weather visibility ────────────────────────────────────────────
   showWeather: '天気を表示',
 
