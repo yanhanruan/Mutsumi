@@ -28,6 +28,14 @@ tauri-plugin-single-instance = "2"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "native-tls"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
+# ── Release size optimizations ─────────────────────────────────────
+[profile.release]
+opt-level     = "z"   # shrink over speed (vs "s": slightly larger but faster)
+lto           = true  # whole-program dead-code elimination across all crates
+codegen-units = 1     # single CGU — required for full LTO coverage
+strip         = true  # drop DWARF debug symbols from the final binary
+panic         = "abort" # no unwinding tables/machinery (~50 KB saved)
+
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61", features = [
     "Win32_Foundation",

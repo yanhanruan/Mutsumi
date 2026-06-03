@@ -39,3 +39,6 @@ frames_raw/**/*
 
 # Local runtime state
 state.json
+
+# Icons (these are generated and can be recreated from the source SVGs in
+/src-tauri/icons/
