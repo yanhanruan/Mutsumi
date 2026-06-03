@@ -163,7 +163,10 @@ defineExpose({ open, dismiss })
 
 <template>
   <Transition name="tarot-fade" :css="!skipLeave">
-    <div v-if="visible" class="tarot-overlay pet-ui-overlay" @click.self="requestClose">
+    <!-- No backdrop-click-to-close: the overlay fills the whole window, so
+         clicking near the card was closing the reading by accident. Closing
+         is explicit via the × control. -->
+    <div v-if="visible" class="tarot-overlay pet-ui-overlay">
       <!-- Controls -->
       <div class="tarot-controls">
         <button class="ctrl" :disabled="isFlipping" :title="t.tarot.redraw" @click.stop="resetToFaceDown">↻</button>
