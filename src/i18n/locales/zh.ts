@@ -63,5 +63,8 @@ export const zh: Translations = {
     reversed:     '逆位',
     redraw:       '重抽',
     close:        '关闭',
+    today:        '今日卡牌',
+    history:      '最近',
+    empty:        '还没有占卜记录。',
   },
 }

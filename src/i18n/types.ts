@@ -68,6 +68,9 @@ export interface Translations {
     reversed:     string   // orientation badge
     redraw:       string   // control button title
     close:        string   // control button title
+    today:        string   // "card of the day" badge
+    history:      string   // history toggle / panel heading
+    empty:        string   // empty-history placeholder
   }
 
   // ── Late-night reminder ─────────────────────────────────────────

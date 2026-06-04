@@ -63,5 +63,8 @@ export const ja: Translations = {
     reversed:     '逆位置',
     redraw:       '引き直す',
     close:        '閉じる',
+    today:        '今日のカード',
+    history:      '最近',
+    empty:        'まだ占いの記録がありません。',
   },
 }

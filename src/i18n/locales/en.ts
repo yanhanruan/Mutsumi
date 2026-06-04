@@ -63,5 +63,8 @@ export const en: Translations = {
     reversed:     'Reversed',
     redraw:       'Redraw',
     close:        'Close',
+    today:        "Today's Card",
+    history:      'Recent',
+    empty:        'No readings yet.',
   },
 }
