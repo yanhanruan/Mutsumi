@@ -334,16 +334,21 @@ defineExpose({ open, dismiss })
   z-index: 2;
 }
 .ctrl {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 26px;
   height: 26px;
+  padding: 0;
   border-radius: 50%;
   border: 1px solid rgba(119, 153, 119, 0.40);
   background: rgba(245, 250, 245, 0.92);
   backdrop-filter: blur(16px) saturate(150%);
   -webkit-backdrop-filter: blur(16px) saturate(150%);
   color: #2a4a2a;
-  font-size: 15px;
+  font-size: 14px;
   line-height: 1;
+  text-align: center;
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(40, 70, 40, 0.14);
   transition: background 150ms ease, transform 120ms ease, opacity 150ms ease;
