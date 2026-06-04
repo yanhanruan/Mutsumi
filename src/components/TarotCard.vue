@@ -423,11 +423,30 @@ defineExpose({ open, dismiss })
   55%, 100% { transform: translateX(100%); }
 }
 
-/* ── Glow VFX (pure box-shadow) ─────────────────────────────────────── */
-.card.is-glowing .card-inner { animation: glow-pulse 2.4s ease-in-out infinite; }
+/* ── Glow VFX ────────────────────────────────────────────────────────
+   Rendered as a STATIC halo on a dedicated ::before layer; only its
+   `opacity` animates. Opacity is GPU-composited, so the breathing is
+   smooth — unlike animating box-shadow values, which repaints every
+   frame and stutters (especially on a transparent window). A one-shot
+   `glow-in` eases it up to the pulse's base opacity before the infinite
+   pulse takes over, so it never pops in. */
+.card.is-glowing::before {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: 18px;
+  box-shadow: 0 0 10px 1px hsl(var(--hue) 80% 60% / 0.6);
+  opacity: 0;
+  pointer-events: none;
+  will-change: opacity;
+  animation:
+    glow-in    0.6s ease-out forwards,
+    glow-pulse 2.8s ease-in-out 0.6s infinite;
+}
+@keyframes glow-in    { to { opacity: 0.5; } }
 @keyframes glow-pulse {
-  0%, 100% { box-shadow: 0 0 12px 2px hsl(var(--hue) 85% 62% / 0.45), 0 0 26px 6px hsl(var(--hue) 85% 60% / 0.22); }
-  50%      { box-shadow: 0 0 20px 5px hsl(var(--hue) 90% 68% / 0.70), 0 0 46px 13px hsl(var(--hue) 85% 60% / 0.40); }
+  0%, 100% { opacity: 0.5; }
+  50%      { opacity: 0.85; }
 }
 
 /* ── Particles ──────────────────────────────────────────────────────── */
