@@ -67,6 +67,9 @@ export interface Translations {
     upright:      string   // orientation badge
     reversed:     string   // orientation badge
     redraw:       string   // control button title
+    download:     string   // control button title (save card image)
+    saved:        string   // toast after a successful download
+    openFolder:   string   // toast link — reveal the saved file's folder
     close:        string   // control button title
     today:        string   // "card of the day" badge
     history:      string   // history toggle / panel heading

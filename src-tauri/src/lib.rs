@@ -1,6 +1,7 @@
 mod app_state;
 #[cfg(windows)]
 mod audio;
+mod card_export;
 mod cursor;
 mod idle;
 mod late_night;
@@ -45,6 +46,8 @@ pub fn run() {
       audio::get_audio_state,
       app_state::set_tray_locale,
       window_ops::set_window_bounds,
+      card_export::save_card_image,
+      card_export::reveal_in_folder,
     ])
     .setup(move |app| {
       if cfg!(debug_assertions) {

@@ -30,11 +30,20 @@ interface DailyRecord {
   reversed: boolean
 }
 
-// ── Storage keys + cap ───────────────────────────────────────────────
+interface DrawCount {
+  date:  string
+  count: number
+}
+
+// ── Storage keys + caps ──────────────────────────────────────────────
 
 const DAILY_KEY   = 'mutsumi_tarot_daily'
 const HISTORY_KEY = 'mutsumi_tarot_history'
+const DRAWS_KEY   = 'mutsumi_tarot_draws'
 const HISTORY_CAP = 30
+
+/** Maximum readings a user may draw per local day. */
+export const MAX_DRAWS_PER_DAY = 3
 
 // ── Pure date helper (exported for tests) ────────────────────────────
 
@@ -76,9 +85,16 @@ function writeJSON(key: string, value: unknown): void {
   } catch { /* ignore quota / access errors */ }
 }
 
-// ── Singleton reactive history ───────────────────────────────────────
+// ── Singleton reactive state ─────────────────────────────────────────
 
 const history = ref<JournalEntry[]>(readJSON<JournalEntry[]>(HISTORY_KEY, []))
+
+/** Number of readings drawn today (resets at local midnight). */
+function readDrawsToday(): number {
+  const rec = readJSON<DrawCount | null>(DRAWS_KEY, null)
+  return rec && rec.date === localDateKey() ? rec.count : 0
+}
+const drawsToday = ref<number>(readDrawsToday())
 
 // ── Composable ───────────────────────────────────────────────────────
 
@@ -101,5 +117,20 @@ export function useTarotJournal() {
     writeJSON(HISTORY_KEY, history.value)
   }
 
-  return { history, getToday, recordDailyIfAbsent, addEntry }
+  /** Re-sync the reactive draw count from storage (handles midnight rollover). */
+  function refreshDraws(): void {
+    drawsToday.value = readDrawsToday()
+  }
+
+  /** Count one reading toward today's quota; returns the new count. */
+  function bumpDraws(): number {
+    const today = localDateKey()
+    const rec = readJSON<DrawCount | null>(DRAWS_KEY, null)
+    const count = (rec && rec.date === today ? rec.count : 0) + 1
+    writeJSON(DRAWS_KEY, { date: today, count } satisfies DrawCount)
+    drawsToday.value = count
+    return count
+  }
+
+  return { history, drawsToday, getToday, recordDailyIfAbsent, addEntry, refreshDraws, bumpDraws }
 }

@@ -80,4 +80,14 @@ describe('useTarotJournal (storage-backed)', () => {
     expect(j.history.value.map(e => e.id)).toEqual([2, 1])
     expect(j.history.value[0]).toMatchObject({ id: 2, reversed: true })
   })
+
+  it('counts draws per day and exposes a per-day cap', async () => {
+    const mod = await import('./useTarotJournal')
+    const j = mod.useTarotJournal()
+    expect(j.drawsToday.value).toBe(0)
+    expect(j.bumpDraws()).toBe(1)
+    expect(j.bumpDraws()).toBe(2)
+    expect(j.drawsToday.value).toBe(2)
+    expect(mod.MAX_DRAWS_PER_DAY).toBe(3)
+  })
 })
