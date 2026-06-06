@@ -8,7 +8,7 @@
  * On mount, syncs the detected frontend locale to the Rust tray so its
  * menu items are localised to match navigator.language.
  */
-import { computed, onMounted, watch } from 'vue'
+import { computed, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import PetWindow from './components/PetWindow.vue'
 import SettingsWindow from './components/SettingsWindow.vue'
@@ -42,13 +42,17 @@ watch(
   { immediate: true },
 )
 
-onMounted(async () => {
-  // Sync the tray menu labels with the effective locale (manual or detected).
-  // Runs per window; the tray is shared so the last write wins.
-  try {
-    await invoke('set_tray_locale', { locale: locale.value })
-  } catch { /* tray update is best-effort */ }
-})
+// Sync the tray menu labels with the effective locale (manual or detected).
+// Runs per window; the tray is shared so the last write wins.
+watch(
+  locale,
+  async l => {
+    try {
+      await invoke('set_tray_locale', { locale: l })
+    } catch { /* tray update is best-effort */ }
+  },
+  { immediate: true },
+)
 </script>
 
 <template>
