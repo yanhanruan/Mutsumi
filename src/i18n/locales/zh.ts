@@ -21,6 +21,25 @@ export const zh: Translations = {
   autostartOnMsg:    '已开启开机启动。',
   autostartOffMsg:   '已关闭开机启动。',
 
+  // ── About window ─────────────────────────────────────────────────
+  aboutTitle:             '关于',
+  aboutVersionInfo:       '版本信息',
+  aboutAppSummary:        '应用简介',
+  aboutAppSummaryBody:    'Mutsumi 是一款轻量的桌面陪伴应用，让若叶睦常驻在桌面上，陪你专注、休息和获得一点温柔的日常反馈。',
+  aboutMainFeatures:      '主要功能',
+  aboutFeaturesList:      ['桌面角色陪伴与互动', '番茄钟专注计时', '塔罗抽卡与记录', '天气提示与状态显示'],
+  aboutDeveloper:         '开发者',
+  aboutContact:           '联系方式',
+  aboutCopyright:         '版权声明',
+  aboutLatestReleaseLead: '最新版本可以前往',
+  aboutSourceCodeLead:    '代码可以在',
+  aboutLatestReleaseLink: 'GitHub Releases',
+  aboutSourceCodeLink:    'GitHub 仓库',
+  aboutDeveloperYoho:     'yOHO',
+  aboutDeveloperMutsumiHead: '-睦头人おれ.',
+  aboutContactQqLabel:    'QQ',
+  aboutCopyrightMit:      'MIT License',
+
   // ── Character size ────────────────────────────────────────────────
   characterSize:   '角色大小',
   charSizeSmall:   '小',

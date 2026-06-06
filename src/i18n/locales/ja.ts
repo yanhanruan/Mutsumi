@@ -21,6 +21,25 @@ export const ja: Translations = {
   autostartOnMsg:    '自動起動を有効にしました。',
   autostartOffMsg:   '自動起動を無効にしました。',
 
+  // ── About window ─────────────────────────────────────────────────
+  aboutTitle:             'このアプリについて',
+  aboutVersionInfo:       'バージョン情報',
+  aboutAppSummary:        'アプリ概要',
+  aboutAppSummaryBody:    'Mutsumi は、若葉睦をデスクトップにそっと常駐させる軽量なデスクトップコンパニオンです。集中、休憩、日々の小さな反応をやさしく支えます。',
+  aboutMainFeatures:      '主な機能',
+  aboutFeaturesList:      ['デスクトップキャラクターとのふれあい', 'ポモドーロ集中タイマー', 'タロットカードと履歴', '天気と状態の表示'],
+  aboutDeveloper:         '開発者',
+  aboutContact:           '連絡先',
+  aboutCopyright:         '著作権表示',
+  aboutLatestReleaseLead: '最新版は',
+  aboutSourceCodeLead:    'コードは',
+  aboutLatestReleaseLink: 'GitHub Releases',
+  aboutSourceCodeLink:    'GitHub リポジトリ',
+  aboutDeveloperYoho:     'yOHO',
+  aboutDeveloperMutsumiHead: '-睦头人おれ.',
+  aboutContactQqLabel:    'QQ',
+  aboutCopyrightMit:      'MIT License',
+
   // ── Character size ────────────────────────────────────────────────
   characterSize:   'キャラクターサイズ',
   charSizeSmall:   '小',

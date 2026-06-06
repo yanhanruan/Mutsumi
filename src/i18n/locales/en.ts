@@ -21,6 +21,25 @@ export const en: Translations = {
   autostartOnMsg:    'Launch on startup enabled.',
   autostartOffMsg:   'Launch on startup disabled.',
 
+  // ── About window ─────────────────────────────────────────────────
+  aboutTitle:             'about',
+  aboutVersionInfo:       'Version Info',
+  aboutAppSummary:        'App Summary',
+  aboutAppSummaryBody:    'Mutsumi is a lightweight desktop companion that keeps Wakaba Mutsumi on your desktop, helping you focus, rest, and enjoy small everyday interactions.',
+  aboutMainFeatures:      'Main Features',
+  aboutFeaturesList:      ['Desktop character companion and interactions', 'Pomodoro focus timer', 'Tarot card draws and history', 'Weather hints and status display'],
+  aboutDeveloper:         'Developer',
+  aboutContact:           'Contact',
+  aboutCopyright:         'Copyright',
+  aboutLatestReleaseLead: 'Download the latest version from',
+  aboutSourceCodeLead:    'Source code is available on',
+  aboutLatestReleaseLink: 'GitHub Releases',
+  aboutSourceCodeLink:    'GitHub',
+  aboutDeveloperYoho:     'yOHO',
+  aboutDeveloperMutsumiHead: '-睦头人おれ.',
+  aboutContactQqLabel:    'QQ',
+  aboutCopyrightMit:      'MIT License',
+
   // ── Character size ────────────────────────────────────────────────
   characterSize:   'Character Size',
   charSizeSmall:   'Small',

@@ -12,12 +12,21 @@ import { computed, onMounted, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import PetWindow from './components/PetWindow.vue'
 import SettingsWindow from './components/SettingsWindow.vue'
+import AboutWindow from './components/AboutWindow.vue'
 import { detectLocale, setLocale, useI18n } from './i18n'
 import { useAppConfig } from './composables/useAppConfig'
 
-const isSettings = computed(() => {
+const windowKind = computed(() => {
   const p = new URLSearchParams(window.location.search)
-  return p.get('window') === 'settings'
+  return p.get('window')
+})
+
+const isSettings = computed(() => {
+  return windowKind.value === 'settings'
+})
+
+const isAbout = computed(() => {
+  return windowKind.value === 'about'
 })
 
 const { locale } = useI18n()
@@ -44,5 +53,6 @@ onMounted(async () => {
 
 <template>
   <SettingsWindow v-if="isSettings" />
+  <AboutWindow v-else-if="isAbout" />
   <PetWindow v-else />
 </template>

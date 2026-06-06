@@ -1,4 +1,4 @@
-//! System tray icon with show/hide/pomodoro/settings/quit menu.
+//! System tray icon with show/hide/pomodoro/settings/about/quit menu.
 //!
 //! The menu is built from localised labels; `rebuild_tray()` rebuilds it
 //! when the frontend reports the detected system locale via `set_tray_locale`.
@@ -24,6 +24,7 @@ struct TrayLabels {
     pom_pause: &'static str,
     pom_stop:  &'static str,
     settings:  &'static str,
+    about:     &'static str,
     quit:      &'static str,
 }
 
@@ -36,6 +37,7 @@ fn labels_for_locale(locale: &str) -> TrayLabels {
             pom_pause: "番茄钟: 暂停",
             pom_stop:  "番茄钟: 停止",
             settings:  "设置…",
+            about:     "关于…",
             quit:      "退出",
         },
         "ja" => TrayLabels {
@@ -45,6 +47,7 @@ fn labels_for_locale(locale: &str) -> TrayLabels {
             pom_pause: "ポモドーロ: 一時停止",
             pom_stop:  "ポモドーロ: 停止",
             settings:  "設定…",
+            about:     "このアプリについて…",
             quit:      "終了",
         },
         _ => TrayLabels {
@@ -54,6 +57,7 @@ fn labels_for_locale(locale: &str) -> TrayLabels {
             pom_pause: "Pomodoro: Pause",
             pom_stop:  "Pomodoro: Stop",
             settings:  "Settings…",
+            about:     "About…",
             quit:      "Quit",
         },
     }
@@ -73,6 +77,7 @@ fn build_tray_menu<R: Runtime>(
     let pom_stop      = MenuItem::with_id(app, "pom_stop",  labels.pom_stop,  true, None::<&str>)?;
     let sep2          = PredefinedMenuItem::separator(app)?;
     let settings_item = MenuItem::with_id(app, "settings",  labels.settings,  true, None::<&str>)?;
+    let about_item    = MenuItem::with_id(app, "about",     labels.about,     true, None::<&str>)?;
     let sep3          = PredefinedMenuItem::separator(app)?;
     let quit_item     = MenuItem::with_id(app, "quit",      labels.quit,      true, None::<&str>)?;
 
@@ -83,7 +88,7 @@ fn build_tray_menu<R: Runtime>(
             &sep1,
             &pom_start, &pom_pause, &pom_stop,
             &sep2,
-            &settings_item,
+            &settings_item, &about_item,
             &sep3,
             &quit_item,
         ],
@@ -143,6 +148,30 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
                     .inner_size(360.0, 490.0)
                     .resizable(false)
                     // Custom Vue titlebar takes over — no OS chrome.
+                    .decorations(false)
+                    .transparent(true)
+                    .shadow(false)
+                    .center()
+                    .build();
+
+                    if let Ok(w) = result {
+                        let _ = w.set_focus();
+                    }
+                }
+            }
+            "about" => {
+                if let Some(w) = app.get_webview_window("about") {
+                    let _ = w.show();
+                    let _ = w.set_focus();
+                } else {
+                    let result = WebviewWindowBuilder::new(
+                        app,
+                        "about",
+                        WebviewUrl::App("index.html?window=about".into()),
+                    )
+                    .title("Mutsumi · About")
+                    .inner_size(420.0, 560.0)
+                    .resizable(false)
                     .decorations(false)
                     .transparent(true)
                     .shadow(false)
