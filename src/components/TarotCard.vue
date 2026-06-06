@@ -307,13 +307,13 @@ defineExpose({ open, dismiss })
         <button
           v-if="!showHistory && revealed && drawsLeft > 0"
           class="ctrl"
-          :title="`${t.tarot.redraw} (${drawsLeft})`"
+          :data-tip="`${t.tarot.redraw} (${drawsLeft})`"
           @click.stop="resetToFaceDown"
         >↻</button>
         <button
           v-if="!showHistory && revealed"
           class="ctrl"
-          :title="t.tarot.download"
+          :data-tip="t.tarot.download"
           @click.stop="downloadCard"
         >
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -321,8 +321,8 @@ defineExpose({ open, dismiss })
             <path d="M12 3v11" /><path d="m7 10 5 5 5-5" /><path d="M5 21h14" />
           </svg>
         </button>
-        <button class="ctrl" :class="{ active: showHistory }" :title="t.tarot.history" @click.stop="showHistory = !showHistory">📜</button>
-        <button class="ctrl" :title="t.tarot.close" @click.stop="requestClose">×</button>
+        <button class="ctrl" :class="{ active: showHistory }" :data-tip="t.tarot.history" @click.stop="showHistory = !showHistory">📜</button>
+        <button class="ctrl" :data-tip="t.tarot.close" @click.stop="requestClose">×</button>
       </div>
 
       <!-- ── Card view ─────────────────────────────────────────────── -->
@@ -461,6 +461,38 @@ defineExpose({ open, dismiss })
   background: linear-gradient(135deg, #779977, #5a8060);
   border-color: transparent;
   color: #fff;
+}
+
+/* ── Custom tooltip (replaces native title=) ────────────────────────── */
+.ctrl[data-tip] {
+  position: relative;
+}
+.ctrl[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  top: calc(100% + 7px);
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  padding: 4px 9px;
+  border-radius: 8px;
+  font-family: system-ui, "Segoe UI", sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  color: #2a4a2a;
+  background: rgba(245, 250, 245, 0.97);
+  border: 1px solid rgba(148, 185, 148, 0.45);
+  box-shadow: 0 2px 8px rgba(40, 70, 40, 0.14);
+  pointer-events: none;
+  z-index: 10;
+  /* hidden by default */
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 120ms ease, visibility 120ms ease;
+}
+.ctrl[data-tip]:hover::after {
+  opacity: 1;
+  visibility: visible;
 }
 
 /* ── Card stage + entrance animation ────────────────────────────────── */
