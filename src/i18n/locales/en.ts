@@ -43,6 +43,7 @@ export const en: Translations = {
     feed:          'Feed Matcha Parfait',
     sleep:         'Sleep',
     fast_learning: 'Fast Learning',
+    tarot:         'Tarot Reading',
     hide:          'Hide App',
   },
 
@@ -56,4 +57,20 @@ export const en: Translations = {
 
   // ── Late-night reminder ───────────────────────────────────────────
   lateNightReminder: "You shouldn't stay up so late!",
+
+  // ── Tarot overlay UI chrome ───────────────────────────────────────
+  tarot: {
+    interpreting: 'Interpreting the stars…',
+    hint:         'Tap the card to reveal your fortune.',
+    upright:      'Upright',
+    reversed:     'Reversed',
+    redraw:       'Redraw',
+    download:     'Download card',
+    saved:        'Saved to Downloads',
+    openFolder:   'Open folder',
+    close:        'Close',
+    today:        "Today's Card",
+    history:      'Recent',
+    empty:        'No readings yet.',
+  },
 }

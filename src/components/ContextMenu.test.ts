@@ -5,7 +5,7 @@
  *  1.  Menu is hidden by default.
  *  2.  open() makes the bubble panel visible.
  *  3.  open() accepts x/y for API compat but ignores them (panel is always on the left).
- *  4.  All 5 bubbles are rendered.
+ *  4.  All 6 bubbles are rendered.
  *  5.  Each bubble has a non-empty icon.
  *  6.  Hovering a bubble shows its label tooltip.
  *  7.  EN labels are correct.
@@ -98,11 +98,11 @@ describe('ContextMenu (vertical glass bubble panel)', () => {
 
   // ── Bubble count & structure ─────────────────────────────────────────
 
-  it('renders exactly 5 bubbles', async () => {
+  it('renders exactly 6 bubbles', async () => {
     const w = mountMenu()
     await w.vm.open()
-    expect(w.findAll('.bubble-wrap')).toHaveLength(5)
-    expect(w.findAll('.bubble')).toHaveLength(5)
+    expect(w.findAll('.bubble-wrap')).toHaveLength(6)
+    expect(w.findAll('.bubble')).toHaveLength(6)
     w.unmount()
   })
 
@@ -110,7 +110,7 @@ describe('ContextMenu (vertical glass bubble panel)', () => {
     const w = mountMenu()
     await w.vm.open()
     const icons = w.findAll('.bubble-icon').map(el => el.text().trim())
-    expect(icons).toHaveLength(5)
+    expect(icons).toHaveLength(6)
     icons.forEach(icon => expect(icon.length).toBeGreaterThan(0))
     w.unmount()
   })
@@ -145,6 +145,7 @@ describe('ContextMenu (vertical glass bubble panel)', () => {
       'Feed Matcha Parfait',
       'Sleep',
       'Fast Learning',
+      'Tarot Reading',
       'Hide App',
     ]
     const wraps = w.findAll('.bubble-wrap')
@@ -170,7 +171,7 @@ describe('ContextMenu (vertical glass bubble panel)', () => {
   })
 
   it('emits the correct action for each bubble', async () => {
-    const expected: MenuAction[] = ['pat_head', 'feed', 'sleep', 'fast_learning', 'hide']
+    const expected: MenuAction[] = ['pat_head', 'feed', 'sleep', 'fast_learning', 'tarot', 'hide']
     for (let i = 0; i < expected.length; i++) {
       const w = mountMenu()
       await w.vm.open()
@@ -229,7 +230,7 @@ describe('ContextMenu (vertical glass bubble panel)', () => {
     const w = mountMenu()
     await w.vm.open()
     const wraps = w.findAll('.bubble-wrap')
-    expect(wraps).toHaveLength(5)
+    expect(wraps).toHaveLength(6)
     wraps.forEach(wrap => {
       expect(wrap.classes()).toContain('pet-ui-overlay')
     })
@@ -307,10 +308,10 @@ describe('ContextMenu (vertical glass bubble panel)', () => {
 
   // ── Style modifiers ──────────────────────────────────────────────────
 
-  it('hide bubble (index 4) carries the .bubble--hide class', async () => {
+  it('hide bubble (index 5) carries the .bubble--hide class', async () => {
     const w = mountMenu()
     await w.vm.open()
-    const hideBubble = w.findAll('.bubble').at(4)
+    const hideBubble = w.findAll('.bubble').at(5)
     expect(hideBubble?.classes()).toContain('bubble--hide')
     w.unmount()
   })
@@ -319,7 +320,7 @@ describe('ContextMenu (vertical glass bubble panel)', () => {
     const w = mountMenu()
     await w.vm.open()
     const bubbles = w.findAll('.bubble')
-    bubbles.slice(0, 4).forEach(b => {
+    bubbles.slice(0, 5).forEach(b => {
       expect(b.classes()).not.toContain('bubble--hide')
     })
     w.unmount()

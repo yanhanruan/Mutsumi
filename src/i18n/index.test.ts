@@ -111,7 +111,7 @@ describe('useI18n', () => {
     expect(locale.value).toBe<Locale>('ja')
   })
 
-  it('has all 5 context menu items for each locale', () => {
+  it('has all context menu items for each locale', () => {
     const actionKeys = ['pat_head', 'feed', 'sleep', 'fast_learning'] as const
     for (const l of ['en', 'zh', 'ja'] as Locale[]) {
       setLocale(l)
@@ -120,6 +120,7 @@ describe('useI18n', () => {
         expect(t.value.contextMenuItems[k]).toBeTruthy()
         expect(t.value.contextResponses[k]).toBeTruthy()
       }
+      expect(t.value.contextMenuItems.tarot).toBeTruthy()
       expect(t.value.contextMenuItems.hide).toBeTruthy()
     }
   })
@@ -151,16 +152,16 @@ describe('locale bundle completeness', () => {
     }
   })
 
-  it('en contextMenuItems has all 5 actions (including hide)', () => {
-    expect(Object.keys(en.contextMenuItems)).toHaveLength(5)
+  it('en contextMenuItems has all 6 actions (including tarot + hide)', () => {
+    expect(Object.keys(en.contextMenuItems)).toHaveLength(6)
   })
 
-  it('zh contextMenuItems has all 5 actions (including hide)', () => {
-    expect(Object.keys(zh.contextMenuItems)).toHaveLength(5)
+  it('zh contextMenuItems has all 6 actions (including tarot + hide)', () => {
+    expect(Object.keys(zh.contextMenuItems)).toHaveLength(6)
   })
 
-  it('ja contextMenuItems has all 5 actions (including hide)', () => {
-    expect(Object.keys(ja.contextMenuItems)).toHaveLength(5)
+  it('ja contextMenuItems has all 6 actions (including tarot + hide)', () => {
+    expect(Object.keys(ja.contextMenuItems)).toHaveLength(6)
   })
 
   it('all locales have character size labels', () => {

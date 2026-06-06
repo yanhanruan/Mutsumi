@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 500" width="300" height="500">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0.4" y2="1">
+      <stop offset="0" stop-color="hsl(280, 72%, 64%)"/>
+      <stop offset="1" stop-color="hsl(320, 60%, 40%)"/>
+    </linearGradient>
+  </defs>
+  <rect x="3" y="3" width="294" height="494" rx="24" fill="url(#bg)"/>
+  <rect x="14" y="14" width="272" height="472" rx="16"
+        fill="none" stroke="rgba(255,255,255,0.65)" stroke-width="2"/>
+  <text x="30" y="32" font-size="20" fill="rgba(255,255,255,0.7)" text-anchor="middle" dominant-baseline="central">✦</text>
+  <text x="270" y="32" font-size="20" fill="rgba(255,255,255,0.7)" text-anchor="middle" dominant-baseline="central">✦</text>
+  <text x="30" y="470" font-size="20" fill="rgba(255,255,255,0.7)" text-anchor="middle" dominant-baseline="central">✦</text>
+  <text x="270" y="470" font-size="20" fill="rgba(255,255,255,0.7)" text-anchor="middle" dominant-baseline="central">✦</text>
+  <text x="150" y="62" font-family="Georgia, 'Times New Roman', serif" font-size="30"
+        font-weight="700" fill="#fff" text-anchor="middle">X</text>
+  <circle cx="150" cy="232" r="86" fill="rgba(255,255,255,0.22)"/>
+  <text x="150" y="232" font-size="120" text-anchor="middle"
+        dominant-baseline="central">🎡</text>
+  <rect x="34" y="408" width="232" height="50" rx="12" fill="rgba(255,255,255,0.85)"/>
+  <text x="150" y="433" font-family="Georgia, 'Times New Roman', serif" font-size="20"
+        font-weight="700" fill="hsl(280, 40%, 18%)" text-anchor="middle" dominant-baseline="central">Wheel of Fortune</text>
+</svg>

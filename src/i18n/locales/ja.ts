@@ -43,6 +43,7 @@ export const ja: Translations = {
     feed:          '抹茶パフェをあげる',
     sleep:         'おやすみ',
     fast_learning: '速習モード',
+    tarot:         'タロット占い',
     hide:          'アプリを隠す',
   },
 
@@ -56,4 +57,20 @@ export const ja: Translations = {
 
   // ── Late-night reminder ───────────────────────────────────────────
   lateNightReminder: '夜更かしは健康によくない！',
+
+  // ── Tarot overlay UI chrome ───────────────────────────────────────
+  tarot: {
+    interpreting: '星を読み解いています…',
+    hint:         'カードをタップして運勢を表示。',
+    upright:      '正位置',
+    reversed:     '逆位置',
+    redraw:       '引き直す',
+    download:     'カードを保存',
+    saved:        'ダウンロードに保存しました',
+    openFolder:   'フォルダを開く',
+    close:        '閉じる',
+    today:        '今日のカード',
+    history:      '最近',
+    empty:        'まだ占いの記録がありません。',
+  },
 }

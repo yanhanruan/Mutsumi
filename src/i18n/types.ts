@@ -48,6 +48,8 @@ export interface Translations {
     feed:          string
     sleep:         string
     fast_learning: string
+    /** Opens the in-pet tarot overlay (frontend-only). */
+    tarot:         string
     /** Task 5: hide the main window to tray. */
     hide:          string
   }
@@ -58,6 +60,23 @@ export interface Translations {
     feed:          string
     sleep:         string
     fast_learning: string
+  }
+
+  // ── Tarot overlay UI chrome ─────────────────────────────────────
+  // (Card names + interpretations are localized in src/config/tarot.ts.)
+  tarot: {
+    interpreting: string   // loading line while the reading "computes"
+    hint:         string   // prompt to tap the face-down card
+    upright:      string   // orientation badge
+    reversed:     string   // orientation badge
+    redraw:       string   // control button title
+    download:     string   // control button title (save card image)
+    saved:        string   // toast after a successful download
+    openFolder:   string   // toast link — reveal the saved file's folder
+    close:        string   // control button title
+    today:        string   // "card of the day" badge
+    history:      string   // history toggle / panel heading
+    empty:        string   // empty-history placeholder
   }
 
   // ── Late-night reminder ─────────────────────────────────────────

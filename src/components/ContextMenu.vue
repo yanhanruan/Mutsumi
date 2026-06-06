@@ -6,14 +6,15 @@
  * Vue <Transition> owns enter/leave timing — no manual closing state,
  * no setTimeout, no !important overrides.
  */
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { useI18n } from '../i18n'
 import { useAppConfig } from '../composables/useAppConfig'
 
 // ── Types ────────────────────────────────────────────────────────────
 
 export type ContextActionKey = 'pat_head' | 'feed' | 'sleep' | 'fast_learning'
-export type MenuAction = ContextActionKey | 'hide'
+/** 'tarot' and 'hide' are frontend-only actions (no backend command). */
+export type MenuAction = ContextActionKey | 'tarot' | 'hide'
 
 interface BubbleDef {
   action: MenuAction
@@ -25,6 +26,7 @@ const BUBBLE_DEFS: BubbleDef[] = [
   { action: 'feed',          icon: '🍵' },
   { action: 'sleep',         icon: '💤' },
   { action: 'fast_learning', icon: '📚' },
+  { action: 'tarot',         icon: '🔮' },
   { action: 'hide',          icon: '👻' },
 ]
 
@@ -48,6 +50,10 @@ const panelStyle = computed(() => {
 
 const visible       = ref(false)
 const hoveredAction = ref<MenuAction | null>(null)
+// When closing because a bubble was clicked, skip the leave transition: the
+// fade-out would otherwise play *after* a tarot-triggered window move and
+// appear as ghost bubbles at the new window centre.
+const skipLeave     = ref(false)
 
 const items = computed(() =>
   BUBBLE_DEFS.map(b => ({
@@ -76,7 +82,9 @@ function close() {
 
 function onBubbleClick(action: MenuAction) {
   emit('action', action)
+  skipLeave.value = true   // vanish immediately — no fade-out at the new window pos
   close()
+  void nextTick(() => { skipLeave.value = false })
 }
 
 // ── Outside-click / Escape ───────────────────────────────────────────
@@ -111,7 +119,7 @@ defineExpose({ open, close })
 <template>
   <!-- duration: enter covers stagger (4×45ms) + transition (300ms) = 480ms → 520ms;
        leave matches transition duration (160ms) → 180ms -->
-  <Transition name="panel" :duration="{ enter: 520, leave: 180 }">
+  <Transition name="panel" :css="!skipLeave" :duration="{ enter: 520, leave: 180 }">
     <div v-if="visible" class="bubble-panel" :style="panelStyle">
       <div
         v-for="(item, i) in items"

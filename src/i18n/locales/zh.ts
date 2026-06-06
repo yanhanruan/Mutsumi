@@ -43,6 +43,7 @@ export const zh: Translations = {
     feed:          '投喂抹茶芭菲',
     sleep:         '睡觉',
     fast_learning: '快速学习',
+    tarot:         '塔罗占卜',
     hide:          '隐藏应用',
   },
 
@@ -56,4 +57,20 @@ export const zh: Translations = {
 
   // ── Late-night reminder ───────────────────────────────────────────
   lateNightReminder: '都这么晚了，早点睡吧！',
+
+  // ── Tarot overlay UI chrome ───────────────────────────────────────
+  tarot: {
+    interpreting: '正在解读星象……',
+    hint:         '轻触卡牌，揭示你的运势。',
+    upright:      '正位',
+    reversed:     '逆位',
+    redraw:       '重抽',
+    download:     '下载卡牌',
+    saved:        '已保存到下载文件夹',
+    openFolder:   '打开文件夹',
+    close:        '关闭',
+    today:        '今日卡牌',
+    history:      '最近',
+    empty:        '还没有占卜记录。',
+  },
 }

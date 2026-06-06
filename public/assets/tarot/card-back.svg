@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 500" width="300" height="500">
+  <defs>
+    <linearGradient id="gb" x1="0" y1="0" x2="0.3" y2="1">
+      <stop offset="0" stop-color="#dff0df"/>
+      <stop offset="1" stop-color="#a9cda9"/>
+    </linearGradient>
+    <pattern id="lattice" width="34" height="34" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <path d="M0 17 H34 M17 0 V34" stroke="rgba(86,122,86,0.28)" stroke-width="1.5"/>
+    </pattern>
+  </defs>
+  <rect x="3" y="3" width="294" height="494" rx="24" fill="url(#gb)"/>
+  <rect x="3" y="3" width="294" height="494" rx="24" fill="url(#lattice)"/>
+  <rect x="16" y="16" width="268" height="468" rx="16"
+        fill="none" stroke="rgba(86,122,86,0.55)" stroke-width="2.5"/>
+  <circle cx="150" cy="250" r="70" fill="rgba(245,250,245,0.85)"
+          stroke="rgba(86,122,86,0.5)" stroke-width="2"/>
+  <text x="150" y="250" font-size="64" text-anchor="middle"
+        dominant-baseline="central" fill="rgba(70,108,70,0.85)">✦</text>
+</svg>

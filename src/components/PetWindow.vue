@@ -10,23 +10,25 @@
  * - Chat bubble is absolutely positioned above the pet so the pet fills the
  *   entire window.
  */
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useAnimator, DEFAULT_ANIMATIONS } from '../composables/useAnimator'
 import { useAudioReaction } from '../composables/useAudioReaction'
 import { useHitTest } from '../composables/useHitTest'
 import { usePetStatus } from '../composables/usePetStatus'
 import { useI18n } from '../i18n'
 import { MUTSUMI_ALL_QUOTES } from '../data/mutsumiQuotes'
-import { getCurrentWindow } from '@tauri-apps/api/window'
+import { getCurrentWindow, currentMonitor } from '@tauri-apps/api/window'
 import { LogicalSize } from '@tauri-apps/api/dpi'
 import { invoke } from '@tauri-apps/api/core'
 import { useAppConfig, CHAR_SIZE_DIMS } from '../composables/useAppConfig'
 import { useWeatherAvailable } from '../composables/useWeatherAvailable'
+import { TAROT_WINDOW_DIMS } from '../config/tarot'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import ChatBubble from './ChatBubble.vue'
 import PomodoroBadge from './PomodoroBadge.vue'
 import WeatherBadge from './WeatherBadge.vue'
 import BalloonPet from './BalloonPet.vue'
+import TarotCard from './TarotCard.vue'
 import ContextMenu, { type MenuAction, type ContextActionKey } from './ContextMenu.vue'
 
 const imgRef = ref<HTMLImageElement | null>(null)
@@ -60,12 +62,19 @@ const { t, locale } = useI18n()
 const { config } = useAppConfig()
 const { weatherAvailable } = useWeatherAvailable()
 
+// True while the tarot overlay is open (declared before the size watch below,
+// which reads it on its immediate run).
+const tarotActive = ref(false)
+
 // ── Window sizing (Task 3) ─────────────────────────────────────────
 // Resize the main window whenever the user changes the character size
 // in the settings. `immediate: true` applies it on first mount too.
+// While the tarot overlay is open the window is held at its larger tarot
+// size, so skip pet-size syncing until it closes.
 watch(
   () => config.value.characterSize,
   size => {
+    if (tarotActive.value) return
     const [w, h] = CHAR_SIZE_DIMS[size]
     getCurrentWindow().setSize(new LogicalSize(w, h))
   },
@@ -74,6 +83,72 @@ watch(
 
 const bubbleRef  = ref<InstanceType<typeof ChatBubble> | null>(null)
 const contextRef = ref<InstanceType<typeof ContextMenu> | null>(null)
+const tarotRef   = ref<InstanceType<typeof TarotCard> | null>(null)
+
+// ── Tarot overlay ──────────────────────────────────────────────────
+// Integrated in-window reading (not a separate OS window). On open the main
+// window grows to a card-suitable size scaled by the 大中小 setting and the
+// pet sprite is hidden; on close both are restored to the pet's position/size.
+// (tarotActive is declared above — the size watch reads it on its immediate run.)
+let savedPos: Awaited<ReturnType<ReturnType<typeof getCurrentWindow>['outerPosition']>> | null = null
+
+// Apply size + position in ONE atomic native op (set_window_bounds → SetWindowPos)
+// so the window lands at its final bounds in a single step. Two separate ops
+// (setSize then center) produced a visible grow-then-recenter jump and could
+// re-enter tao's paint flush and panic. Bounds are physical pixels.
+async function setBounds(win: ReturnType<typeof getCurrentWindow>, x: number, y: number, pw: number, ph: number) {
+  await invoke('set_window_bounds', { x: Math.round(x), y: Math.round(y), width: Math.round(pw), height: Math.round(ph) })
+}
+
+// Resolve after the browser has actually painted (two rAFs: the first schedules
+// before the next paint, the second confirms it happened). Used to guarantee
+// the overlay is on screen BEFORE we move the window, so the move never carries
+// a stale pet/bubble frame to the new position.
+const nextPaint = () => new Promise<void>(r =>
+  requestAnimationFrame(() => requestAnimationFrame(() => r())),
+)
+
+// Ordering: the overlay must be painted before the window moves, so a
+// wrongly-sized pet frame is never carried to the new centre.
+async function openTarot() {
+  const win = getCurrentWindow()
+  try { savedPos = await win.outerPosition() } catch { savedPos = null }   // physical
+  bubbleRef.value?.hide()
+  tarotActive.value = true       // hide the pet sprite
+  tarotRef.value?.open()         // show the overlay BEFORE growing — it covers the window
+  await nextTick()               // flush the DOM update
+  await nextPaint()              // …and wait until the overlay has actually painted
+
+  const [lw, lh] = TAROT_WINDOW_DIMS[config.value.characterSize]
+  const sf  = await win.scaleFactor()
+  const mon = await currentMonitor()
+  const pw  = lw * sf
+  const ph  = lh * sf
+  // Centre on the monitor the pet sits on; fall back to growing in place.
+  let x = savedPos?.x ?? 0
+  let y = savedPos?.y ?? 0
+  if (mon) {
+    x = mon.position.x + (mon.size.width  - pw) / 2
+    y = mon.position.y + (mon.size.height - ph) / 2
+  }
+  await setBounds(win, x, y, pw, ph)
+}
+
+async function closeTarot() {
+  const win = getCurrentWindow()
+  const [lw, lh] = CHAR_SIZE_DIMS[config.value.characterSize]
+  const sf = await win.scaleFactor()
+  // Remove the card while the window is STILL centred (its correct place), and
+  // wait for that now-empty/transparent frame to paint — so no card lingers to
+  // flash at the pet's original position when we move the window back.
+  tarotRef.value?.dismiss()
+  await nextTick()
+  await nextPaint()
+  // The window is now empty/transparent; shrink + move it back invisibly.
+  await setBounds(win, savedPos?.x ?? 0, savedPos?.y ?? 0, lw * sf, lh * sf)
+  // Reveal the pet at the restored small position.
+  tarotActive.value = false
+}
 
 // ── Mouse interaction ──────────────────────────────────────────────
 const DRAG_THRESHOLD = 5
@@ -83,7 +158,7 @@ let pressed = false
 let didDrag = false
 
 function onMouseDown(e: MouseEvent) {
-  if (e.button !== 0) return
+  if (e.button !== 0 || tarotActive.value) return
   pressX = e.screenX
   pressY = e.screenY
   pressed = true
@@ -109,7 +184,7 @@ async function onMouseMove(e: MouseEvent) {
 }
 
 function onMouseUp(e: MouseEvent) {
-  if (e.button !== 0) return
+  if (e.button !== 0 || tarotActive.value) return
   if (pressed && !didDrag) {
     // True click — no movement.
     // Suppress the click animation while in music mode so it doesn't
@@ -129,13 +204,18 @@ function onMouseUp(e: MouseEvent) {
 
 function onContextMenu(e: MouseEvent) {
   e.preventDefault()
+  if (tarotActive.value) return
   contextRef.value?.open(e.clientX, e.clientY)
 }
 
 async function onContextAction(action: MenuAction) {
-  // Task 5: hide is frontend-only — no backend command, no bubble.
+  // Frontend-only actions — no backend command, no response bubble.
   if (action === 'hide') {
     await getCurrentWindow().hide()
+    return
+  }
+  if (action === 'tarot') {
+    await openTarot()
     return
   }
   // Play the pat_head animation immediately (like click — no pending delay).
@@ -170,14 +250,15 @@ onUnmounted(() => {
     @mouseup="onMouseUp"
     @contextmenu="onContextMenu"
   >
-    <img v-show="ready" ref="imgRef" class="frame" draggable="false" />
-    <PomodoroBadge />
-    <WeatherBadge v-if="config.showWeather && weatherAvailable !== false" />
+    <img v-show="ready && !tarotActive" ref="imgRef" class="frame" draggable="false" />
+    <PomodoroBadge v-if="!tarotActive" />
+    <WeatherBadge v-if="!tarotActive && config.showWeather && weatherAvailable !== false" />
     <div class="bubble-anchor">
       <ChatBubble ref="bubbleRef" />
     </div>
   </div>
   <ContextMenu ref="contextRef" @action="onContextAction" />
+  <TarotCard ref="tarotRef" @close="closeTarot" />
   <BalloonPet />
 </template>
 
