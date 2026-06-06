@@ -534,7 +534,7 @@ defineExpose({ open, dismiss })
 .card.is-glowing::before {
   content: '';
   position: absolute;
-  inset: -2px;
+  inset: 0px;
   border-radius: 18px;
   box-shadow: 0 0 10px 1px hsl(var(--hue) 80% 60% / 0.6);
   opacity: 0;
