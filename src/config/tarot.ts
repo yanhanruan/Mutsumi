@@ -34,19 +34,19 @@ const USE_CLASSIC_DECK = true
 
 /**
  * Classic-deck front filenames, indexed by card id (0–77). Major Arcana use
- * `NN-Name.jpg`; Minor Arcana use `Suit` + zero-padded rank (01=Ace … 14=King),
+ * `NN-Name.avif`; Minor Arcana use `Suit` + zero-padded rank (01=Ace … 14=King),
  * which matches the deck order (Wands 22–35, Cups 36–49, Swords 50–63,
  * Pentacles 64–77).
  */
 const CLASSIC_DECK_FILES: readonly string[] = [
-  '00-TheFool.jpg', '01-TheMagician.jpg', '02-TheHighPriestess.jpg', '03-TheEmpress.jpg',
-  '04-TheEmperor.jpg', '05-TheHierophant.jpg', '06-TheLovers.jpg', '07-TheChariot.jpg',
-  '08-Strength.jpg', '09-TheHermit.jpg', '10-WheelOfFortune.jpg', '11-Justice.jpg',
-  '12-TheHangedMan.jpg', '13-Death.jpg', '14-Temperance.jpg', '15-TheDevil.jpg',
-  '16-TheTower.jpg', '17-TheStar.jpg', '18-TheMoon.jpg', '19-TheSun.jpg',
-  '20-Judgement.jpg', '21-TheWorld.jpg',
+  '00-TheFool.avif', '01-TheMagician.avif', '02-TheHighPriestess.avif', '03-TheEmpress.avif',
+  '04-TheEmperor.avif', '05-TheHierophant.avif', '06-TheLovers.avif', '07-TheChariot.avif',
+  '08-Strength.avif', '09-TheHermit.avif', '10-WheelOfFortune.avif', '11-Justice.avif',
+  '12-TheHangedMan.avif', '13-Death.avif', '14-Temperance.avif', '15-TheDevil.avif',
+  '16-TheTower.avif', '17-TheStar.avif', '18-TheMoon.avif', '19-TheSun.avif',
+  '20-Judgement.avif', '21-TheWorld.avif',
   ...['Wands', 'Cups', 'Swords', 'Pentacles'].flatMap(suit =>
-    Array.from({ length: 14 }, (_, r) => `${suit}${String(r + 1).padStart(2, '0')}.jpg`),
+    Array.from({ length: 14 }, (_, r) => `${suit}${String(r + 1).padStart(2, '0')}.avif`),
   ),
 ]
 
@@ -54,13 +54,11 @@ const CLASSIC_DECK_FILES: readonly string[] = [
 
 export const TAROT_ASSETS = {
   /** Card-back artwork. '' → CSS gradient placeholder. */
-  cardBackImage: USE_CLASSIC_DECK
-    ? '/assets/tarot/CardBacks.jpg'
-    : '/assets/tarot/card-back.svg',
+  cardBackImage: '/assets/tarot/card-back.svg',
 
   /**
    * Builder for a card's front artwork from its id (0–77). Returns the classic
-   * JPG when USE_CLASSIC_DECK is true, otherwise the generated SVG placeholder.
+   * AVIF when USE_CLASSIC_DECK is true, otherwise the generated SVG placeholder.
    */
   cardFrontImage: (id: number): string =>
     USE_CLASSIC_DECK

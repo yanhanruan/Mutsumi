@@ -533,10 +533,8 @@ defineExpose({ open, dismiss })
   overflow: hidden;                 /* clip the tap-hint sheen to the card */
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
-  background-size: cover;
-  background-position: center;
+  background-size: 100% 100%;
   box-shadow: 0 10px 28px rgba(40, 70, 40, 0.30);
-  border: 1px solid rgba(255, 255, 255, 0.5);
 }
 .back  { transform: rotateY(0deg); }
 .front { transform: rotateY(180deg); }
