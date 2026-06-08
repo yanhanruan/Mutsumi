@@ -16,7 +16,16 @@
   <a href="#mutsumi--桌面陪伴宠物-中文"><b>中文</b></a> | <a href="#mutsumi--desktop-companion-english"><b>English</b></a>
 </p>
 
+<table align="center">
+  <tr>
+    <td align="center"><img src="docs/images/idle.avif"    width="200" alt="Mutsumi idle" /><br/><sub>🌿 静静陪伴 · just hanging out</sub></td>
+    <td align="center"><img src="docs/images/headpat.avif" width="200" alt="Head pat" /><br/><sub>✋ 摸摸头 · head pat</sub></td>
+    <td align="center"><img src="docs/images/tarot.avif"   width="200" alt="Tarot reading" /><br/><sub>🔮 塔罗占卜 · tarot reading</sub></td>
+  </tr>
+</table>
+
 ---
+
 
 <h2 id="mutsumi--桌面陪伴宠物-中文">🌟 Mutsumi — 桌面陪伴宠物</h2>
 
@@ -27,21 +36,67 @@ Mutsumi 是一个静静住在你屏幕角落的小伙伴。
 
 ### ✨ 核心体验
 
-* 👻 **无感陪伴，穿透点击**：始终悬浮在屏幕最前方，但透明区域完全穿透，绝不遮挡你点击底部的代码或网页。你可以随时把她拖拽到屏幕的任意角落。
-* 🎧 **全局音频感知（无需配置）**：当你开始播放音乐或看视频时，她会立刻戴上耳机跟着节奏晃动；声音停止，她会摘下耳机恢复平静。*（基于 Windows 原生音频 API，纯本地监听，无需麦克风权限，绝对保护隐私）*
-* 🍅 **极客番茄钟 & 天气**：内置轻量级专注/休息计时器，并在角落安静地展示实时天气。如果你断网了，天气模块会静默隐藏，绝不弹出烦人的报错。
-* 🎮 **丰富的互动菜单**：右键点击她，即可呼出互动面板：
-  * ✋ **摸摸头**：给她一点回应
-  * 🍵 **喂茶**：偶尔也要补充水分
-  * 📚 **专注模式**：进入沉浸式番茄钟
-  * 💤 **让她睡觉 / 隐藏**：当你需要绝对清爽的桌面时
+👻 **无感陪伴，穿透点击**：始终悬浮在屏幕最前方，但透明区域完全穿透，绝不遮挡你点击底部的代码或网页。你可以随时把她拖拽到屏幕的任意角落。
 
-*(此处插入：音乐响应演示 GIF)*
+🎧 **全局音频感知（无需配置）**：当你开始播放音乐或看视频时，她会立刻戴上耳机跟着节奏晃动；声音停止，她会摘下耳机恢复平静。
+
+🍅 **极客番茄钟 & 天气**：内置轻量级专注/休息计时器，并在角落安静地展示实时天气。
+
+🎮 **丰富的互动菜单**：右键点击她，即可呼出互动面板：
+* ✋ **摸摸头**：召唤哈基米摸摸头
+* 🍨 **喂抹茶芭菲**：抹茶芭菲最喜欢了！
+*  **让她睡觉 / 隐藏**：让她躲起来
+* 🔮 **每日塔罗占卜**：每天抽取3张专属塔罗牌，带来每天不一样的未知惊喜与指引。
+
+<h3 align="center">🎧 睦子米喜欢跟着节奏摇摆</h3>
+
+<p align="center">
+  <img src="docs/images/music1.avif" width="176" alt="music reaction 1" />
+  <img src="docs/images/music2.avif" width="176" alt="music reaction 2" />
+  <img src="docs/images/music3.avif" width="176" alt="music reaction 3" />
+  <img src="docs/images/music4.avif" width="176" alt="music reaction 4" />
+  <img src="docs/images/music5.avif" width="176" alt="music reaction 5" />
+</p>
+
+
+<h3 align="center">🔮 塔罗牌样例</h3>
+
+<table align="center">
+  <tr>
+    <td align="center"><img src="public/assets/tarot/Cups03.avif"   width="120" alt="Three of Cips" /></td>
+    <td align="center"><img src="public/assets/tarot/15-TheDevil.avif"  width="120" alt="The Devil" /></td>
+    <td align="center"><img src="public/assets/tarot/19-TheSun.avif"    width="120" alt="The Sun" /></td>
+    <td align="center"><img src="public/assets/tarot/Wands04.avif"   width="120" alt="Four of Wands" /></td>
+    <td align="center"><img src="public/assets/tarot/21-TheWorld.avif"  width="120" alt="The World" /></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="public/assets/tarot/Cups06.avif"       width="120" alt="Six of Cups" /></td>
+    <td align="center"><img src="public/assets/tarot/Cups13.avif"       width="120" alt="Queen of Cups" /></td>
+    <td align="center"><img src="public/assets/tarot/Wands05.avif"      width="120" alt="Five of Wands" /></td>
+    <td align="center"><img src="public/assets/tarot/Wands13.avif"      width="120" alt="Queen of Wands" /></td>
+    <td align="center"><img src="public/assets/tarot/Pentacles05.avif"  width="120" alt="Five of Pentacles" /></td>
+  </tr>
+</table>
+<p align="center"><sub><i>共 78 张卡片——每天都有不同的惊喜！（卡牌仅供娱乐）</i></sub></p>
+
+
+
+下个版本即将推出🚀：休闲小音游、屏保飞行模式.....
+
+
+
+### ⚙️ 偏好设置
+
+右键点击系统托盘（右下角）的 Mutsumi 图标，可以自定义：`番茄钟时长` / `角色体型 (小/中/大)` / `天气开关` / `界面语言`
+
+<p align="center"><img src="docs/images/setting.avif" width="440" alt="Settings window" /></p>
+
+---
 
 ### 🚀 快速获取
 
 **直接安装（推荐）：**
-前往 [Releases 页面](../../releases) 获取最新的 `.msi` 安装包，双击即可带她回家。（目前仅支持 Windows）
+前往 [Releases 页面](../../releases) 获取最新的 `.exe` 可执行文件，双击即可召唤小黄瓜。（目前仅支持 Windows）
 
 **面向开发者的源码构建：**
 如果你想研究 Tauri 的异形窗口或系统音频捕获逻辑，欢迎克隆代码！
@@ -55,10 +110,6 @@ npm run tauri dev
 ```
 
 *(首次运行会编译 Rust 核心依赖，大约需要喝杯茶的时间 🍵，后续启动秒开)*
-
-### ⚙️ 偏好设置
-
-右键点击系统托盘（右下角）的 Mutsumi 图标，可以自定义：`番茄钟时长` / `角色体型 (小/中/大)` / `天气开关` / `界面语言`
 
 ### 🛠️ 技术架构
 
@@ -94,26 +145,44 @@ Mutsumi/
 
 如果只是想聊聊设计思路或报告问题，直接开一个 [Issue](../../issues) 就好。
 
+如果喜欢这个项目，感谢你的star⭐——这对我们帮助很大！
+
 ---
 
 <h2 id="mutsumi--desktop-companion-english">🌟 Mutsumi — Desktop Companion</h2>
 
 <p align="center"><i>She doesn't tell you what to do. She's just quietly there, waiting.</i></p>
 
-Mutsumi is a quiet little companion living in the corner of your screen. She minds her own business, puts on her headphones when you play some tunes, and reacts when you interact with her. Powered by Tauri 2 and Rust, she is lightweight and resource-friendly.
+Mutsumi is a quiet little companion living in the corner of your screen. She minds her own business, puts on her headphones when you play some tunes, and reacts when you interact with her. Powered by **Tauri 2 + Rust**, she is exceptionally lightweight (only a few dozen megabytes) and consumes virtually no system resources.
 
-### ✨ What She Does
+### ✨ Core Features
 
-* 👻 **Always There, Never in the Way**: She stays on top of all windows, but her transparent background lets your mouse clicks pass right through. She will never block your code or workflow. Drag and drop her wherever you like!
-* 🎧 **Zero-Config Audio Reactivity**: The moment any audio starts playing on your PC, she puts on her headphones and grooves along. When the music stops, she settles back down. *(Powered by Windows native audio APIs — no microphone access required, 100% privacy-safe)*
-* 🍅 **Built-in Pomodoro & Weather**: Keep your workflow steady with an unobtrusive focus timer, alongside a silent local weather badge (which smoothly hides itself if you go offline).
-* 🎮 **Quick Interactions**: Right-click her to open the action menu:
-  * ✋ Pat her head
-  * 🍵 Give her some tea
-  * 📚 **Focus Mode** (Start Pomodoro)
-  * 💤 Put her to sleep / Hide
+👻 **Always There, Never in the Way**
+ Stays on top of all your windows, while fully transparent areas let your clicks pass straight through. Your code, browser, and apps remain completely accessible. Drag her anywhere on your screen at any time.
 
-*(Insert: Music Reaction GIF here)*
+🎧 **Automatic Audio Awareness**
+ Start playing music or a video, and she'll instantly put on her headphones and groove along to the beat. When the audio stops, she'll take them off and quietly return to idle.
+
+🍅 **Built-in Pomodoro Timer & Weather**
+ Stay focused with a lightweight Pomodoro timer and keep an eye on the current weather, conveniently displayed in the corner of your screen.
+
+🎮 **Fun Interactive Menu**
+ Right-click her to open a menu full of interactions:
+
+- ✋ **Pat Her Head** — Give her a gentle head pat.
+- 🍨 **Feed Her a Matcha Parfait** — Her favorite treat!
+- 😴 **Put Her to Sleep / Hide Her** — Let her take a break and disappear from view.
+- 🔮 **Daily Tarot Reading** — Draw three tarot cards each day for a fresh dose of mystery, surprises, and inspiration.
+
+<h3 align="center">🎧 Mutsumi Loves Bopping Along to Your Music</h3>
+
+<p align="center">
+  <img src="docs/images/music1.avif" width="105" alt="music reaction 1" />
+  <img src="docs/images/music2.avif" width="105" alt="music reaction 2" />
+  <img src="docs/images/music3.avif" width="105" alt="music reaction 3" />
+  <img src="docs/images/music4.avif" width="105" alt="music reaction 4" />
+  <img src="docs/images/music5.avif" width="105" alt="music reaction 5" />
+</p>
 
 ### 🚀 Getting Started
 
@@ -136,6 +205,10 @@ npm run tauri dev
 ### ⚙️ Settings
 
 Right-click her icon in the system tray (bottom-right corner) to tweak: `Pomodoro Durations` / `Character Size (S/M/L)` / `Weather Toggle` / `Language`
+
+<p align="center"><img src="docs/images/setting.avif" width="440" alt="Settings window" /></p>
+
+🚀 Coming soon: Casual Rhythm Game, Flying Screensaver Mode...
 
 ### 🛠️ Architecture
 
@@ -163,13 +236,13 @@ Mutsumi/
 
 ### 🤝 Contributing
 
-All contributions are welcome — bug reports, new animations, dialogue lines, translation fixes, or feature ideas. The bar to entry is low:
+Contributions of any kind are welcome! Whether you have an idea for a new feature, found a bug, or would like to help with animations, dialogue, or translations, we'd love to hear from you.
 
 1. Fork the repo
 2. Create a branch: `git checkout -b feat/your-idea`
 3. Commit your changes and open a Pull Request
 
-Just want to share a thought or report something? Open an [Issue](../../issues) — no pressure.
+Just want to share a thought or report something? Feel free to open an [Issue](../../issues) 
 
 ---
 
