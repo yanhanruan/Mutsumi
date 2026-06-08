@@ -107,13 +107,14 @@ export function buildPingPongSequence(
 // ── Default registry (matches Python original) ──────────────────────
 
 export const DEFAULT_ANIMATIONS: Record<AnimationName, AnimationDef> = {
-  idle:                { dir: 'idle',           count: 234, fps: 24, loop: true  },
+  idle:                { dir: 'idle',           count: 426, fps: 24, loop: true  },
   // ── Idle-variant placeholders ──────────────────────────────────────────
   // These fall back to the normal `idle` directory until dedicated animation
   // assets are added. To activate: update `dir` (and `count` if different).
-  idle_low_energy:    { dir: 'idle',           count: 419, fps: 24, loop: true  },
-  idle_low_affection: { dir: 'idle',           count: 419, fps: 24, loop: true  },
-  idle_exhausted:     { dir: 'idle',           count: 419, fps: 24, loop: true  },
+  // Kept in sync with `idle` (426) so they loop on the same seamless boundary.
+  idle_low_energy:    { dir: 'idle',           count: 426, fps: 24, loop: true  },
+  idle_low_affection: { dir: 'idle',           count: 426, fps: 24, loop: true  },
+  idle_exhausted:     { dir: 'idle',           count: 426, fps: 24, loop: true  },
   // ─────────────────────────────────────────────────────────────────────
   click:               { dir: 'click_matched',  count: 156, fps: 24, loop: false },
   pat_head:            { dir: 'pat_head',       count: 192, fps: 24, loop: false },
@@ -186,7 +187,7 @@ export function useAnimator(
 
     // ── Step 1: show the very first frame as soon as it has loaded ────────
     // Load frame_001 alone so the pet appears immediately instead of waiting
-    // for all 234 idle frames to download.
+    // for all idle frames to download.
     const firstFrame = new Image()
     firstFrame.src = `/assets/${idleDef.dir}/frame_001.webp`
     await new Promise<void>(res => {
