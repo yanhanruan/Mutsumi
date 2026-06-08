@@ -1,17 +1,9 @@
 # Claude rules for this project
 
-## Workflow
+The canonical rules now live in [`docs/rules/CLAUDE.md`](docs/rules/CLAUDE.md).
+This root file just re-imports them so Claude Code keeps loading them
+automatically (Claude Code only auto-discovers `CLAUDE.md` at the repo root and
+in the directory you're working in — a file buried under `docs/` would not be
+picked up on its own).
 
-- **Never commit without explicit user instruction.**
-  When changes are ready, stage them (`git add`) and stop.
-  Only run `git commit` after the user says "commit" or equivalent.
-
-## i18n
-
-- **Always implement i18n for user-facing strings.** Never hardcode display
-  text in components. Route every player-facing string through the existing
-  i18n system: add the key to `Translations` in `src/i18n/types.ts`, provide
-  `en` / `zh` / `ja` in `src/i18n/locales/*`, and read it via `useI18n()`.
-- For localized *data* (not just chrome), use a `{ en, zh, ja }` shape and
-  select by the active locale (see `LocalizedText` in `src/config/tarot.ts`).
-- Supported locales: `en`, `zh`, `ja` (fallback `en`).
+@docs/rules/CLAUDE.md
