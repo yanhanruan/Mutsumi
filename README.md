@@ -29,7 +29,7 @@
 
 <h2 id="mutsumi--桌面陪伴宠物-中文">🌟 Mutsumi — 桌面陪伴宠物</h2>
 
-<p align="center"><i>她不告诉你该怎么做。她只是安静地在那里等你。</i></p>
+<p align="center"><i>就算是黄瓜,也需要时间才能长大，好事不能着急 🌱</i></p>
 
 Mutsumi 是一个静静住在你屏幕角落的小伙伴。
 她不会打扰你工作，只是自顾自地待在那里。当你播放音乐时，她会默默戴上耳机感受节奏；当你感到疲惫时，可以戳戳她、喂杯茶。得益于 **Tauri 2 + Rust** 的底层驱动，她非常轻量（几十 MB），几乎不占用系统资源。
@@ -51,11 +51,11 @@ Mutsumi 是一个静静住在你屏幕角落的小伙伴。
 <h3 align="center">🎧 睦子米喜欢跟着节奏摇摆</h3>
 
 <p align="center">
-  <img src="docs/images/music1.avif" width="176" alt="music reaction 1" />
-  <img src="docs/images/music2.avif" width="176" alt="music reaction 2" />
-  <img src="docs/images/music3.avif" width="176" alt="music reaction 3" />
-  <img src="docs/images/music4.avif" width="176" alt="music reaction 4" />
-  <img src="docs/images/music5.avif" width="176" alt="music reaction 5" />
+  <img src="docs/images/music1.avif" width="105" alt="music reaction 1" />
+  <img src="docs/images/music2.avif" width="105" alt="music reaction 2" />
+  <img src="docs/images/music3.avif" width="105" alt="music reaction 3" />
+  <img src="docs/images/music4.avif" width="105" alt="music reaction 4" />
+  <img src="docs/images/music5.avif" width="105" alt="music reaction 5" />
 </p>
 
 
@@ -151,7 +151,7 @@ Mutsumi/
 
 <h2 id="mutsumi--desktop-companion-english">🌟 Mutsumi — Desktop Companion</h2>
 
-<p align="center"><i>She doesn't tell you what to do. She's just quietly there, waiting.</i></p>
+<p align="center"><i>If even a cucumber needs time to grow, there's no need to rush. Good things take time 🌱</i></p>
 
 Mutsumi is a quiet little companion living in the corner of your screen. She minds her own business, puts on her headphones when you play some tunes, and reacts when you interact with her. Powered by **Tauri 2 + Rust**, she is exceptionally lightweight (only a few dozen megabytes) and consumes virtually no system resources.
 
