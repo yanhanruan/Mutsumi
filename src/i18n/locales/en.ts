@@ -85,6 +85,7 @@ export const en: Translations = {
     replay:        'Replay',
     mute:          'Mute',
     unmute:        'Unmute',
+    volume:        'Volume',
   },
 
   lateNightReminder: "You shouldn't stay up so late!",

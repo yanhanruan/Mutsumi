@@ -109,6 +109,7 @@ export interface Translations {
     replay:        string   // restart-current-track button tooltip
     mute:          string   // mute button tooltip
     unmute:        string   // unmute button tooltip
+    volume:        string   // volume slider aria-label
   }
 
   // ── Late-night reminder ─────────────────────────────────────────

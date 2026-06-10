@@ -31,12 +31,17 @@ interface MediaSnapshot {
   can_play:    boolean
   can_pause:   boolean
   muted:       boolean
+  volume:      number
 }
 
 const { t } = useI18n()
 
 const data    = ref<MediaSnapshot | null>(null)
 const hovered = ref(false)
+
+// Volume slider state (local so dragging stays smooth between backend polls).
+const vol = ref(0)
+let draggingVol = false
 
 // Lottie speakers animation for the badge.
 const lottieEl = ref<HTMLElement | null>(null)
@@ -70,6 +75,7 @@ function applySnapshot(s: MediaSnapshot): void {
   basePos = s.position_ms
   baseAt  = performance.now()
   displayMs.value = s.position_ms
+  if (!draggingVol) vol.value = s.volume   // don't fight the user mid-drag
 }
 
 // Advance the displayed position while playing (rAF; cheap, only updates a ref).
@@ -91,6 +97,13 @@ async function toggleMute() {
     if (data.value) data.value = { ...data.value, muted: m }   // optimistic; poll re-syncs
   } catch { /* ignore */ }
 }
+function onVolumeInput(e: Event) {
+  const v = Number((e.target as HTMLInputElement).value)
+  vol.value = v
+  void invoke('media_set_volume', { level: v }).catch(() => {})
+}
+function onVolStart() { draggingVol = true }
+function onVolEnd()   { draggingVol = false }
 
 // ── Lottie badge ───────────────────────────────────────────────────
 function syncLottie() {
@@ -182,15 +195,26 @@ onUnmounted(() => {
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 6v12M15 12L6 6v12z"/></svg>
             </button>
           </div>
-          <!-- Secondary: replay + mute -->
+          <!-- Secondary: replay + mute (with a vertical volume popup on hover) -->
           <div class="ctrl-row">
             <button class="ctrl small" :data-tip="t.music.replay" :aria-label="t.music.replay" @click.stop="replay">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>
             </button>
-            <button class="ctrl small mute" :data-tip="muted ? t.music.unmute : t.music.mute" :aria-label="muted ? t.music.unmute : t.music.mute" :class="{ active: muted }" @click.stop="toggleMute">
-              <svg v-if="muted" viewBox="0 0 24 24" aria-hidden="true"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>
-              <svg v-else viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
-            </button>
+            <div class="vol-control">
+              <!-- Vertical volume slider, shown only while hovering the mute button -->
+              <div class="vol-popup">
+                <input
+                  type="range" class="vol-slider" min="0" max="1" step="0.01"
+                  :value="vol" :style="{ '--v': (vol * 100) + '%' }"
+                  :aria-label="t.music.volume"
+                  @input="onVolumeInput" @pointerdown="onVolStart" @pointerup="onVolEnd" @click.stop
+                />
+              </div>
+              <button class="ctrl small mute" :class="{ active: muted }" :aria-label="muted ? t.music.unmute : t.music.mute" @click.stop="toggleMute">
+                <svg v-if="muted" viewBox="0 0 24 24" aria-hidden="true"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>
+                <svg v-else viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -352,6 +376,55 @@ onUnmounted(() => {
 .ctrl:active:not(:disabled) { transform: scale(0.92); }
 .ctrl:disabled { opacity: 0.4; cursor: not-allowed; }
 
+/* ── Volume: vertical slider popup, shown on mute-button hover ───── */
+.vol-control { position: relative; display: flex; align-items: center; }
+.vol-popup {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 26px;
+  height: 92px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: rgba(245, 250, 245, 0.97);
+  border: 1px solid rgba(148, 185, 148, 0.45);
+  box-shadow: 0 3px 12px rgba(40, 70, 40, 0.16);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 140ms ease, visibility 140ms ease;
+  z-index: 6;
+}
+.vol-control:hover .vol-popup { opacity: 1; visibility: visible; }
+/* A horizontal range rotated -90° → reliable vertical slider with our custom
+   track gradient (left→bottom, so it fills from the bottom up). */
+.vol-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 72px;          /* becomes the vertical length once rotated */
+  height: 5px;
+  border-radius: 999px;
+  cursor: pointer;
+  transform: rotate(-90deg);
+  background: linear-gradient(
+    to right,
+    #5a8060 var(--v, 0%),
+    rgba(119, 153, 119, 0.25) var(--v, 0%)
+  );
+}
+.vol-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #fff;
+  border: 1px solid rgba(119, 153, 119, 0.5);
+  box-shadow: 0 1px 3px rgba(40, 70, 40, 0.25);
+  cursor: pointer;
+}
 
 /* ── Panel enter/leave ───────────────────────────────────────────── */
 /* Scale from the bottom-right (the badge) and fade — no translate, so the

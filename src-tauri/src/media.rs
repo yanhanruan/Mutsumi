@@ -53,6 +53,8 @@ pub struct MediaSnapshot {
     pub can_pause:   bool,
     /// System render-endpoint mute state (not part of SMTC — see endpoint volume).
     pub muted:       bool,
+    /// System render-endpoint master volume, 0.0–1.0.
+    pub volume:      f32,
 }
 
 pub struct MediaState(pub Mutex<MediaSnapshot>);
@@ -106,6 +108,19 @@ pub fn media_toggle_mute() -> Result<bool, String> {
     }
 }
 
+/// Set the system master volume (0.0–1.0).
+#[tauri::command]
+pub fn media_set_volume(level: f32) -> Result<(), String> {
+    init_mta();
+    let l = level.clamp(0.0, 1.0);
+    unsafe {
+        let vol = endpoint_volume().map_err(|e| e.message())?;
+        vol.SetMasterVolumeLevelScalar(l, std::ptr::null())
+            .map_err(|e| e.message())?;
+    }
+    Ok(())
+}
+
 /// Run a transport control against the current session (the closure issues the
 /// `Try*Async` call and awaits it via `.get()`, returning whether it succeeded).
 fn control<F>(f: F) -> Result<(), String>
@@ -132,13 +147,17 @@ unsafe fn endpoint_volume() -> windows::core::Result<IAudioEndpointVolume> {
     device.Activate(CLSCTX_ALL, None)
 }
 
-/// Read the system render-endpoint mute state (false if unavailable).
-fn read_muted() -> bool {
+/// Read the system render-endpoint (muted, volume 0.0–1.0); defaults if unavailable.
+fn read_endpoint() -> (bool, f32) {
     unsafe {
-        endpoint_volume()
-            .and_then(|v| v.GetMute())
-            .map(|b| b.as_bool())
-            .unwrap_or(false)
+        match endpoint_volume() {
+            Ok(v) => {
+                let muted  = v.GetMute().map(|b| b.as_bool()).unwrap_or(false);
+                let volume = v.GetMasterVolumeLevelScalar().unwrap_or(0.0);
+                (muted, volume)
+            }
+            Err(_) => (false, 0.0),
+        }
     }
 }
 
@@ -192,7 +211,9 @@ fn read_snapshot() -> MediaSnapshot {
     }
 
     snap.active = matches!(snap.status.as_str(), "playing" | "paused" | "changing");
-    snap.muted  = read_muted();
+    let (muted, volume) = read_endpoint();
+    snap.muted  = muted;
+    snap.volume = volume;
     snap
 }
 

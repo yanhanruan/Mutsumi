@@ -85,6 +85,7 @@ export const zh: Translations = {
     replay:        '重播',
     mute:          '静音',
     unmute:        '取消静音',
+    volume:        '音量',
   },
 
   lateNightReminder: '都这么晚了，早点睡吧！',
