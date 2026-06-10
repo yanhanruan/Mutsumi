@@ -28,6 +28,7 @@ interface MediaSnapshot {
   can_prev:    boolean
   can_play:    boolean
   can_pause:   boolean
+  muted:       boolean
 }
 
 const { t } = useI18n()
@@ -42,6 +43,7 @@ const displayMs = ref(0)
 let raf = 0
 
 const playing  = computed(() => data.value?.status === 'playing')
+const muted    = computed(() => data.value?.muted ?? false)
 const title    = computed(() => data.value?.title?.trim() || t.value.music.unknownTitle)
 const artist   = computed(() => data.value?.artist?.trim() || t.value.music.unknownArtist)
 const duration = computed(() => data.value?.duration_ms ?? 0)
@@ -76,6 +78,13 @@ function tick(): void {
 function prev()      { void invoke('media_prev').catch(() => {}) }
 function next()      { void invoke('media_next').catch(() => {}) }
 function playPause() { void invoke('media_play_pause').catch(() => {}) }
+function replay()    { void invoke('media_replay').catch(() => {}) }
+async function toggleMute() {
+  try {
+    const m = await invoke<boolean>('media_toggle_mute')
+    if (data.value) data.value = { ...data.value, muted: m }   // optimistic; poll re-syncs
+  } catch { /* ignore */ }
+}
 
 let unlisten: UnlistenFn | null = null
 
@@ -117,16 +126,29 @@ onUnmounted(() => {
           <span>{{ fmt(duration) }}</span>
         </div>
         <div class="controls">
-          <button class="ctrl" :data-tip="t.music.prev" :aria-label="t.music.prev" :disabled="!data?.can_prev" @click.stop="prev">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 6v12M9 12l9 6V6z"/></svg>
-          </button>
-          <button class="ctrl play" :data-tip="playing ? t.music.pause : t.music.play" :aria-label="playing ? t.music.pause : t.music.play" @click.stop="playPause">
-            <svg v-if="playing" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5h3v14H8zM13 5h3v14h-3z"/></svg>
-            <svg v-else viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5l11 7-11 7z"/></svg>
-          </button>
-          <button class="ctrl" :data-tip="t.music.next" :aria-label="t.music.next" :disabled="!data?.can_next" @click.stop="next">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 6v12M15 12L6 6v12z"/></svg>
-          </button>
+          <!-- Primary transport -->
+          <div class="ctrl-row">
+            <button class="ctrl" :data-tip="t.music.prev" :aria-label="t.music.prev" :disabled="!data?.can_prev" @click.stop="prev">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 6v12M9 12l9 6V6z"/></svg>
+            </button>
+            <button class="ctrl play" :data-tip="playing ? t.music.pause : t.music.play" :aria-label="playing ? t.music.pause : t.music.play" @click.stop="playPause">
+              <svg v-if="playing" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5h3v14H8zM13 5h3v14h-3z"/></svg>
+              <svg v-else viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5l11 7-11 7z"/></svg>
+            </button>
+            <button class="ctrl" :data-tip="t.music.next" :aria-label="t.music.next" :disabled="!data?.can_next" @click.stop="next">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 6v12M15 12L6 6v12z"/></svg>
+            </button>
+          </div>
+          <!-- Secondary: replay + mute -->
+          <div class="ctrl-row">
+            <button class="ctrl small" :data-tip="t.music.replay" :aria-label="t.music.replay" @click.stop="replay">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>
+            </button>
+            <button class="ctrl small" :data-tip="muted ? t.music.unmute : t.music.mute" :aria-label="muted ? t.music.unmute : t.music.mute" :class="{ active: muted }" @click.stop="toggleMute">
+              <svg v-if="muted" viewBox="0 0 24 24" aria-hidden="true"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>
+              <svg v-else viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+            </button>
+          </div>
         </div>
       </div>
     </Transition>
@@ -249,7 +271,8 @@ onUnmounted(() => {
 }
 
 /* ── Controls ────────────────────────────────────────────────────── */
-.controls { display: flex; align-items: center; justify-content: center; gap: 14px; }
+.controls { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.ctrl-row { display: flex; align-items: center; justify-content: center; gap: 12px; }
 /* Frosted circular buttons — same language as the tarot controls (.ctrl). */
 .ctrl {
   position: relative;
@@ -290,12 +313,22 @@ onUnmounted(() => {
 .ctrl[data-tip]:hover::after { opacity: 1; visibility: visible; }
 .ctrl svg { width: 14px; height: 14px; fill: currentColor; }
 .ctrl.play {
-  width: 32px; height: 32px;
+  width: 30px; height: 30px;
   border-color: transparent;
   background: linear-gradient(135deg, #779977, #5a8060);
   color: #fff;
 }
-.ctrl.play svg { width: 16px; height: 16px; }
+.ctrl.play svg { width: 15px; height: 15px; }
+/* Secondary row (replay / mute) — slightly smaller. */
+.ctrl.small { width: 24px; height: 24px; }
+.ctrl.small svg { width: 13px; height: 13px; }
+/* Muted state highlight. */
+.ctrl.active {
+  background: linear-gradient(135deg, #b06a6a, #8a5050);
+  border-color: transparent;
+  color: #fff;
+}
+.ctrl.active:hover:not(:disabled) { background: linear-gradient(135deg, #c07a7a, #8a5050); }
 .ctrl:hover:not(:disabled)  { background: #fff; transform: scale(1.08); }
 .ctrl.play:hover:not(:disabled) { background: linear-gradient(135deg, #80a880, #5a8060); transform: scale(1.08); }
 .ctrl:active:not(:disabled) { transform: scale(0.92); }

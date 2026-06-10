@@ -63,6 +63,8 @@ pub fn run() {
       media::media_next,
       media::media_prev,
       media::media_stop,
+      media::media_replay,
+      media::media_toggle_mute,
       app_state::set_tray_locale,
       window_ops::set_window_bounds,
       card_export::save_card_image,

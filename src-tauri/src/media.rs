@@ -24,7 +24,13 @@ use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSessionManager as SessionManager,
     GlobalSystemMediaTransportControlsSessionPlaybackStatus as PlaybackStatus,
 };
-use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
+use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
+use windows::Win32::Media::Audio::{
+    eMultimedia, eRender, IMMDevice, IMMDeviceEnumerator, MMDeviceEnumerator,
+};
+use windows::Win32::System::Com::{
+    CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED,
+};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(1000);
 
@@ -45,6 +51,8 @@ pub struct MediaSnapshot {
     pub can_prev:    bool,
     pub can_play:    bool,
     pub can_pause:   bool,
+    /// System render-endpoint mute state (not part of SMTC — see endpoint volume).
+    pub muted:       bool,
 }
 
 pub struct MediaState(pub Mutex<MediaSnapshot>);
@@ -80,6 +88,23 @@ pub fn media_prev() -> Result<(), String> {
 pub fn media_stop() -> Result<(), String> {
     control(|s| s.TryStopAsync()?.get())
 }
+/// Restart the current track (seek to position 0).
+#[tauri::command]
+pub fn media_replay() -> Result<(), String> {
+    control(|s| s.TryChangePlaybackPositionAsync(0)?.get())
+}
+
+/// Toggle the system render endpoint mute; returns the new muted state.
+#[tauri::command]
+pub fn media_toggle_mute() -> Result<bool, String> {
+    init_mta();
+    unsafe {
+        let vol = endpoint_volume().map_err(|e| e.message())?;
+        let now = !vol.GetMute().map_err(|e| e.message())?.as_bool();
+        vol.SetMute(now, std::ptr::null()).map_err(|e| e.message())?;
+        Ok(now)
+    }
+}
 
 /// Run a transport control against the current session (the closure issues the
 /// `Try*Async` call and awaits it via `.get()`, returning whether it succeeded).
@@ -98,6 +123,23 @@ where
 fn current_session() -> windows::core::Result<Session> {
     let mgr = SessionManager::RequestAsync()?.get()?;
     mgr.GetCurrentSession()
+}
+
+/// Default render endpoint's volume control (for mute).
+unsafe fn endpoint_volume() -> windows::core::Result<IAudioEndpointVolume> {
+    let enumerator: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
+    let device: IMMDevice = enumerator.GetDefaultAudioEndpoint(eRender, eMultimedia)?;
+    device.Activate(CLSCTX_ALL, None)
+}
+
+/// Read the system render-endpoint mute state (false if unavailable).
+fn read_muted() -> bool {
+    unsafe {
+        endpoint_volume()
+            .and_then(|v| v.GetMute())
+            .map(|b| b.as_bool())
+            .unwrap_or(false)
+    }
 }
 
 /// TimeSpan is in 100-ns ticks → milliseconds.
@@ -150,6 +192,7 @@ fn read_snapshot() -> MediaSnapshot {
     }
 
     snap.active = matches!(snap.status.as_str(), "playing" | "paused" | "changing");
+    snap.muted  = read_muted();
     snap
 }
 

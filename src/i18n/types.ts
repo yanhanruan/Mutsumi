@@ -106,6 +106,9 @@ export interface Translations {
     play:          string   // play button tooltip
     pause:         string   // pause button tooltip
     next:          string   // next-track button tooltip
+    replay:        string   // restart-current-track button tooltip
+    mute:          string   // mute button tooltip
+    unmute:        string   // unmute button tooltip
   }
 
   // ── Late-night reminder ─────────────────────────────────────────
