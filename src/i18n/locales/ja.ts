@@ -75,6 +75,15 @@ export const ja: Translations = {
   },
 
   // ── Late-night reminder ───────────────────────────────────────────
+  music: {
+    unknownTitle:  '不明な曲',
+    unknownArtist: '不明なアーティスト',
+    prev:          '前の曲',
+    play:          '再生',
+    pause:         '一時停止',
+    next:          '次の曲',
+  },
+
   lateNightReminder: '夜更かしは健康によくない！',
 
   // ── Tarot overlay UI chrome ───────────────────────────────────────

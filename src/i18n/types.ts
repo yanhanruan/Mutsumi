@@ -98,6 +98,16 @@ export interface Translations {
     empty:        string   // empty-history placeholder
   }
 
+  // ── Mini music controller ───────────────────────────────────────
+  music: {
+    unknownTitle:  string   // fallback when the track has no title
+    unknownArtist: string   // fallback when the track has no artist
+    prev:          string   // previous-track button tooltip
+    play:          string   // play button tooltip
+    pause:         string   // pause button tooltip
+    next:          string   // next-track button tooltip
+  }
+
   // ── Late-night reminder ─────────────────────────────────────────
   lateNightReminder: string
 }

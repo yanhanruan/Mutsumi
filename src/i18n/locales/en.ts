@@ -75,6 +75,15 @@ export const en: Translations = {
   },
 
   // ── Late-night reminder ───────────────────────────────────────────
+  music: {
+    unknownTitle:  'Unknown track',
+    unknownArtist: 'Unknown artist',
+    prev:          'Previous',
+    play:          'Play',
+    pause:         'Pause',
+    next:          'Next',
+  },
+
   lateNightReminder: "You shouldn't stay up so late!",
 
   // ── Tarot overlay UI chrome ───────────────────────────────────────

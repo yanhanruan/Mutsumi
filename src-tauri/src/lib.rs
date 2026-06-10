@@ -5,6 +5,8 @@ mod card_export;
 mod cursor;
 mod idle;
 mod late_night;
+#[cfg(windows)]
+mod media;
 mod persistence;
 mod pomodoro;
 mod state;
@@ -22,6 +24,7 @@ pub fn run() {
   let shared = SharedState::new();
   let weather_state = weather::WeatherState::new();
   let audio_state   = audio::AudioState(AtomicBool::new(false));
+  let media_state   = media::MediaState::new();
 
   tauri::Builder::default()
     // ── Single-instance guard ─────────────────────────────────────────────
@@ -41,6 +44,7 @@ pub fn run() {
     .manage(shared.clone())
     .manage(weather_state)
     .manage(audio_state)
+    .manage(media_state)
     .invoke_handler(tauri::generate_handler![
       app_state::get_state,
       app_state::pet_click,
@@ -54,6 +58,11 @@ pub fn run() {
       weather::get_weather,
       weather::get_weather_status,
       audio::get_audio_state,
+      media::get_media,
+      media::media_play_pause,
+      media::media_next,
+      media::media_prev,
+      media::media_stop,
       app_state::set_tray_locale,
       window_ops::set_window_bounds,
       card_export::save_card_image,
@@ -83,6 +92,11 @@ pub fn run() {
         let stop_flag = Arc::new(AtomicBool::new(false));
         let _ = &stop_flag;   // not stored — runs for app lifetime
         audio::spawn(app.handle().clone(), stop_flag);
+
+        // Media transport controller (SMTC now-playing + transport).
+        let media_stop_flag = Arc::new(AtomicBool::new(false));
+        let _ = &media_stop_flag;
+        media::spawn(app.handle().clone(), media_stop_flag);
       }
 
       // System tray.

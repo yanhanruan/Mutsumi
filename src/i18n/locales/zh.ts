@@ -75,6 +75,15 @@ export const zh: Translations = {
   },
 
   // ── Late-night reminder ───────────────────────────────────────────
+  music: {
+    unknownTitle:  '未知曲目',
+    unknownArtist: '未知歌手',
+    prev:          '上一首',
+    play:          '播放',
+    pause:         '暂停',
+    next:          '下一首',
+  },
+
   lateNightReminder: '都这么晚了，早点睡吧！',
 
   // ── Tarot overlay UI chrome ───────────────────────────────────────
