@@ -12,10 +12,12 @@
  * is interpolated from a local clock between ~1 Hz backend updates so it ticks
  * smoothly.
  */
-import { onMounted, onUnmounted, ref, computed } from 'vue'
+import { onMounted, onUnmounted, ref, computed, watch, nextTick } from 'vue'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
+import lottie from 'lottie-web'
 import { useI18n } from '../i18n'
+import speakersAnim from '../assets/speakers.json'
 
 interface MediaSnapshot {
   active:      boolean
@@ -35,6 +37,10 @@ const { t } = useI18n()
 
 const data    = ref<MediaSnapshot | null>(null)
 const hovered = ref(false)
+
+// Lottie speakers animation for the badge.
+const lottieEl = ref<HTMLElement | null>(null)
+let anim: ReturnType<typeof lottie.loadAnimation> | null = null
 
 // Local progress interpolation between backend updates.
 let basePos    = 0          // position_ms at the last update
@@ -86,6 +92,37 @@ async function toggleMute() {
   } catch { /* ignore */ }
 }
 
+// ── Lottie badge ───────────────────────────────────────────────────
+function syncLottie() {
+  if (!anim) return
+  if (playing.value) anim.play()
+  else anim.pause()
+}
+function ensureLottie() {
+  if (anim || !lottieEl.value) return
+  anim = lottie.loadAnimation({
+    container: lottieEl.value,
+    renderer: 'svg',
+    loop: true,
+    autoplay: false,
+    animationData: speakersAnim,
+  })
+  syncLottie()
+}
+watch(playing, syncLottie)
+// The badge only exists in the DOM while a session is active. Its container is
+// recreated by v-if each time, so destroy the old animation when it disappears
+// and re-create against the fresh container when it reappears.
+watch(() => data.value?.active, async (active) => {
+  if (active) {
+    await nextTick()
+    ensureLottie()
+  } else {
+    anim?.destroy()
+    anim = null
+  }
+})
+
 let unlisten: UnlistenFn | null = null
 
 onMounted(async () => {
@@ -96,11 +133,14 @@ onMounted(async () => {
 
   unlisten = await listen<MediaSnapshot>('media-update', e => applySnapshot(e.payload))
   raf = requestAnimationFrame(tick)
+  if (data.value?.active) { await nextTick(); ensureLottie() }
 })
 
 onUnmounted(() => {
   unlisten?.()
   cancelAnimationFrame(raf)
+  anim?.destroy()
+  anim = null
 })
 </script>
 
@@ -147,7 +187,7 @@ onUnmounted(() => {
             <button class="ctrl small" :data-tip="t.music.replay" :aria-label="t.music.replay" @click.stop="replay">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>
             </button>
-            <button class="ctrl small" :data-tip="muted ? t.music.unmute : t.music.mute" :aria-label="muted ? t.music.unmute : t.music.mute" :class="{ active: muted }" @click.stop="toggleMute">
+            <button class="ctrl small mute" :data-tip="muted ? t.music.unmute : t.music.mute" :aria-label="muted ? t.music.unmute : t.music.mute" :class="{ active: muted }" @click.stop="toggleMute">
               <svg v-if="muted" viewBox="0 0 24 24" aria-hidden="true"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>
               <svg v-else viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
             </button>
@@ -156,9 +196,9 @@ onUnmounted(() => {
       </div>
     </Transition>
 
-    <!-- Compact equalizer badge -->
-    <div class="badge" :class="{ playing }">
-      <span class="eq"><i /><i /><i /></span>
+    <!-- Animated speakers badge (Lottie) -->
+    <div class="badge">
+      <div ref="lottieEl" class="lottie" />
     </div>
   </div>
 </template>
@@ -178,44 +218,19 @@ onUnmounted(() => {
   z-index: 1;
 }
 
-/* ── Badge ───────────────────────────────────────────────────────── */
+/* ── Badge (animated Lottie speakers) ────────────────────────────── */
 .badge {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.20);
-  backdrop-filter: blur(14px) saturate(180%);
-  -webkit-backdrop-filter: blur(14px) saturate(180%);
-  border: 1px solid rgba(255, 255, 255, 0.38);
-  box-shadow:
-    0 3px 10px rgba(40, 70, 40, 0.14),
-    inset 0 1px 0 rgba(255, 255, 255, 0.55);
-  transition: transform 160ms cubic-bezier(0.34, 1.56, 0.64, 1), background 160ms ease;
+  width: 46px;
+  height: 46px;
   cursor: default;
+  transition: transform 160ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  filter: drop-shadow(0 2px 5px rgba(40, 70, 40, 0.18));
 }
-.music-anchor:hover .badge {
-  transform: scale(1.10);
-  background: rgba(255, 255, 255, 0.28);
-}
-
-/* equalizer bars */
-.eq { display: flex; align-items: flex-end; gap: 2px; height: 14px; }
-.eq i {
-  width: 3px;
-  height: 40%;
-  border-radius: 1px;
-  background: #2a6a4a;
-}
-.badge.playing .eq i { animation: eq 900ms ease-in-out infinite; }
-.badge.playing .eq i:nth-child(2) { animation-delay: 150ms; }
-.badge.playing .eq i:nth-child(3) { animation-delay: 300ms; }
-@keyframes eq {
-  0%, 100% { height: 30%; }
-  50%      { height: 100%; }
-}
+.music-anchor:hover .badge { transform: scale(1.10); }
+.lottie { width: 100%; height: 100%; }
 
 /* ── Panel ───────────────────────────────────────────────────────── */
 .panel {
@@ -336,6 +351,7 @@ onUnmounted(() => {
 .ctrl.play:hover:not(:disabled) { background: linear-gradient(135deg, #80a880, #5a8060); transform: scale(1.08); }
 .ctrl:active:not(:disabled) { transform: scale(0.92); }
 .ctrl:disabled { opacity: 0.4; cursor: not-allowed; }
+
 
 /* ── Panel enter/leave ───────────────────────────────────────────── */
 /* Scale from the bottom-right (the badge) and fade — no translate, so the
