@@ -117,14 +117,14 @@ onUnmounted(() => {
           <span>{{ fmt(duration) }}</span>
         </div>
         <div class="controls">
-          <button class="ctrl" :title="t.music.prev" :disabled="!data?.can_prev" @click.stop="prev">
+          <button class="ctrl" :data-tip="t.music.prev" :aria-label="t.music.prev" :disabled="!data?.can_prev" @click.stop="prev">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 6v12M9 12l9 6V6z"/></svg>
           </button>
-          <button class="ctrl play" :title="playing ? t.music.pause : t.music.play" @click.stop="playPause">
+          <button class="ctrl play" :data-tip="playing ? t.music.pause : t.music.play" :aria-label="playing ? t.music.pause : t.music.play" @click.stop="playPause">
             <svg v-if="playing" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5h3v14H8zM13 5h3v14h-3z"/></svg>
             <svg v-else viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5l11 7-11 7z"/></svg>
           </button>
-          <button class="ctrl" :title="t.music.next" :disabled="!data?.can_next" @click.stop="next">
+          <button class="ctrl" :data-tip="t.music.next" :aria-label="t.music.next" :disabled="!data?.can_next" @click.stop="next">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 6v12M15 12L6 6v12z"/></svg>
           </button>
         </div>
@@ -143,7 +143,7 @@ onUnmounted(() => {
 .music-anchor {
   position: absolute;
   bottom: 8px;
-  right: 8px;
+  right: 6px;
   display: flex;
   flex-direction: column;       /* panel on top, badge anchored at the bottom */
   align-items: flex-end;
@@ -166,8 +166,8 @@ onUnmounted(() => {
   -webkit-backdrop-filter: blur(14px) saturate(180%);
   border: 1px solid rgba(255, 255, 255, 0.38);
   box-shadow:
-    0 2px 8px rgba(0, 0, 0, 0.10),
-    inset 0 1px 0 rgba(255, 255, 255, 0.50);
+    0 3px 10px rgba(40, 70, 40, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.55);
   transition: transform 160ms cubic-bezier(0.34, 1.56, 0.64, 1), background 160ms ease;
   cursor: default;
 }
@@ -199,17 +199,21 @@ onUnmounted(() => {
   gap: 6px;
   /* Fit within the (small) pet window — 8px margins each side — capped so it
      doesn't get oversized on the large character setting. */
-  width: calc(100vw - 16px);
-  max-width: 184px;
+  width: calc(100vw - 12px);
+  max-width: 240px;
   box-sizing: border-box;
-  padding: 9px 11px;
-  border-radius: 12px;
+  padding: 9px 10px;
+  border-radius: 14px;
+  /* Match the tarot reading panel (frosted green glass). */
   background: rgba(245, 250, 245, 0.94);
   backdrop-filter: blur(20px) saturate(160%);
   -webkit-backdrop-filter: blur(20px) saturate(160%);
   border: 1px solid rgba(148, 185, 148, 0.45);
-  box-shadow: 0 4px 16px rgba(40, 70, 40, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  /* Light, soft drop shadow. */
+  box-shadow: 0 3px 12px rgba(40, 70, 40, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.65);
   pointer-events: auto;
+  /* Collapse toward the badge (bottom-right) on enter/leave. */
+  transform-origin: bottom right;
 }
 .meta { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .title {
@@ -245,29 +249,61 @@ onUnmounted(() => {
 }
 
 /* ── Controls ────────────────────────────────────────────────────── */
-.controls { display: flex; align-items: center; justify-content: center; gap: 10px; }
+.controls { display: flex; align-items: center; justify-content: center; gap: 14px; }
+/* Frosted circular buttons — same language as the tarot controls (.ctrl). */
 .ctrl {
+  position: relative;
   display: flex; align-items: center; justify-content: center;
   width: 26px; height: 26px; padding: 0;
-  border: none; border-radius: 50%;
-  background: transparent;
+  border-radius: 50%;
+  border: 1px solid rgba(119, 153, 119, 0.40);
+  background: rgba(245, 250, 245, 0.92);
   color: #2a4a2a;
   cursor: pointer;
-  transition: transform 120ms ease, background 150ms ease, opacity 150ms ease;
+  box-shadow: 0 2px 8px rgba(40, 70, 40, 0.14);
+  transition: background 150ms ease, transform 120ms ease, opacity 150ms ease;
 }
-.ctrl svg { width: 16px; height: 16px; fill: currentColor; }
+
+/* Custom frosted tooltip above each button (replaces the native title box). */
+.ctrl[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  padding: 3px 7px;
+  border-radius: 7px;
+  font-family: system-ui, "Segoe UI", "Noto Sans SC", "Noto Sans JP", sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  color: #2a4a2a;
+  background: rgba(245, 250, 245, 0.97);
+  border: 1px solid rgba(148, 185, 148, 0.45);
+  box-shadow: 0 2px 8px rgba(40, 70, 40, 0.14);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 120ms ease, visibility 120ms ease;
+  pointer-events: none;
+  z-index: 5;
+}
+.ctrl[data-tip]:hover::after { opacity: 1; visibility: visible; }
+.ctrl svg { width: 14px; height: 14px; fill: currentColor; }
 .ctrl.play {
-  width: 30px; height: 30px;
+  width: 32px; height: 32px;
+  border-color: transparent;
   background: linear-gradient(135deg, #779977, #5a8060);
   color: #fff;
-  box-shadow: 0 2px 7px rgba(40, 70, 40, 0.22);
 }
-.ctrl:hover:not(:disabled)  { transform: scale(1.12); background: rgba(119, 153, 119, 0.16); }
-.ctrl.play:hover:not(:disabled) { transform: scale(1.10); background: linear-gradient(135deg, #80a880, #5a8060); }
-.ctrl:active:not(:disabled) { transform: scale(0.9); }
-.ctrl:disabled { opacity: 0.3; cursor: default; }
+.ctrl.play svg { width: 16px; height: 16px; }
+.ctrl:hover:not(:disabled)  { background: #fff; transform: scale(1.08); }
+.ctrl.play:hover:not(:disabled) { background: linear-gradient(135deg, #80a880, #5a8060); transform: scale(1.08); }
+.ctrl:active:not(:disabled) { transform: scale(0.92); }
+.ctrl:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* ── Panel enter/leave ───────────────────────────────────────────── */
-.tip-enter-active, .tip-leave-active { transition: opacity 150ms ease, transform 150ms ease; }
-.tip-enter-from, .tip-leave-to { opacity: 0; transform: translateY(4px) scale(0.97); }
+/* Scale from the bottom-right (the badge) and fade — no translate, so the
+   controls don't appear to slide when the panel closes. */
+.tip-enter-active, .tip-leave-active { transition: opacity 160ms ease, transform 160ms cubic-bezier(0.22, 1, 0.36, 1); }
+.tip-enter-from, .tip-leave-to { opacity: 0; transform: scale(0.92); }
 </style>
