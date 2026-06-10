@@ -110,6 +110,9 @@ onUnmounted(() => {
     class="music-anchor pet-ui-overlay"
     @mouseenter="hovered = true"
     @mouseleave="hovered = false"
+    @mousedown.stop
+    @mouseup.stop
+    @click.stop
   >
     <!-- Hover panel (above the badge) -->
     <Transition name="tip">
