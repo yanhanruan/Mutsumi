@@ -86,6 +86,8 @@ export const ja: Translations = {
     pause:         '一時停止',
     next:          '次の曲',
     replay:        '最初から',
+    skipBack:      '10秒戻る',
+    skipForward:   '10秒進む',
     mute:          'ミュート',
     unmute:        'ミュート解除',
     volume:        '音量',

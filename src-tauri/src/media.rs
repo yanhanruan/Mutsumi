@@ -96,6 +96,26 @@ pub fn media_replay() -> Result<(), String> {
     control(|s| s.TryChangePlaybackPositionAsync(0)?.get())
 }
 
+/// Seek relative to the current position by `delta_ms` (negative = backward),
+/// clamped to the track's [start, end]. Used by the ±10 s skip buttons.
+#[tauri::command]
+pub fn media_skip(delta_ms: i64) -> Result<(), String> {
+    init_mta();
+    let session = current_session().map_err(|_| "no active media session".to_string())?;
+    let tl = session.GetTimelineProperties().map_err(|e| e.message())?;
+    // Raw timeline ticks (100-ns); positions are absolute, not start-normalized.
+    let pos   = tl.Position().map(|t| t.Duration).unwrap_or(0);
+    let start = tl.StartTime().map(|t| t.Duration).unwrap_or(0);
+    let end   = tl.EndTime().map(|t| t.Duration).unwrap_or(0);
+    let target = (pos + delta_ms * 10_000).clamp(start, end.max(start));
+    let ok = session
+        .TryChangePlaybackPositionAsync(target)
+        .map_err(|e| e.message())?
+        .get()
+        .map_err(|e| e.message())?;
+    if ok { Ok(()) } else { Err("seek was rejected".into()) }
+}
+
 /// Toggle the system render endpoint mute; returns the new muted state.
 #[tauri::command]
 pub fn media_toggle_mute() -> Result<bool, String> {

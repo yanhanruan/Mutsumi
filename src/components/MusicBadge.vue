@@ -108,6 +108,8 @@ function prev()      { void invoke('media_prev').catch(() => {}) }
 function next()      { void invoke('media_next').catch(() => {}) }
 function playPause() { void invoke('media_play_pause').catch(() => {}) }
 function replay()    { void invoke('media_replay').catch(() => {}) }
+function skipBack()    { void invoke('media_skip', { deltaMs: -10_000 }).catch(() => {}) }
+function skipForward() { void invoke('media_skip', { deltaMs:  10_000 }).catch(() => {}) }
 async function toggleMute() {
   try {
     const m = await invoke<boolean>('media_toggle_mute')
@@ -215,6 +217,20 @@ onUnmounted(() => {
           <div class="ctrl-row">
             <button class="ctrl small" :data-tip="t.music.replay" :aria-label="t.music.replay" @click.stop="replay">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>
+            </button>
+            <!-- Seek back 10 s (rewind arrow + "10") -->
+            <button class="ctrl small" :data-tip="t.music.skipBack" :aria-label="t.music.skipBack" @click.stop="skipBack">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/>
+                <text x="12" y="15.5" text-anchor="middle" font-size="8.5" font-weight="800">10</text>
+              </svg>
+            </button>
+            <!-- Seek forward 10 s (mirrored arrow + upright "10") -->
+            <button class="ctrl small" :data-tip="t.music.skipForward" :aria-label="t.music.skipForward" @click.stop="skipForward">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <g transform="translate(24,0) scale(-1,1)"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></g>
+                <text x="12" y="15.5" text-anchor="middle" font-size="8.5" font-weight="800">10</text>
+              </svg>
             </button>
             <div class="vol-control">
               <!-- Vertical volume slider, shown only while hovering the mute button -->

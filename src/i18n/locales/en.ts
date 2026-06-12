@@ -86,6 +86,8 @@ export const en: Translations = {
     pause:         'Pause',
     next:          'Next',
     replay:        'Replay',
+    skipBack:      'Back 10s',
+    skipForward:   'Forward 10s',
     mute:          'Mute',
     unmute:        'Unmute',
     volume:        'Volume',

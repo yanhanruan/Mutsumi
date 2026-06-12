@@ -64,6 +64,7 @@ pub fn run() {
       media::media_prev,
       media::media_stop,
       media::media_replay,
+      media::media_skip,
       media::media_toggle_mute,
       media::media_set_volume,
       app_state::set_tray_locale,

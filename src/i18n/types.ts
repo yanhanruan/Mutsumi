@@ -110,6 +110,8 @@ export interface Translations {
     pause:         string   // pause button tooltip
     next:          string   // next-track button tooltip
     replay:        string   // restart-current-track button tooltip
+    skipBack:      string   // seek backward 10 s button tooltip
+    skipForward:   string   // seek forward 10 s button tooltip
     mute:          string   // mute button tooltip
     unmute:        string   // unmute button tooltip
     volume:        string   // volume slider aria-label

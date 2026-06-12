@@ -86,6 +86,8 @@ export const zh: Translations = {
     pause:         '暂停',
     next:          '下一首',
     replay:        '重播',
+    skipBack:      '后退10秒',
+    skipForward:   '快进10秒',
     mute:          '静音',
     unmute:        '取消静音',
     volume:        '音量',
