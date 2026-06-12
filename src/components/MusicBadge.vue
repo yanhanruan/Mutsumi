@@ -247,8 +247,10 @@ onUnmounted(() => {
 /* ── Anchor (bottom-right; panel stacks above the badge) ─────────── */
 .music-anchor {
   position: absolute;
+  /* Mirror WeatherBadge's anchor so the two badges share a right edge:
+     weather sits top-right, music sits bottom-right, both inset 8px. */
   bottom: 8px;
-  right: 6px;
+  right: 8px;
   display: flex;
   flex-direction: column;       /* panel on top, badge anchored at the bottom */
   align-items: flex-end;
