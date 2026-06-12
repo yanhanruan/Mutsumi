@@ -187,7 +187,7 @@ onUnmounted(() => {
   >
     <!-- Hover panel (above the badge) -->
     <Transition name="tip">
-      <div v-if="hovered" class="panel">
+      <div v-if="true" class="panel">
         <div class="meta">
           <div class="title">{{ title }}</div>
           <div class="artist">{{ artist }}</div>
@@ -218,18 +218,20 @@ onUnmounted(() => {
             <button class="ctrl small" :data-tip="t.music.replay" :aria-label="t.music.replay" @click.stop="replay">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>
             </button>
-            <!-- Seek back 10 s (rewind arrow + "10") -->
+            <!-- Seek back 10 s (counter-clockwise ring surrounding "10") -->
             <button class="ctrl small" :data-tip="t.music.skipBack" :aria-label="t.music.skipBack" @click.stop="skipBack">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/>
-                <text x="12" y="15.5" text-anchor="middle" font-size="8.5" font-weight="800">10</text>
+              <svg class="ic-seek" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+                <path d="M3 3v5h5"/>
+                <text x="12" y="15.7" text-anchor="middle" font-size="10.5" font-weight="700" fill="currentColor" stroke="none">10</text>
               </svg>
             </button>
-            <!-- Seek forward 10 s (mirrored arrow + upright "10") -->
+            <!-- Seek forward 10 s (clockwise ring surrounding "10") -->
             <button class="ctrl small" :data-tip="t.music.skipForward" :aria-label="t.music.skipForward" @click.stop="skipForward">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <g transform="translate(24,0) scale(-1,1)"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></g>
-                <text x="12" y="15.5" text-anchor="middle" font-size="8.5" font-weight="800">10</text>
+              <svg class="ic-seek" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M21 12a9 9 0 1 1-9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
+                <path d="M21 3v5h-5"/>
+                <text x="12" y="15.7" text-anchor="middle" font-size="10.5" font-weight="700" fill="currentColor" stroke="none">10</text>
               </svg>
             </button>
             <div class="vol-control">
@@ -387,6 +389,9 @@ onUnmounted(() => {
 }
 .ctrl[data-tip]:hover::after { opacity: 1; visibility: visible; }
 .ctrl svg { width: 14px; height: 14px; fill: currentColor; }
+/* Seek ±10s glyphs are stroked outlines (a ring that wraps the "10"), not
+   filled shapes — override the default fill and draw with the stroke. */
+.ctrl svg.ic-seek { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .ctrl.play {
   width: 30px; height: 30px;
   border-color: transparent;
