@@ -116,6 +116,26 @@ pub fn media_skip(delta_ms: i64) -> Result<(), String> {
     if ok { Ok(()) } else { Err("seek was rejected".into()) }
 }
 
+/// Seek to an absolute position, `position_ms` measured from the track start
+/// (i.e. start-normalized, matching the snapshot's `position_ms`). Used by the
+/// click/drag-to-seek progress bar.
+#[tauri::command]
+pub fn media_seek(position_ms: i64) -> Result<(), String> {
+    init_mta();
+    let session = current_session().map_err(|_| "no active media session".to_string())?;
+    let tl = session.GetTimelineProperties().map_err(|e| e.message())?;
+    let start = tl.StartTime().map(|t| t.Duration).unwrap_or(0);
+    let end   = tl.EndTime().map(|t| t.Duration).unwrap_or(0);
+    // Re-base onto the raw timeline and clamp to the track bounds.
+    let target = (start + position_ms.max(0) * 10_000).clamp(start, end.max(start));
+    let ok = session
+        .TryChangePlaybackPositionAsync(target)
+        .map_err(|e| e.message())?
+        .get()
+        .map_err(|e| e.message())?;
+    if ok { Ok(()) } else { Err("seek was rejected".into()) }
+}
+
 /// Toggle the system render endpoint mute; returns the new muted state.
 #[tauri::command]
 pub fn media_toggle_mute() -> Result<bool, String> {

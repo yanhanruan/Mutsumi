@@ -60,6 +60,11 @@ const audioOn = ref(false)
 const vol = ref(0)
 let draggingVol = false
 
+// Progress-bar seek state. While dragging we drive displayMs locally and hold
+// off the interpolation tick so the bar tracks the pointer crisply.
+const progressEl   = ref<HTMLElement | null>(null)
+const draggingSeek = ref(false)
+
 // Lottie speakers animation for the badge.
 const lottieEl = ref<HTMLElement | null>(null)
 let anim: ReturnType<typeof lottie.loadAnimation> | null = null
@@ -87,17 +92,58 @@ function fmt(ms: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 
+// Re-base the local interpolation clock onto an authoritative position.
+function adoptPosition(posMs: number): void {
+  basePos = posMs
+  baseAt  = performance.now()
+  displayMs.value = posMs
+}
+
+// Seek guard: after a user seek we optimistically jump the bar to the target
+// and ignore backend positions until they catch up (or a short timeout). The
+// SMTC timeline only refreshes ~1 Hz and often still reports the pre-seek
+// position for a poll or two, which would otherwise snap the bar backward.
+let pendingSeek: number | null = null
+let seekAt = 0
+const SEEK_SETTLE_TOLERANCE = 1500   // ms — backend within this of expected = settled
+const SEEK_GUARD_TIMEOUT    = 3000   // ms — stop guarding regardless after this
+
 function applySnapshot(s: MediaSnapshot): void {
   data.value = s
-  basePos = s.position_ms
-  baseAt  = performance.now()
-  displayMs.value = s.position_ms
   if (!draggingVol) vol.value = s.volume   // don't fight the user mid-drag
+
+  // While actively scrubbing, the pointer owns the playhead — never let a poll
+  // move it out from under the user.
+  if (draggingSeek.value) return
+
+  if (pendingSeek !== null) {
+    const since    = performance.now() - seekAt
+    const expected = pendingSeek + (s.status === 'playing' ? since : 0)
+    const settled  = Math.abs(s.position_ms - expected) <= SEEK_SETTLE_TOLERANCE
+    if (settled || since > SEEK_GUARD_TIMEOUT) {
+      pendingSeek = null
+      adoptPosition(s.position_ms)
+    }
+    // else: backend still reports the old position — keep interpolating locally
+    // from the seek target rather than snapping back to it.
+    return
+  }
+
+  // Normal sync. While playing, only re-base when the backend genuinely diverges
+  // from our 60fps projection (track change, external seek) — small IPC jitter is
+  // ignored so the bar stays buttery instead of hitching every poll.
+  if (s.status === 'playing') {
+    const projected = basePos + (performance.now() - baseAt)
+    if (Math.abs(projected - s.position_ms) > 400) adoptPosition(s.position_ms)
+  } else {
+    adoptPosition(s.position_ms)
+  }
 }
 
 // Advance the displayed position while playing (rAF; cheap, only updates a ref).
 function tick(): void {
   raf = requestAnimationFrame(tick)
+  if (draggingSeek.value) return            // pointer owns displayMs mid-drag
   if (!playing.value) { displayMs.value = basePos; return }
   const next = basePos + (performance.now() - baseAt)
   displayMs.value = duration.value > 0 ? Math.min(duration.value, next) : next
@@ -123,6 +169,37 @@ function onVolumeInput(e: Event) {
 }
 function onVolStart() { draggingVol = true }
 function onVolEnd()   { draggingVol = false }
+
+// ── Seek (click / drag the progress bar) ───────────────────────────
+// Map a pointer x to a start-normalized position in ms.
+function posFromEvent(e: PointerEvent): number {
+  const el = progressEl.value
+  if (!el || duration.value <= 0) return 0
+  const rect = el.getBoundingClientRect()
+  const frac = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width))
+  return frac * duration.value
+}
+function onSeekDown(e: PointerEvent) {
+  if (duration.value <= 0) return
+  draggingSeek.value = true
+  displayMs.value = posFromEvent(e)
+  ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
+}
+function onSeekMove(e: PointerEvent) {
+  if (!draggingSeek.value) return
+  displayMs.value = posFromEvent(e)
+}
+function onSeekUp(e: PointerEvent) {
+  if (!draggingSeek.value) return
+  const pos = posFromEvent(e)
+  draggingSeek.value = false
+  // Optimistically hold the bar at the target and guard against stale polls
+  // until the backend position catches up.
+  pendingSeek = pos
+  seekAt = performance.now()
+  adoptPosition(pos)
+  void invoke('media_seek', { positionMs: Math.round(pos) }).catch(() => {})
+}
 
 // ── Lottie badge ───────────────────────────────────────────────────
 // Spin while system audio plays; rest (reset to the first frame) when silent.
@@ -187,13 +264,22 @@ onUnmounted(() => {
   >
     <!-- Hover panel (above the badge) -->
     <Transition name="tip">
-      <div v-if="true" class="panel">
+      <div v-if="hovered" class="panel">
         <div class="meta">
           <div class="title">{{ title }}</div>
           <div class="artist">{{ artist }}</div>
         </div>
-        <div class="progress">
+        <div
+          ref="progressEl"
+          class="progress"
+          :class="{ dragging: draggingSeek, seekable: duration > 0 }"
+          @pointerdown.stop="onSeekDown"
+          @pointermove="onSeekMove"
+          @pointerup="onSeekUp"
+          @pointercancel="onSeekUp"
+        >
           <div class="bar" :style="{ width: pct + '%' }" />
+          <div class="seek-thumb" :style="{ left: pct + '%' }" />
         </div>
         <div class="times">
           <span>{{ fmt(displayMs) }}</span>
@@ -327,19 +413,50 @@ onUnmounted(() => {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
-/* ── Progress ────────────────────────────────────────────────────── */
+/* ── Progress (click / drag to seek) ─────────────────────────────── */
 .progress {
+  position: relative;
   height: 4px;
+  /* Thin visible track, but a taller transparent hit area for easy grabbing.
+     background-clip keeps the painted track at the 4px content box. */
+  padding: 6px 0;
+  margin: 1px 0;
   border-radius: 999px;
   background: rgba(119, 153, 119, 0.25);
-  overflow: hidden;
+  background-clip: content-box;
+  cursor: default;
+  touch-action: none;
 }
+.progress.seekable { cursor: pointer; }
 .bar {
-  height: 100%;
+  position: absolute;
+  left: 0;
+  top: 6px;
+  height: 4px;
   border-radius: 999px;
   background: linear-gradient(90deg, #779977, #5a8060);
-  transition: width 240ms linear;
+  /* No width transition: the bar is driven by a 60fps rAF clock, so it's
+     already smooth — a CSS transition would only lag it behind the playhead
+     and animate a visible slide on every seek. */
+  pointer-events: none;
 }
+/* Draggable handle — appears on hover / while dragging. */
+.seek-thumb {
+  position: absolute;
+  top: 8px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #fff;
+  border: 1px solid rgba(119, 153, 119, 0.6);
+  box-shadow: 0 1px 3px rgba(40, 70, 40, 0.25);
+  transform: translate(-50%, -50%);
+  opacity: 0;
+  transition: opacity 140ms ease;
+  pointer-events: none;
+}
+.progress.seekable:hover .seek-thumb,
+.progress.dragging .seek-thumb { opacity: 1; }
 .times {
   display: flex;
   justify-content: space-between;
