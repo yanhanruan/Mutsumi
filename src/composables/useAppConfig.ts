@@ -21,6 +21,8 @@ export type CharacterSize = 'small' | 'medium' | 'large'
 export interface AppConfig {
   characterSize: CharacterSize
   showWeather:   boolean
+  /** Show the mini music controller (Lottie speakers badge + transport panel). */
+  showMusic:     boolean
   /**
    * Manually-chosen UI language. `null` (the default) means "follow the
    * system" — the app uses navigator.language detection. Setting a locale
@@ -49,6 +51,7 @@ const EVENT_NAME   = 'app-config-changed'
 const DEFAULT_CONFIG: AppConfig = {
   characterSize: 'medium',
   showWeather:   true,
+  showMusic:     true,
   language:      null,   // null → follow system locale
 }
 

@@ -52,6 +52,9 @@ export const zh: Translations = {
   // ── Weather visibility ────────────────────────────────────────────
   showWeather: '显示天气',
 
+  // ── Music controller visibility ───────────────────────────────────
+  showMusic: '显示音乐控制器',
+
   // ── Pomodoro badge ────────────────────────────────────────────────
   pomFocus: '专注',
   pomBreak: '休息',

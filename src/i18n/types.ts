@@ -57,6 +57,9 @@ export interface Translations {
   // ── Weather visibility (Task 4) ─────────────────────────────────
   showWeather: string
 
+  // ── Music controller visibility ─────────────────────────────────
+  showMusic: string
+
   // ── Pomodoro badge ──────────────────────────────────────────────
   pomFocus:  string
   pomBreak:  string

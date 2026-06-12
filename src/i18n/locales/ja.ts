@@ -52,6 +52,9 @@ export const ja: Translations = {
   // ── Weather visibility ────────────────────────────────────────────
   showWeather: '天気を表示',
 
+  // ── Music controller visibility ───────────────────────────────────
+  showMusic: '音楽コントローラーを表示',
+
   // ── Pomodoro badge ────────────────────────────────────────────────
   pomFocus: '集中',
   pomBreak: '休憩',

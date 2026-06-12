@@ -94,6 +94,15 @@ async function toggleWeather() {
   await updateConfig({ showWeather: localShowWeather.value })
 }
 
+// ── Music controller visibility ───────────────────────────────────
+const localShowMusic = ref<boolean>(config.value.showMusic)
+
+watch(() => config.value.showMusic, v => { localShowMusic.value = v })
+
+async function toggleMusic() {
+  await updateConfig({ showMusic: localShowMusic.value })
+}
+
 // ── Window controls ────────────────────────────────────────────────
 
 const win = getCurrentWindow()
@@ -315,6 +324,20 @@ onMounted(async () => {
               v-model="localShowWeather"
               :disabled="weatherAvailable === false"
               @change="toggleWeather"
+            />
+            <span class="thumb" />
+          </label>
+        </div>
+
+        <!-- Music controller visibility -->
+        <div class="field-row" style="margin-top: 6px;">
+          <label for="music-toggle">{{ t.showMusic }}</label>
+          <label class="toggle">
+            <input
+              id="music-toggle"
+              type="checkbox"
+              v-model="localShowMusic"
+              @change="toggleMusic"
             />
             <span class="thumb" />
           </label>

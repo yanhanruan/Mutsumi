@@ -38,6 +38,11 @@ const { t } = useI18n()
 
 const data    = ref<MediaSnapshot | null>(null)
 const hovered = ref(false)
+// System-audio activity (from the WASAPI detector). The Lottie speakers spin
+// while audio is actually playing and rest when it stops — independent of
+// whether a controllable SMTC session exists. Whether the badge is *shown* at
+// all is decided in Settings (config.showMusic), not here.
+const audioOn = ref(false)
 
 // Volume slider state (local so dragging stays smooth between backend polls).
 const vol = ref(0)
@@ -106,10 +111,11 @@ function onVolStart() { draggingVol = true }
 function onVolEnd()   { draggingVol = false }
 
 // ── Lottie badge ───────────────────────────────────────────────────
+// Spin while system audio plays; rest (reset to the first frame) when silent.
 function syncLottie() {
   if (!anim) return
-  if (playing.value) anim.play()
-  else anim.pause()
+  if (audioOn.value) anim.play()
+  else anim.stop()
 }
 function ensureLottie() {
   if (anim || !lottieEl.value) return
@@ -122,21 +128,11 @@ function ensureLottie() {
   })
   syncLottie()
 }
-watch(playing, syncLottie)
-// The badge only exists in the DOM while a session is active. Its container is
-// recreated by v-if each time, so destroy the old animation when it disappears
-// and re-create against the fresh container when it reappears.
-watch(() => data.value?.active, async (active) => {
-  if (active) {
-    await nextTick()
-    ensureLottie()
-  } else {
-    anim?.destroy()
-    anim = null
-  }
-})
+watch(audioOn, syncLottie)
 
-let unlisten: UnlistenFn | null = null
+let unlisten:      UnlistenFn | null = null
+let unlistenStart: UnlistenFn | null = null
+let unlistenStop:  UnlistenFn | null = null
 
 onMounted(async () => {
   try {
@@ -144,13 +140,22 @@ onMounted(async () => {
     if (cached) applySnapshot(cached)
   } catch { /* ignore — events will populate it */ }
 
+  // Seed + subscribe to the system-audio detector so the speakers animate in
+  // lock-step with real playback (same events as the pet's headphones).
+  try { audioOn.value = await invoke<boolean>('get_audio_state') } catch { /* ignore */ }
+  unlistenStart = await listen('audio-started', () => { audioOn.value = true  })
+  unlistenStop  = await listen('audio-stopped', () => { audioOn.value = false })
+
   unlisten = await listen<MediaSnapshot>('media-update', e => applySnapshot(e.payload))
   raf = requestAnimationFrame(tick)
-  if (data.value?.active) { await nextTick(); ensureLottie() }
+  await nextTick()
+  ensureLottie()
 })
 
 onUnmounted(() => {
   unlisten?.()
+  unlistenStart?.()
+  unlistenStop?.()
   cancelAnimationFrame(raf)
   anim?.destroy()
   anim = null
@@ -159,7 +164,6 @@ onUnmounted(() => {
 
 <template>
   <div
-    v-if="data?.active"
     class="music-anchor pet-ui-overlay"
     @mouseenter="hovered = true"
     @mouseleave="hovered = false"

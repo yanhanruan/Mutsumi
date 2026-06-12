@@ -254,7 +254,7 @@ onUnmounted(() => {
     <img v-show="ready && !tarotActive" ref="imgRef" class="frame" draggable="false" />
     <PomodoroBadge v-if="!tarotActive" />
     <WeatherBadge v-if="!tarotActive && config.showWeather && weatherAvailable !== false" />
-    <MusicBadge v-if="!tarotActive" />
+    <MusicBadge v-if="!tarotActive && config.showMusic" />
     <div class="bubble-anchor">
       <ChatBubble ref="bubbleRef" />
     </div>

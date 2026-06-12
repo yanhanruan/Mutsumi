@@ -52,6 +52,9 @@ export const en: Translations = {
   // ── Weather visibility ────────────────────────────────────────────
   showWeather: 'Show Weather',
 
+  // ── Music controller visibility ───────────────────────────────────
+  showMusic: 'Show Music Controller',
+
   // ── Pomodoro badge ────────────────────────────────────────────────
   pomFocus: 'Focus',
   pomBreak: 'Break',
