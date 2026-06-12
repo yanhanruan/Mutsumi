@@ -203,14 +203,14 @@ onUnmounted(() => {
           <!-- Primary transport -->
           <div class="ctrl-row">
             <button class="ctrl" :data-tip="t.music.prev" :aria-label="t.music.prev" :disabled="!data?.can_prev" @click.stop="prev">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 6v12M9 12l9 6V6z"/></svg>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6h2.2v12H6z"/><path d="M19 6v12l-9-6z"/></svg>
             </button>
             <button class="ctrl play" :data-tip="playing ? t.music.pause : t.music.play" :aria-label="playing ? t.music.pause : t.music.play" @click.stop="playPause">
               <svg v-if="playing" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5h3v14H8zM13 5h3v14h-3z"/></svg>
               <svg v-else viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5l11 7-11 7z"/></svg>
             </button>
             <button class="ctrl" :data-tip="t.music.next" :aria-label="t.music.next" :disabled="!data?.can_next" @click.stop="next">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 6v12M15 12L6 6v12z"/></svg>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.8 6H18v12h-2.2z"/><path d="M5 6v12l9-6z"/></svg>
             </button>
           </div>
           <!-- Secondary: replay + mute (with a vertical volume popup on hover) -->
