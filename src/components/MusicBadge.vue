@@ -237,6 +237,7 @@ onUnmounted(() => {
             <div class="vol-control">
               <!-- Vertical volume slider, shown only while hovering the mute button -->
               <div class="vol-popup">
+                <span class="vol-val">{{ Math.round(vol * 100) }}</span>
                 <input
                   type="range" class="vol-slider" min="0" max="1" step="0.01"
                   :value="vol" :style="{ '--v': (vol * 100) + '%' }"
@@ -421,8 +422,8 @@ onUnmounted(() => {
   bottom: calc(100% + 8px);
   left: 50%;
   transform: translateX(-50%);
-  width: 26px;
-  height: 92px;
+  width: 28px;
+  height: 108px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -436,6 +437,20 @@ onUnmounted(() => {
   z-index: 6;
 }
 .vol-control:hover .vol-popup { opacity: 1; visibility: visible; }
+/* Live volume readout pinned above the (rotated) slider. */
+.vol-val {
+  position: absolute;
+  top: 6px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-family: system-ui, "Segoe UI", sans-serif;
+  font-size: 9.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #2a4a2a;
+  pointer-events: none;
+}
 /* A horizontal range rotated -90° → reliable vertical slider with our custom
    track gradient (left→bottom, so it fills from the bottom up). */
 .vol-slider {
