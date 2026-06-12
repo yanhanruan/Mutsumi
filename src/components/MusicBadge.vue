@@ -18,6 +18,10 @@ import { invoke } from '@tauri-apps/api/core'
 import lottie from 'lottie-web'
 import { useI18n } from '../i18n'
 import { useAppConfig, type CharacterSize } from '../composables/useAppConfig'
+import {
+  createClock, reconcile, commitSeek, tickPosition,
+  pctOf, fmtTime, seekPositionFromPointer, type ProgressClock,
+} from '../composables/mediaProgress'
 import speakersAnim from '../assets/speakers.json'
 
 interface MediaSnapshot {
@@ -69,9 +73,10 @@ const draggingSeek = ref(false)
 const lottieEl = ref<HTMLElement | null>(null)
 let anim: ReturnType<typeof lottie.loadAnimation> | null = null
 
-// Local progress interpolation between backend updates.
-let basePos    = 0          // position_ms at the last update
-let baseAt     = 0          // performance.now() at the last update
+// Local progress interpolation between backend updates. The clock + all the
+// re-base / seek-guard / track-change logic is pure and lives in mediaProgress;
+// this component just owns the refs, the rAF loop, and the pointer events.
+let clock: ProgressClock = createClock()
 const displayMs = ref(0)
 let raf = 0
 
@@ -80,73 +85,26 @@ const muted    = computed(() => data.value?.muted ?? false)
 const title    = computed(() => data.value?.title?.trim() || t.value.music.unknownTitle)
 const artist   = computed(() => data.value?.artist?.trim() || t.value.music.unknownArtist)
 const duration = computed(() => data.value?.duration_ms ?? 0)
-const pct = computed(() => {
-  const d = duration.value
-  return d > 0 ? Math.min(100, (displayMs.value / d) * 100) : 0
-})
+const pct = computed(() => pctOf(displayMs.value, duration.value))
 
-function fmt(ms: number): string {
-  const total = Math.max(0, Math.round(ms / 1000))
-  const m = Math.floor(total / 60)
-  const s = total % 60
-  return `${m}:${s.toString().padStart(2, '0')}`
-}
-
-// Re-base the local interpolation clock onto an authoritative position.
-function adoptPosition(posMs: number): void {
-  basePos = posMs
-  baseAt  = performance.now()
-  displayMs.value = posMs
-}
-
-// Seek guard: after a user seek we optimistically jump the bar to the target
-// and ignore backend positions until they catch up (or a short timeout). The
-// SMTC timeline only refreshes ~1 Hz and often still reports the pre-seek
-// position for a poll or two, which would otherwise snap the bar backward.
-let pendingSeek: number | null = null
-let seekAt = 0
-const SEEK_SETTLE_TOLERANCE = 1500   // ms — backend within this of expected = settled
-const SEEK_GUARD_TIMEOUT    = 3000   // ms — stop guarding regardless after this
+const fmt = fmtTime
 
 function applySnapshot(s: MediaSnapshot): void {
   data.value = s
   if (!draggingVol) vol.value = s.volume   // don't fight the user mid-drag
 
-  // While actively scrubbing, the pointer owns the playhead — never let a poll
-  // move it out from under the user.
-  if (draggingSeek.value) return
-
-  if (pendingSeek !== null) {
-    const since    = performance.now() - seekAt
-    const expected = pendingSeek + (s.status === 'playing' ? since : 0)
-    const settled  = Math.abs(s.position_ms - expected) <= SEEK_SETTLE_TOLERANCE
-    if (settled || since > SEEK_GUARD_TIMEOUT) {
-      pendingSeek = null
-      adoptPosition(s.position_ms)
-    }
-    // else: backend still reports the old position — keep interpolating locally
-    // from the seek target rather than snapping back to it.
-    return
-  }
-
-  // Normal sync. While playing, only re-base when the backend genuinely diverges
-  // from our 60fps projection (track change, external seek) — small IPC jitter is
-  // ignored so the bar stays buttery instead of hitching every poll.
-  if (s.status === 'playing') {
-    const projected = basePos + (performance.now() - baseAt)
-    if (Math.abs(projected - s.position_ms) > 400) adoptPosition(s.position_ms)
-  } else {
-    adoptPosition(s.position_ms)
+  clock = reconcile(clock, s, performance.now(), draggingSeek.value)
+  if (!draggingSeek.value) {
+    displayMs.value = tickPosition(clock, performance.now(), s.status === 'playing', s.duration_ms)
   }
 }
 
-// Advance the displayed position while playing (rAF; cheap, only updates a ref).
+// Advance the displayed position each frame (rAF; cheap, only updates a ref).
+// The pointer owns displayMs mid-drag, so skip interpolation then.
 function tick(): void {
   raf = requestAnimationFrame(tick)
-  if (draggingSeek.value) return            // pointer owns displayMs mid-drag
-  if (!playing.value) { displayMs.value = basePos; return }
-  const next = basePos + (performance.now() - baseAt)
-  displayMs.value = duration.value > 0 ? Math.min(duration.value, next) : next
+  if (draggingSeek.value) return
+  displayMs.value = tickPosition(clock, performance.now(), playing.value, duration.value)
 }
 
 // ── Controls ───────────────────────────────────────────────────────
@@ -174,10 +132,9 @@ function onVolEnd()   { draggingVol = false }
 // Map a pointer x to a start-normalized position in ms.
 function posFromEvent(e: PointerEvent): number {
   const el = progressEl.value
-  if (!el || duration.value <= 0) return 0
+  if (!el) return 0
   const rect = el.getBoundingClientRect()
-  const frac = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width))
-  return frac * duration.value
+  return seekPositionFromPointer(e.clientX, rect.left, rect.width, duration.value)
 }
 function onSeekDown(e: PointerEvent) {
   if (duration.value <= 0) return
@@ -193,12 +150,11 @@ function onSeekUp(e: PointerEvent) {
   if (!draggingSeek.value) return
   const pos = posFromEvent(e)
   draggingSeek.value = false
-  // Optimistically hold the bar at the target and guard against stale polls
-  // until the backend position catches up.
-  pendingSeek = pos
-  seekAt = performance.now()
-  adoptPosition(pos)
-  void invoke('media_seek', { positionMs: Math.round(pos) }).catch(() => {})
+  // Optimistically hold the bar at the target; the seek guard ignores stale
+  // polls until the backend position catches up.
+  clock = commitSeek(clock, pos, performance.now(), duration.value)
+  displayMs.value = clock.basePos
+  void invoke('media_seek', { positionMs: Math.round(clock.basePos) }).catch(() => {})
 }
 
 // ── Lottie badge ───────────────────────────────────────────────────
