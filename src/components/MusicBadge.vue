@@ -17,6 +17,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import lottie from 'lottie-web'
 import { useI18n } from '../i18n'
+import { useAppConfig, type CharacterSize } from '../composables/useAppConfig'
 import speakersAnim from '../assets/speakers.json'
 
 interface MediaSnapshot {
@@ -35,6 +36,17 @@ interface MediaSnapshot {
 }
 
 const { t } = useI18n()
+const { config } = useAppConfig()
+
+// Badge size tracks the character-size setting (大中小), mirroring how the rest
+// of the pet UI scales with the window. The Lottie itself is an SVG, so it
+// fills whatever box we give it crisply at any size.
+const BADGE_PX: Record<CharacterSize, number> = {
+  small:  34,
+  medium: 40,
+  large:  46,
+}
+const badgePx = computed(() => BADGE_PX[config.value.characterSize])
 
 const data    = ref<MediaSnapshot | null>(null)
 const hovered = ref(false)
@@ -224,8 +236,8 @@ onUnmounted(() => {
       </div>
     </Transition>
 
-    <!-- Animated speakers badge (Lottie) -->
-    <div class="badge">
+    <!-- Animated speakers badge (Lottie) — scales with the 大中小 setting -->
+    <div class="badge" :style="{ width: badgePx + 'px', height: badgePx + 'px' }">
       <div ref="lottieEl" class="lottie" />
     </div>
   </div>
@@ -251,8 +263,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 46px;
-  height: 46px;
+  /* width / height set inline from the 大中小 character-size setting. */
   cursor: default;
   transition: transform 160ms cubic-bezier(0.34, 1.56, 0.64, 1);
   filter: drop-shadow(0 2px 5px rgba(40, 70, 40, 0.18));
