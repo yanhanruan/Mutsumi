@@ -91,6 +91,8 @@ export const en: Translations = {
     mute:          'Mute',
     unmute:        'Unmute',
     volume:        'Volume',
+    source:        'Audio source',
+    autoSource:    'Auto (active)',
   },
 
   lateNightReminder: "You shouldn't stay up so late!",

@@ -24,6 +24,13 @@ import {
 } from '../composables/mediaProgress'
 import speakersAnim from '../assets/speakers.json'
 
+interface SessionInfo {
+  id:      string
+  title:   string
+  artist:  string
+  playing: boolean
+}
+
 interface MediaSnapshot {
   active:      boolean
   title:       string
@@ -37,6 +44,8 @@ interface MediaSnapshot {
   can_pause:   boolean
   muted:       boolean
   volume:      number
+  app_id:      string
+  sessions:    SessionInfo[]
 }
 
 const { t } = useI18n()
@@ -69,6 +78,14 @@ let draggingVol = false
 const progressEl   = ref<HTMLElement | null>(null)
 const draggingSeek = ref(false)
 
+// Source switcher: when several apps each hold a media session, the user can pin
+// which one the controller targets (so a paused source can be resumed instead of
+// the controller auto-jumping to whatever else is playing).
+const showSources = ref(false)
+// Local echo of the pin so the menu can highlight "Auto" vs a specific source
+// without waiting for the next backend poll. '' means auto-follow.
+const pinnedLocal = ref('')
+
 // Lottie speakers animation for the badge.
 const lottieEl = ref<HTMLElement | null>(null)
 let anim: ReturnType<typeof lottie.loadAnimation> | null = null
@@ -86,6 +103,11 @@ const title    = computed(() => data.value?.title?.trim() || t.value.music.unkno
 const artist   = computed(() => data.value?.artist?.trim() || t.value.music.unknownArtist)
 const duration = computed(() => data.value?.duration_ms ?? 0)
 const pct = computed(() => pctOf(displayMs.value, duration.value))
+
+const sessions    = computed<SessionInfo[]>(() => data.value?.sessions ?? [])
+const multiSource = computed(() => sessions.value.length > 1)
+// Close the source menu whenever the panel itself hides.
+watch(hovered, v => { if (!v) showSources.value = false })
 
 const fmt = fmtTime
 
@@ -114,6 +136,17 @@ function playPause() { void invoke('media_play_pause').catch(() => {}) }
 function replay()    { void invoke('media_replay').catch(() => {}) }
 function skipBack()    { void invoke('media_skip', { deltaMs: -10_000 }).catch(() => {}) }
 function skipForward() { void invoke('media_skip', { deltaMs:  10_000 }).catch(() => {}) }
+// Source switcher: pin a specific source, or '' to auto-follow the active one.
+function selectSource(id: string) {
+  pinnedLocal.value = id
+  showSources.value = false
+  void invoke('media_select', { appId: id }).catch(() => {})
+}
+function selectAuto() {
+  pinnedLocal.value = ''
+  showSources.value = false
+  void invoke('media_select', { appId: '' }).catch(() => {})
+}
 async function toggleMute() {
   try {
     const m = await invoke<boolean>('media_toggle_mute')
@@ -221,6 +254,37 @@ onUnmounted(() => {
     <!-- Hover panel (above the badge) -->
     <Transition name="tip">
       <div v-if="hovered" class="panel">
+        <!-- Source switcher — only when several apps hold a media session -->
+        <div v-if="multiSource" class="source-bar">
+          <button
+            class="src-toggle"
+            :class="{ open: showSources }"
+            :aria-label="t.music.source"
+            @click.stop="showSources = !showSources"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            <span class="src-label">{{ t.music.source }}</span>
+            <svg class="src-caret" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10l5 5 5-5z"/></svg>
+          </button>
+          <Transition name="tip">
+            <div v-if="showSources" class="src-list">
+              <button class="src-item" :class="{ active: pinnedLocal === '' }" @click.stop="selectAuto">
+                <span class="src-dot auto" />
+                <span class="src-name">{{ t.music.autoSource }}</span>
+              </button>
+              <button
+                v-for="se in sessions"
+                :key="se.id"
+                class="src-item"
+                :class="{ active: se.id === data?.app_id }"
+                @click.stop="selectSource(se.id)"
+              >
+                <span class="src-dot" :class="{ on: se.playing }" />
+                <span class="src-name">{{ se.title || se.artist || se.id || t.music.unknownTitle }}</span>
+              </button>
+            </div>
+          </Transition>
+        </div>
         <div class="meta">
           <div class="title">{{ title }}</div>
           <div class="artist">{{ artist }}</div>
@@ -368,6 +432,80 @@ onUnmounted(() => {
   font-size: 10px; color: rgba(42, 74, 42, 0.65);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+
+/* ── Source switcher ─────────────────────────────────────────────── */
+.source-bar { position: relative; }
+.src-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 7px;
+  border-radius: 9px;
+  border: 1px solid rgba(119, 153, 119, 0.35);
+  background: rgba(255, 255, 255, 0.55);
+  color: #2a4a2a;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease;
+}
+.src-toggle:hover { background: rgba(255, 255, 255, 0.8); }
+.src-toggle.open  { background: #fff; border-color: rgba(119, 153, 119, 0.55); }
+.src-toggle > svg { width: 13px; height: 13px; fill: currentColor; flex-shrink: 0; }
+.src-label {
+  flex: 1;
+  text-align: left;
+  font-size: 10.5px; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.src-caret { opacity: 0.55; transition: transform 160ms ease; }
+.src-toggle.open .src-caret { transform: rotate(180deg); }
+
+.src-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 7;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 134px;
+  overflow-y: auto;
+  padding: 4px;
+  border-radius: 10px;
+  background: rgba(245, 250, 245, 0.98);
+  border: 1px solid rgba(148, 185, 148, 0.5);
+  box-shadow: 0 4px 14px rgba(40, 70, 40, 0.18);
+}
+.src-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 7px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: #2a4a2a;
+  cursor: pointer;
+  text-align: left;
+  transition: background 120ms ease;
+}
+.src-item:hover  { background: rgba(119, 153, 119, 0.16); }
+.src-item.active { background: linear-gradient(135deg, #779977, #5a8060); color: #fff; }
+.src-name {
+  flex: 1;
+  font-size: 10.5px; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.src-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  flex-shrink: 0;
+  background: rgba(90, 128, 96, 0.35);
+}
+.src-dot.on   { background: #4caf50; box-shadow: 0 0 4px rgba(76, 175, 80, 0.7); }
+.src-dot.auto { background: transparent; border: 1.5px dashed rgba(90, 128, 96, 0.6); }
+.src-item.active .src-dot    { background: rgba(255, 255, 255, 0.85); }
+.src-item.active .src-dot.on { background: #b8f5bb; box-shadow: none; }
 
 /* ── Progress (click / drag to seek) ─────────────────────────────── */
 .progress {

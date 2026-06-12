@@ -115,6 +115,8 @@ export interface Translations {
     mute:          string   // mute button tooltip
     unmute:        string   // unmute button tooltip
     volume:        string   // volume slider aria-label
+    source:        string   // source-switcher button tooltip / heading
+    autoSource:    string   // "Auto" entry — follow the active source
   }
 
   // ── Late-night reminder ─────────────────────────────────────────

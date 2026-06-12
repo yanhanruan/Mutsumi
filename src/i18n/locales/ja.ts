@@ -91,6 +91,8 @@ export const ja: Translations = {
     mute:          'ミュート',
     unmute:        'ミュート解除',
     volume:        '音量',
+    source:        'オーディオソース',
+    autoSource:    '自動（再生中）',
   },
 
   lateNightReminder: '夜更かしは健康によくない！',

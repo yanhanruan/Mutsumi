@@ -91,6 +91,8 @@ export const zh: Translations = {
     mute:          '静音',
     unmute:        '取消静音',
     volume:        '音量',
+    source:        '音频来源',
+    autoSource:    '自动（活动）',
   },
 
   lateNightReminder: '都这么晚了，早点睡吧！',
