@@ -69,6 +69,8 @@ export interface Translations {
     fast_learning: string
     /** Opens the in-pet tarot overlay (frontend-only). */
     tarot:         string
+    /** Opens the system state overlay (frontend-only). */
+    sys_state:     string
     /** Task 5: hide the main window to tray. */
     hide:          string
   }

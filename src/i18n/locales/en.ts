@@ -63,6 +63,7 @@ export const en: Translations = {
     sleep:         'Sleep',
     fast_learning: 'Fast Learning',
     tarot:         'Tarot Reading',
+    sys_state:     'System Status',
     hide:          'Hide App',
   },
 

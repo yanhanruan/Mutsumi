@@ -11,6 +11,7 @@ mod state;
 mod tray;
 mod weather;
 mod window_ops;
+mod sys_state;
 
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -116,6 +117,13 @@ pub fn run() {
         let stop_flag = Arc::new(AtomicBool::new(false));
         let _ = &stop_flag;
         idle::spawn(app.handle().clone(), stop_flag);
+      }
+
+      // System state monitor
+      {
+        let stop_flag = Arc::new(AtomicBool::new(false));
+        let _ = &stop_flag;
+        sys_state::spawn(app.handle().clone(), stop_flag);
       }
 
       // Pet state + pomodoro ticker (also drives late-night reminder).

@@ -63,6 +63,7 @@ export const zh: Translations = {
     sleep:         '睡觉',
     fast_learning: '快速学习',
     tarot:         '塔罗占卜',
+    sys_state:     '系统状态',
     hide:          '隐藏应用',
   },
 

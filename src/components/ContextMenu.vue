@@ -14,7 +14,7 @@ import { useAppConfig } from '../composables/useAppConfig'
 
 export type ContextActionKey = 'pat_head' | 'feed' | 'sleep' | 'fast_learning'
 /** 'tarot' and 'hide' are frontend-only actions (no backend command). */
-export type MenuAction = ContextActionKey | 'tarot' | 'hide'
+export type MenuAction = ContextActionKey | 'tarot' | 'sys_state' | 'hide'
 
 interface BubbleDef {
   action: MenuAction
@@ -27,6 +27,7 @@ const BUBBLE_DEFS: BubbleDef[] = [
   { action: 'sleep',         icon: '💤' },
   { action: 'fast_learning', icon: '📚' },
   { action: 'tarot',         icon: '🔮' },
+  { action: 'sys_state',     icon: '🖥️' },
   { action: 'hide',          icon: '👻' },
 ]
 

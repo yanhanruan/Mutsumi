@@ -27,6 +27,8 @@ tauri-plugin-autostart = "2"
 tauri-plugin-single-instance = "2"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "native-tls"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+sysinfo = "0.36.1"
+battery = "0.7.8"
 
 # ── Release size optimizations ─────────────────────────────────────
 [profile.release]

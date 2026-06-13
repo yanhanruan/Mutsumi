@@ -29,6 +29,7 @@ import PomodoroBadge from './PomodoroBadge.vue'
 import WeatherBadge from './WeatherBadge.vue'
 import BalloonPet from './BalloonPet.vue'
 import TarotCard from './TarotCard.vue'
+import SystemStateOverlay from './SystemStateOverlay.vue'
 import ContextMenu, { type MenuAction, type ContextActionKey } from './ContextMenu.vue'
 
 const imgRef = ref<HTMLImageElement | null>(null)
@@ -90,6 +91,7 @@ watch(
 const bubbleRef  = ref<InstanceType<typeof ChatBubble> | null>(null)
 const contextRef = ref<InstanceType<typeof ContextMenu> | null>(null)
 const tarotRef   = ref<InstanceType<typeof TarotCard> | null>(null)
+const sysStateRef = ref<InstanceType<typeof SystemStateOverlay> | null>(null)
 
 // ── Tarot overlay ──────────────────────────────────────────────────
 // Integrated in-window reading (not a separate OS window). On open the main
@@ -224,6 +226,10 @@ async function onContextAction(action: MenuAction) {
     await openTarot()
     return
   }
+  if (action === 'sys_state') {
+    sysStateRef.value?.open()
+    return
+  }
   // Play the pat_head animation immediately (like click — no pending delay).
   if (action === 'pat_head') {
     setAnim('pat_head')
@@ -285,6 +291,7 @@ onUnmounted(() => {
   </div>
   <ContextMenu ref="contextRef" @action="onContextAction" />
   <TarotCard ref="tarotRef" @close="closeTarot" />
+  <SystemStateOverlay ref="sysStateRef" />
   <BalloonPet />
 </template>
 

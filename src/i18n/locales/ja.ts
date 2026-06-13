@@ -63,6 +63,7 @@ export const ja: Translations = {
     sleep:         'おやすみ',
     fast_learning: '速習モード',
     tarot:         'タロット占い',
+    sys_state:     'システム状態',
     hide:          'アプリを隠す',
   },
 
