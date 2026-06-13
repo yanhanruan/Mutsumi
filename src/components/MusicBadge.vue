@@ -55,9 +55,9 @@ const { config } = useAppConfig()
 // of the pet UI scales with the window. The Lottie itself is an SVG, so it
 // fills whatever box we give it crisply at any size.
 const BADGE_PX: Record<CharacterSize, number> = {
-  small:  34,
-  medium: 40,
-  large:  46,
+  small:  28,
+  medium: 34,
+  large:  40,
 }
 const badgePx = computed(() => BADGE_PX[config.value.characterSize])
 
@@ -111,7 +111,28 @@ watch(hovered, v => { if (!v) showSources.value = false })
 
 const fmt = fmtTime
 
+// Optimistic play/pause guard: clicking flips the status (and icon) instantly;
+// hold that optimistic status + clock until a backend poll confirms it (or a
+// timeout), so a stale ~1 Hz poll can't bounce the icon/bar back for a moment.
+let pendingStatus: 'playing' | 'paused' | null = null
+let pendingStatusAt = 0
+const PLAYPAUSE_GUARD_MS = 2500
+
 function applySnapshot(s: MediaSnapshot): void {
+  if (pendingStatus !== null) {
+    const settled = s.status === pendingStatus
+    const expired = performance.now() - pendingStatusAt > PLAYPAUSE_GUARD_MS
+    if (settled || expired) {
+      pendingStatus = null
+    } else {
+      // Backend hasn't applied the toggle yet: keep the optimistic status + clock,
+      // only refreshing metadata / volume / sessions from the poll.
+      data.value = { ...s, status: pendingStatus }
+      if (!draggingVol) vol.value = s.volume
+      return
+    }
+  }
+
   data.value = s
   if (!draggingVol) vol.value = s.volume   // don't fight the user mid-drag
 
@@ -132,7 +153,18 @@ function tick(): void {
 // ── Controls ───────────────────────────────────────────────────────
 function prev()      { void invoke('media_prev').catch(() => {}) }
 function next()      { void invoke('media_next').catch(() => {}) }
-function playPause() { void invoke('media_play_pause').catch(() => {}) }
+function playPause() {
+  if (data.value) {
+    const next = data.value.status === 'playing' ? 'paused' : 'playing'
+    pendingStatus   = next
+    pendingStatusAt = performance.now()
+    // Re-base the clock so the bar continues smoothly from the current spot
+    // under the new status (resume keeps advancing, pause freezes in place).
+    clock = { ...clock, basePos: displayMs.value, baseAt: performance.now() }
+    data.value = { ...data.value, status: next }   // instant icon/label flip
+  }
+  void invoke('media_play_pause').catch(() => {})
+}
 function replay()    { void invoke('media_replay').catch(() => {}) }
 function skipBack()    { void invoke('media_skip', { deltaMs: -10_000 }).catch(() => {}) }
 function skipForward() { void invoke('media_skip', { deltaMs:  10_000 }).catch(() => {}) }
@@ -205,6 +237,11 @@ function ensureLottie() {
     loop: true,
     autoplay: false,
     animationData: speakersAnim,
+    // The 400×400 source canvas is mostly empty padding — the speaker artwork is
+    // only the centre ~168px circle, so by default it renders at ~40% of the
+    // badge (tiny). Crop the SVG viewBox to the artwork region (with headroom for
+    // the floating notes, which stay within ~100–300) so it fills the badge.
+    rendererSettings: { viewBoxSize: '100 100 200 200' },
   })
   syncLottie()
 }
@@ -266,7 +303,7 @@ onUnmounted(() => {
             <span class="src-label">{{ t.music.source }}</span>
             <svg class="src-caret" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10l5 5 5-5z"/></svg>
           </button>
-          <Transition name="tip">
+          <Transition name="drop">
             <div v-if="showSources" class="src-list">
               <button class="src-item" :class="{ active: pinnedLocal === '' }" @click.stop="selectAuto">
                 <span class="src-dot auto" />
@@ -308,14 +345,13 @@ onUnmounted(() => {
         <div class="controls">
           <!-- Primary transport -->
           <div class="ctrl-row">
-            <button class="ctrl" :data-tip="t.music.prev" :aria-label="t.music.prev" :disabled="!data?.can_prev" @click.stop="prev">
+            <button class="ctrl" :data-tip="t.music.prev" :aria-label="t.music.prev" @click.stop="prev">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6h2.2v12H6z"/><path d="M19 6v12l-9-6z"/></svg>
             </button>
             <button class="ctrl play" :data-tip="playing ? t.music.pause : t.music.play" :aria-label="playing ? t.music.pause : t.music.play" @click.stop="playPause">
-              <svg v-if="playing" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5h3v14H8zM13 5h3v14h-3z"/></svg>
-              <svg v-else viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5l11 7-11 7z"/></svg>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="playing ? 'M8 5h3v14H8zM13 5h3v14h-3z' : 'M8 5l11 7-11 7z'" /></svg>
             </button>
-            <button class="ctrl" :data-tip="t.music.next" :aria-label="t.music.next" :disabled="!data?.can_next" @click.stop="next">
+            <button class="ctrl" :data-tip="t.music.next" :aria-label="t.music.next" @click.stop="next">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.8 6H18v12h-2.2z"/><path d="M5 6v12l9-6z"/></svg>
             </button>
           </div>
@@ -386,6 +422,10 @@ onUnmounted(() => {
 }
 
 /* ── Badge (animated Lottie speakers) ────────────────────────────── */
+/* Mirror WeatherBadge's frosted rounded square so the two badges read as a
+   matched pair: same 10px corner radius, and the visible box edge (not an inset
+   icon) sits at the anchor's right: 8px — so their right edges line up exactly.
+   overflow:hidden clips the Lottie to the rounded corners. */
 .badge {
   display: flex;
   align-items: center;
@@ -573,7 +613,7 @@ onUnmounted(() => {
   color: #2a4a2a;
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(40, 70, 40, 0.14);
-  transition: background 150ms ease, transform 120ms ease, opacity 150ms ease;
+  transition: background 150ms ease, box-shadow 150ms ease, transform 120ms ease, opacity 150ms ease;
 }
 
 /* Custom frosted tooltip above each button (replaces the native title box). */
@@ -621,8 +661,10 @@ onUnmounted(() => {
   color: #fff;
 }
 .ctrl.active:hover:not(:disabled) { background: linear-gradient(135deg, #c07a7a, #8a5050); }
-.ctrl:hover:not(:disabled)  { background: #fff; transform: scale(1.08); }
-.ctrl.play:hover:not(:disabled) { background: linear-gradient(135deg, #80a880, #5a8060); transform: scale(1.08); }
+/* Hover feedback via background + shadow only — no scale, so the button
+   doesn't appear to pop/shift. Press still nudges for tactile feedback. */
+.ctrl:hover:not(:disabled)  { background: #fff; box-shadow: 0 3px 11px rgba(40, 70, 40, 0.20); }
+.ctrl.play:hover:not(:disabled) { background: linear-gradient(135deg, #80a880, #5a8060); box-shadow: 0 4px 12px rgba(90, 128, 96, 0.34); }
 .ctrl:active:not(:disabled) { transform: scale(0.92); }
 .ctrl:disabled { opacity: 0.4; cursor: not-allowed; }
 
@@ -691,8 +733,28 @@ onUnmounted(() => {
 }
 
 /* ── Panel enter/leave ───────────────────────────────────────────── */
-/* Scale from the bottom-right (the badge) and fade — no translate, so the
-   controls don't appear to slide when the panel closes. */
-.tip-enter-active, .tip-leave-active { transition: opacity 160ms ease, transform 160ms cubic-bezier(0.22, 1, 0.36, 1); }
-.tip-enter-from, .tip-leave-to { opacity: 0; transform: scale(0.92); }
+/* Fade + a uniform vertical slide (NOT scale). Scaling changed the panel's
+   apparent size, which made the progress bar and controls look like they
+   shifted/expanded for a frame as the panel grew in. A uniform translate moves
+   everything together, so nothing changes size or shifts relative to siblings. */
+.tip-enter-active, .tip-leave-active { transition: opacity 160ms ease, transform 180ms cubic-bezier(0.22, 1, 0.36, 1); }
+.tip-enter-from, .tip-leave-to { opacity: 0; transform: translateY(8px); }
+
+/* ── Source dropdown enter/leave ──────────────────────────────────── */
+/* Same principle: fade + tiny downward unfold, no scale — so the list doesn't
+   render short for a frame and then expand to its final height. */
+.drop-enter-active, .drop-leave-active { transition: opacity 140ms ease, transform 160ms cubic-bezier(0.22, 1, 0.36, 1); }
+.drop-enter-from, .drop-leave-to { opacity: 0; transform: translateY(-4px); }
+
+/* ── Small character size ─────────────────────────────────────────── */
+/* On the small window (~140px) the panel content area is only ~108px wide.
+   The 4-button secondary row (4×24 + 3×12 gaps = 132px) overflowed, so the
+   buttons stuck out of the panel. Tighten the gaps and shrink the buttons a
+   touch so both rows fit. Only the small window matches (medium is 170px+). */
+@media (max-width: 155px) {
+  .ctrl-row { gap: 6px; }
+  .ctrl { width: 24px; height: 24px; }
+  .ctrl.play { width: 28px; height: 28px; }
+  .ctrl.small { width: 22px; height: 22px; }
+}
 </style>

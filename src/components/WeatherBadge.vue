@@ -10,6 +10,7 @@ import { onMounted, onUnmounted, ref, computed } from 'vue'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import WeatherIcon from './WeatherIcon.vue'
+import { useAppConfig, type CharacterSize } from '../composables/useAppConfig'
 
 interface WeatherUpdate {
   code:   number
@@ -17,6 +18,19 @@ interface WeatherUpdate {
   temp_c: number
   city:   string | null
 }
+
+const { config } = useAppConfig()
+
+// Badge size mirrors MusicBadge: scales with the 大中小 character-size setting.
+const BADGE_PX: Record<CharacterSize, number> = {
+  small:  18,
+  medium: 24,
+  large:  30,
+}
+const badgePx = computed(() => BADGE_PX[config.value.characterSize])
+// Icon fills ~71 % of the badge (mirrors the original 20 px icon inside the
+// original 28 px badge).  Rounded to the nearest integer for crisp rendering.
+const iconPx  = computed(() => Math.round(badgePx.value * 20 / 28))
 
 const data    = ref<WeatherUpdate | null>(null)
 const hovered = ref(false)
@@ -52,8 +66,8 @@ onUnmounted(() => {
     @mouseleave="hovered = false"
   >
     <!-- Badge pill — always visible; pulsing dot while fetch is pending -->
-    <div class="badge">
-      <WeatherIcon v-if="data" :code="data.code" />
+    <div class="badge" :style="{ width: badgePx + 'px', height: badgePx + 'px' }">
+      <WeatherIcon v-if="data" :code="data.code" :size="iconPx" />
       <span v-else class="loading-dot" />
     </div>
 
@@ -89,8 +103,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  /* width / height set inline from the 大中小 character-size setting. */
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.20);
   backdrop-filter: blur(14px) saturate(180%);

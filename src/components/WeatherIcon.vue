@@ -10,7 +10,7 @@
 import { computed } from 'vue'
 import { classify } from '../composables/weatherUtils'
 
-const props = defineProps<{ code: number }>()
+const props = defineProps<{ code: number; size?: number }>()
 const type  = computed(() => classify(props.code))
 </script>
 
@@ -20,6 +20,7 @@ const type  = computed(() => classify(props.code))
     viewBox="0 0 24 24"
     fill="none"
     class="wi"
+    :style="props.size != null ? { width: props.size + 'px', height: props.size + 'px' } : {}"
     aria-hidden="true"
   >
 
