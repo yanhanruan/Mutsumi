@@ -40,7 +40,7 @@ Mutsumi 是一个静静住在你屏幕角落的小伙伴。
 
 🎧 **全局音频感知（无需配置）**：当你开始播放音乐或看视频时，她会立刻戴上耳机跟着节奏晃动；声音停止，她会摘下耳机恢复平静。
 
-🎵 **迷你音乐控制器**：右下角常驻一个会随音乐律动的音响小图标。悬停即可展开控制面板——播放 / 暂停、上一首 / 下一首、快进 / 快退 10 秒、重播、系统音量与静音，并显示当前曲目、歌手和播放进度。基于 Windows 系统媒体控件（SMTC），几乎能控制任何正在播放的应用：Spotify、网易云音乐、浏览器等。可在设置中随时开关。
+🎵 **迷你音乐控制器**：右下角常驻一个会随音乐律动的音响小图标。悬停即可展开控制面板——播放 / 暂停、上一首 / 下一首、快进 / 快退 10 秒、重播、系统音量与静音，并显示当前曲目、歌手和播放进度，点击或拖动进度条即可跳转到任意位置。当多个应用同时在播放时，还能切换音源并自动跟随最新的播放会话。基于 Windows 系统媒体控件（SMTC），几乎能控制任何正在播放的应用：Spotify、网易云音乐、浏览器等。可在设置中随时开关。
 
 🍅 **极客番茄钟 & 天气**：内置轻量级专注/休息计时器，并在角落安静地展示实时天气。
 
@@ -126,6 +126,7 @@ Mutsumi/
 │   └── data/                   台词与对话数据
 ├── src-tauri/src/              Rust 后端
 │   ├── audio.rs                全局系统音频监听（WASAPI）
+│   ├── media.rs                媒体播放控制（SMTC）
 │   ├── weather.rs              天气数据获取与缓存
 │   ├── pomodoro.rs             专注 / 休息状态机
 │   ├── state.rs                宠物状态（精力、好感度、心情）
@@ -166,7 +167,7 @@ Mutsumi is a quiet little companion living in the corner of your screen. She min
  Start playing music or a video, and she'll instantly put on her headphones and groove along to the beat. When the audio stops, she'll take them off and quietly return to idle.
 
 🎵 **Mini Music Controller**
- A little speaker icon sits in the bottom-right corner and pulses along with your audio. Hover to expand a control panel — play/pause, previous/next, skip ±10s, replay, plus system volume and mute — alongside the current track, artist, and progress. Built on Windows System Media Transport Controls (SMTC), so it drives almost anything that's playing: Spotify, 网易云音乐, browser media, and more. Toggle it anytime from Settings.
+ A little speaker icon sits in the bottom-right corner and pulses along with your audio. Hover to expand a control panel — play/pause, previous/next, skip ±10s, replay, plus system volume and mute — alongside the current track, artist, and a progress bar you can click or drag to seek. When multiple apps are playing at once, switch between sources or let it auto-follow whichever one is most active. Built on Windows System Media Transport Controls (SMTC), so it drives almost anything that's playing: Spotify, 网易云音乐, browser media, and more. Toggle it anytime from Settings.
 
 🍅 **Built-in Pomodoro Timer & Weather**
  Stay focused with a lightweight Pomodoro timer and keep an eye on the current weather, conveniently displayed in the corner of your screen.
@@ -228,6 +229,7 @@ Mutsumi/
 │   └── data/                   Dialogue and quote data
 ├── src-tauri/src/              Rust backend
 │   ├── audio.rs                Global system audio monitoring (WASAPI)
+│   ├── media.rs                Media playback control (SMTC)
 │   ├── weather.rs              Weather fetching and caching
 │   ├── pomodoro.rs             Focus / break state machine
 │   ├── state.rs                Pet state (energy, affection, mood)
