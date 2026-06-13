@@ -66,6 +66,12 @@ const { weatherAvailable } = useWeatherAvailable()
 // which reads it on its immediate run).
 const tarotActive = ref(false)
 
+// ── Window show / hide transitions ────────────────────────────────
+// petOpacity drives a CSS opacity transition. It starts at 1, goes to 0 when
+// hiding, and goes back to 1 when pet-show is received.
+const petOpacity = ref(1)
+
+
 // ── Window sizing (Task 3) ─────────────────────────────────────────
 // Resize the main window whenever the user changes the character size
 // in the settings. `immediate: true` applies it on first mount too.
@@ -211,7 +217,7 @@ function onContextMenu(e: MouseEvent) {
 async function onContextAction(action: MenuAction) {
   // Frontend-only actions — no backend command, no response bubble.
   if (action === 'hide') {
-    await getCurrentWindow().hide()
+    void invoke('hide_pet')
     return
   }
   if (action === 'tarot') {
@@ -230,14 +236,33 @@ async function onContextAction(action: MenuAction) {
 // The backend fires `late-night-reminder` once per night when the local
 // hour first crosses into [00:00, 04:59). Show the locale-appropriate phrase.
 let unlistenLateNight: UnlistenFn | null = null
+let unlistenWillHide: UnlistenFn | null = null
+let unlistenShow: UnlistenFn | null = null
 
 onMounted(async () => {
+  // Fade-out: Rust emits "pet-will-hide" before w.hide(); drive the CSS transition.
+  unlistenWillHide = await listen('pet-will-hide', () => {
+    petOpacity.value = 0
+  })
+  
+  // Fade-in: Rust emits "pet-show" right after w.show().
+  // We use requestAnimationFrame to ensure the browser has painted the 0-opacity
+  // frame (which it held while hidden) before we flip it back to 1.
+  unlistenShow = await listen('pet-show', () => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        petOpacity.value = 1
+      })
+    })
+  })
   unlistenLateNight = await listen('late-night-reminder', () => {
     bubbleRef.value?.show(t.value.lateNightReminder)
   })
 })
 
 onUnmounted(() => {
+  unlistenWillHide?.()
+  unlistenShow?.()
   unlistenLateNight?.()
 })
 </script>
@@ -245,6 +270,7 @@ onUnmounted(() => {
 <template>
   <div
     class="pet"
+    :style="{ opacity: petOpacity }"
     @mousedown="onMouseDown"
     @mousemove="onMouseMove"
     @mouseup="onMouseUp"
@@ -269,6 +295,7 @@ onUnmounted(() => {
   height: 100%;
   background: transparent;
   cursor: pointer;
+  transition: opacity 200ms ease;
 }
 .frame {
   width: 100%;

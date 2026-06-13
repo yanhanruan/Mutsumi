@@ -8,8 +8,8 @@
 
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
-    tray::TrayIconBuilder,
-    AppHandle, Manager, Runtime, State,
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    AppHandle, Emitter, Manager, Runtime, State,
     WebviewUrl, WebviewWindowBuilder,
 };
 
@@ -95,6 +95,29 @@ fn build_tray_menu<R: Runtime>(
     )
 }
 
+// ── Shared hide helper ──────────────────────────────────────────────
+
+/// Emit `pet-will-hide`, wait for the frontend fade-out, then hide.
+pub fn hide_main_faded<R: Runtime>(app: &AppHandle<R>) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Some(w) = app.get_webview_window("main") {
+            let _ = app.emit("pet-will-hide", ());
+            tauri::async_runtime::spawn_blocking(|| std::thread::sleep(std::time::Duration::from_millis(220))).await.ok();
+            let _ = w.hide();
+        }
+    });
+}
+
+/// Show the main window. The frontend handles the fade-in via the `pet-show` event.
+pub fn show_main_faded<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.set_focus();
+        let _ = app.emit("pet-show", ());
+    }
+}
+
 // ── Public API ──────────────────────────────────────────────────────
 
 /// Build and register the tray icon (English labels by default).
@@ -108,18 +131,32 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         .tooltip("Mutsumi")
         .icon(app.default_window_icon().cloned().expect("no default icon"))
         .menu(&menu)
-        .show_menu_on_left_click(true)
-        .on_menu_event(|app, event| match event.id.as_ref() {
-            "show" => {
+        // Right-click (or clicking the chevron on Windows) shows the menu;
+        // left-click toggles the pet window's visibility instead.
+        .show_menu_on_left_click(false)
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                let app = tray.app_handle();
                 if let Some(w) = app.get_webview_window("main") {
-                    let _ = w.show();
-                    let _ = w.set_focus();
+                    if w.is_visible().unwrap_or(false) {
+                        hide_main_faded(&app);
+                    } else {
+                        show_main_faded(&app);
+                    }
                 }
             }
+        })
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "show" => {
+                show_main_faded(app);
+            }
             "hide" => {
-                if let Some(w) = app.get_webview_window("main") {
-                    let _ = w.hide();
-                }
+                hide_main_faded(app);
             }
             "pom_start" => {
                 let s: State<SharedState> = app.state();
@@ -135,7 +172,9 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
             }
             "settings" => {
                 // Show existing window or create on demand — never silently fails.
+                // Unminimize first so a minimized window is restored, not just focused.
                 if let Some(w) = app.get_webview_window("settings") {
+                    let _ = w.unminimize();
                     let _ = w.show();
                     let _ = w.set_focus();
                 } else {
@@ -161,6 +200,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
             }
             "about" => {
                 if let Some(w) = app.get_webview_window("about") {
+                    let _ = w.unminimize();
                     let _ = w.show();
                     let _ = w.set_focus();
                 } else {

@@ -17,6 +17,14 @@ use std::sync::Arc;
 
 use app_state::SharedState;
 
+/// Tauri command: ask the frontend to fade out, then hide the main window.
+/// Mirrors `tray::hide_main_faded` so the context-menu "Hide App" button goes
+/// through the same Rust-owned w.hide() path as the tray icon.
+#[tauri::command]
+async fn hide_pet(app: tauri::AppHandle) {
+    tray::hide_main_faded(&app);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   let shared = SharedState::new();
@@ -58,6 +66,7 @@ pub fn run() {
       window_ops::set_window_bounds,
       card_export::save_card_image,
       card_export::reveal_in_folder,
+      hide_pet,
     ])
     .setup(move |app| {
       if cfg!(debug_assertions) {
