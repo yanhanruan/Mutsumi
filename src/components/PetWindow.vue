@@ -20,7 +20,7 @@ import { MUTSUMI_ALL_QUOTES } from '../data/mutsumiQuotes'
 import { getCurrentWindow, currentMonitor } from '@tauri-apps/api/window'
 import { LogicalSize } from '@tauri-apps/api/dpi'
 import { invoke } from '@tauri-apps/api/core'
-import { useAppConfig, CHAR_SIZE_DIMS } from '../composables/useAppConfig'
+import { useAppConfig, CHAR_SIZE_DIMS, SYS_WINDOW_DIMS } from '../composables/useAppConfig'
 import { useWeatherAvailable } from '../composables/useWeatherAvailable'
 import { TAROT_WINDOW_DIMS } from '../config/tarot'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
@@ -66,6 +66,7 @@ const { weatherAvailable } = useWeatherAvailable()
 // True while the tarot overlay is open (declared before the size watch below,
 // which reads it on its immediate run).
 const tarotActive = ref(false)
+const sysStateActive = ref(false)
 
 // ── Window show / hide transitions ────────────────────────────────
 // petOpacity drives a CSS opacity transition. It starts at 1, goes to 0 when
@@ -81,7 +82,7 @@ const petOpacity = ref(1)
 watch(
   () => config.value.characterSize,
   size => {
-    if (tarotActive.value) return
+    if (tarotActive.value || sysStateActive.value) return
     const [w, h] = CHAR_SIZE_DIMS[size]
     getCurrentWindow().setSize(new LogicalSize(w, h))
   },
@@ -158,6 +159,41 @@ async function closeTarot() {
   tarotActive.value = false
 }
 
+// ── System State overlay ───────────────────────────────────────────
+async function openSysState() {
+  const win = getCurrentWindow()
+  try { savedPos = await win.outerPosition() } catch { savedPos = null }
+  bubbleRef.value?.hide()
+  sysStateActive.value = true
+  sysStateRef.value?.open()
+  await nextTick()
+  await nextPaint()
+
+  const [lw, lh] = SYS_WINDOW_DIMS[config.value.characterSize]
+  const sf  = await win.scaleFactor()
+  const mon = await currentMonitor()
+  const pw  = lw * sf
+  const ph  = lh * sf
+  let x = savedPos?.x ?? 0
+  let y = savedPos?.y ?? 0
+  if (mon) {
+    x = mon.position.x + (mon.size.width  - pw) / 2
+    y = mon.position.y + (mon.size.height - ph) / 2
+  }
+  await setBounds(win, x, y, pw, ph)
+}
+
+async function closeSysState() {
+  const win = getCurrentWindow()
+  const [lw, lh] = CHAR_SIZE_DIMS[config.value.characterSize]
+  const sf = await win.scaleFactor()
+  sysStateRef.value?.dismiss()
+  await nextTick()
+  await nextPaint()
+  await setBounds(win, savedPos?.x ?? 0, savedPos?.y ?? 0, lw * sf, lh * sf)
+  sysStateActive.value = false
+}
+
 // ── Mouse interaction ──────────────────────────────────────────────
 const DRAG_THRESHOLD = 5
 let pressX = 0
@@ -166,7 +202,7 @@ let pressed = false
 let didDrag = false
 
 function onMouseDown(e: MouseEvent) {
-  if (e.button !== 0 || tarotActive.value) return
+  if (e.button !== 0 || tarotActive.value || sysStateActive.value) return
   pressX = e.screenX
   pressY = e.screenY
   pressed = true
@@ -192,7 +228,7 @@ async function onMouseMove(e: MouseEvent) {
 }
 
 function onMouseUp(e: MouseEvent) {
-  if (e.button !== 0 || tarotActive.value) return
+  if (e.button !== 0 || tarotActive.value || sysStateActive.value) return
   if (pressed && !didDrag) {
     // True click — no movement.
     // Suppress the click animation while in music mode so it doesn't
@@ -212,7 +248,7 @@ function onMouseUp(e: MouseEvent) {
 
 function onContextMenu(e: MouseEvent) {
   e.preventDefault()
-  if (tarotActive.value) return
+  if (tarotActive.value || sysStateActive.value) return
   contextRef.value?.open(e.clientX, e.clientY)
 }
 
@@ -227,7 +263,7 @@ async function onContextAction(action: MenuAction) {
     return
   }
   if (action === 'sys_state') {
-    sysStateRef.value?.open()
+    await openSysState()
     return
   }
   // Play the pat_head animation immediately (like click — no pending delay).
@@ -282,16 +318,16 @@ onUnmounted(() => {
     @mouseup="onMouseUp"
     @contextmenu="onContextMenu"
   >
-    <img v-show="ready && !tarotActive" ref="imgRef" class="frame" draggable="false" />
-    <PomodoroBadge v-if="!tarotActive" />
-    <WeatherBadge v-if="!tarotActive && config.showWeather && weatherAvailable !== false" />
+    <img v-show="ready && !tarotActive && !sysStateActive" ref="imgRef" class="frame" draggable="false" />
+    <PomodoroBadge v-if="!tarotActive && !sysStateActive" />
+    <WeatherBadge v-if="!tarotActive && !sysStateActive && config.showWeather && weatherAvailable !== false" />
     <div class="bubble-anchor">
       <ChatBubble ref="bubbleRef" />
     </div>
   </div>
   <ContextMenu ref="contextRef" @action="onContextAction" />
   <TarotCard ref="tarotRef" @close="closeTarot" />
-  <SystemStateOverlay ref="sysStateRef" />
+  <SystemStateOverlay ref="sysStateRef" @close="closeSysState" />
   <BalloonPet />
 </template>
 

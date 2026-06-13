@@ -93,4 +93,20 @@ export const zh: Translations = {
     history:      '最近',
     empty:        '还没有占卜记录。',
   },
+
+  // ── System State Overlay ────────────────────────────────────────
+  sys: {
+    title:       '系统状态',
+    cpu:         'CPU',
+    memory:      '内存',
+    temp:        '温度',
+    network:     '网络',
+    online:      '在线',
+    offline:     '离线',
+    uptime:      '运行时间',
+    battery:     '电池',
+    charging:    '充电中 (还需要 {time})',
+    discharging: '放电中 (剩余 {time})',
+    pluggedIn:   '已接通电源',
+  },
 }

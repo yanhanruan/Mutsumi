@@ -93,4 +93,20 @@ export const en: Translations = {
     history:      'Recent',
     empty:        'No readings yet.',
   },
+
+  // ── System State Overlay ────────────────────────────────────────
+  sys: {
+    title:       'System Status',
+    cpu:         'CPU',
+    memory:      'Memory',
+    temp:        'Temp',
+    network:     'Network',
+    online:      'Online',
+    offline:     'Offline',
+    uptime:      'Uptime',
+    battery:     'Battery',
+    charging:    'Charging ({time} to full)',
+    discharging: 'Discharging ({time} left)',
+    pluggedIn:   'Plugged In',
+  },
 }

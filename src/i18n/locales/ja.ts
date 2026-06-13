@@ -93,4 +93,20 @@ export const ja: Translations = {
     history:      '最近',
     empty:        'まだ占いの記録がありません。',
   },
+
+  // ── System State Overlay ────────────────────────────────────────
+  sys: {
+    title:       'システム状態',
+    cpu:         'CPU',
+    memory:      'メモリ',
+    temp:        '温度',
+    network:     'ネットワーク',
+    online:      'オンライン',
+    offline:     'オフライン',
+    uptime:      '起動時間',
+    battery:     'バッテリー',
+    charging:    '充電中 (完了まで {time})',
+    discharging: '使用中 (残り {time})',
+    pluggedIn:   '電源接続中',
+  },
 }

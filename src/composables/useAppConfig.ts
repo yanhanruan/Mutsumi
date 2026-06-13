@@ -41,6 +41,16 @@ export const CHAR_SIZE_DIMS: Record<CharacterSize, [number, number]> = {
   large:  [200, 340],
 }
 
+/**
+ * Main-window logical pixel dimensions [width, height] while the system state
+ * overlay is open. This matches the logic of TAROT_WINDOW_DIMS to prevent clipping.
+ */
+export const SYS_WINDOW_DIMS: Record<CharacterSize, [number, number]> = {
+  small:  [280, 380],
+  medium: [320, 430],
+  large:  [360, 480],
+}
+
 // ── Storage ──────────────────────────────────────────────────────────
 
 const STORAGE_KEY  = 'mutsumi_app_config_v2'

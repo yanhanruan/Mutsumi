@@ -102,4 +102,20 @@ export interface Translations {
 
   // ── Late-night reminder ─────────────────────────────────────────
   lateNightReminder: string
+
+  // ── System State Overlay ────────────────────────────────────────
+  sys: {
+    title:       string
+    cpu:         string
+    memory:      string
+    temp:        string
+    network:     string
+    online:      string
+    offline:     string
+    uptime:      string
+    battery:     string
+    charging:    string
+    discharging: string
+    pluggedIn:   string
+  }
 }
