@@ -142,11 +142,42 @@ pub fn media_seek(position_ms: i64) -> Result<(), String> {
     let end   = tl.EndTime().map(|t| t.Duration).unwrap_or(0);
     // Re-base onto the raw timeline and clamp to the track bounds.
     let target = (start + position_ms.max(0) * 10_000).clamp(start, end.max(start));
+    // Browser media (Chrome, Edge, …) is reachable only through SMTC, which
+    // routes the seek across an IPC chain into the page. While it propagates,
+    // the browser's audio output keeps draining the PCM it had already buffered
+    // ahead of the playhead, so the pre-seek audio replays for a beat before it
+    // catches up. A page's own seekbar avoids this because it sets `currentTime`
+    // in-renderer and flushes those buffers synchronously — which we can't do
+    // from outside. We mimic that flush with the only controls SMTC gives us:
+    // pause the output, seek, then resume. Local players (PotPlayer, …) seek
+    // instantly and cleanly, so we skip this for them (it would only add a blip).
+    let is_browser = {
+        let a = session_id(&session).to_lowercase();
+        ["chrome", "msedge", "edge", "firefox", "brave", "opera", "vivaldi"]
+            .iter()
+            .any(|b| a.contains(b))
+    };
+    let was_playing = session
+        .GetPlaybackInfo()
+        .and_then(|pb| pb.PlaybackStatus())
+        .map(|s| s == PlaybackStatus::Playing)
+        .unwrap_or(false);
+    let flush = is_browser && was_playing;
+
+    if flush {
+        let _ = session.TryPauseAsync().and_then(|op| op.get());
+    }
     let ok = session
         .TryChangePlaybackPositionAsync(target)
         .map_err(|e| e.message())?
         .get()
         .map_err(|e| e.message())?;
+    if flush {
+        // Give the seek time to land before resuming; otherwise the play command
+        // races the still-in-flight seek and the browser drops it (stays paused).
+        std::thread::sleep(Duration::from_millis(250));
+        let _ = session.TryPlayAsync().and_then(|op| op.get());
+    }
     if ok { Ok(()) } else { Err("seek was rejected".into()) }
 }
 

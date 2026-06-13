@@ -18,6 +18,7 @@ import { invoke } from '@tauri-apps/api/core'
 import lottie from 'lottie-web'
 import { useI18n } from '../i18n'
 import { useAppConfig, type CharacterSize } from '../composables/useAppConfig'
+import { useInteractionLock } from '../composables/useInteractionLock'
 import {
   createClock, reconcile, commitSeek, tickPosition,
   pctOf, fmtTime, seekPositionFromPointer, type ProgressClock,
@@ -50,6 +51,7 @@ interface MediaSnapshot {
 
 const { t } = useI18n()
 const { config } = useAppConfig()
+const { beginDrag, endDrag } = useInteractionLock()
 
 // Badge size tracks the character-size setting (大中小), mirroring how the rest
 // of the pet UI scales with the window. The Lottie itself is an SVG, so it
@@ -71,7 +73,7 @@ const audioOn = ref(false)
 
 // Volume slider state (local so dragging stays smooth between backend polls).
 const vol = ref(0)
-let draggingVol = false
+const draggingVol = ref(false)
 
 // Progress-bar seek state. While dragging we drive displayMs locally and hold
 // off the interpolation tick so the bar tracks the pointer crisply.
@@ -128,7 +130,7 @@ function applySnapshot(s: MediaSnapshot): void {
       // Backend hasn't applied the toggle yet: keep the optimistic status + clock,
       // only refreshing metadata / volume / sessions from the poll.
       data.value = { ...s, status: pendingStatus }
-      if (!draggingVol) vol.value = s.volume
+      if (!draggingVol.value) vol.value = s.volume
       return
     }
   }
@@ -190,8 +192,8 @@ function onVolumeInput(e: Event) {
   vol.value = v
   void invoke('media_set_volume', { level: v }).catch(() => {})
 }
-function onVolStart() { draggingVol = true }
-function onVolEnd()   { draggingVol = false }
+function onVolStart() { draggingVol.value = true;  beginDrag() }
+function onVolEnd()   { draggingVol.value = false; endDrag()   }
 
 // ── Seek (click / drag the progress bar) ───────────────────────────
 // Map a pointer x to a start-normalized position in ms.
@@ -201,9 +203,25 @@ function posFromEvent(e: PointerEvent): number {
   const rect = el.getBoundingClientRect()
   return seekPositionFromPointer(e.clientX, rect.left, rect.width, duration.value)
 }
+// Coalesce the backend seek: the bar follows the pointer instantly (optimistic
+// clock), but the actual media_seek is sent on a short trailing debounce. If a
+// release lands within the window (e.g. the OS chops one drag into several
+// gestures), only the final position is sent — so the player is never set to a
+// handful of positions in quick succession (which audibly stutters the track).
+const SEEK_DEBOUNCE_MS = 120
+let seekTimer: ReturnType<typeof setTimeout> | null = null
+function scheduleSeek(positionMs: number) {
+  if (seekTimer !== null) clearTimeout(seekTimer)
+  seekTimer = setTimeout(() => {
+    seekTimer = null
+    void invoke('media_seek', { positionMs }).catch(() => {})
+  }, SEEK_DEBOUNCE_MS)
+}
+
 function onSeekDown(e: PointerEvent) {
   if (duration.value <= 0) return
   draggingSeek.value = true
+  beginDrag()   // hold the window interactive so the drag isn't chopped up
   displayMs.value = posFromEvent(e)
   ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
 }
@@ -215,11 +233,12 @@ function onSeekUp(e: PointerEvent) {
   if (!draggingSeek.value) return
   const pos = posFromEvent(e)
   draggingSeek.value = false
+  endDrag()
   // Optimistically hold the bar at the target; the seek guard ignores stale
   // polls until the backend position catches up.
   clock = commitSeek(clock, pos, performance.now(), duration.value)
   displayMs.value = clock.basePos
-  void invoke('media_seek', { positionMs: Math.round(clock.basePos) }).catch(() => {})
+  scheduleSeek(Math.round(clock.basePos))
 }
 
 // ── Lottie badge ───────────────────────────────────────────────────
@@ -274,6 +293,8 @@ onUnmounted(() => {
   unlistenStart?.()
   unlistenStop?.()
   cancelAnimationFrame(raf)
+  if (seekTimer !== null) clearTimeout(seekTimer)
+  endDrag()
   anim?.destroy()
   anim = null
 })
@@ -288,9 +309,10 @@ onUnmounted(() => {
     @mouseup.stop
     @click.stop
   >
-    <!-- Hover panel (above the badge) -->
+    <!-- Hover panel (above the badge). Stays mounted while a drag is in flight
+         so the progress / volume element is never destroyed mid-gesture. -->
     <Transition name="tip">
-      <div v-if="hovered" class="panel">
+      <div v-if="hovered || draggingSeek || draggingVol" class="panel">
         <!-- Source switcher — only when several apps hold a media session -->
         <div v-if="multiSource" class="source-bar">
           <button

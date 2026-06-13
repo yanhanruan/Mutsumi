@@ -23,6 +23,7 @@
 import { onMounted, onUnmounted } from 'vue'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { useInteractionLock } from './useInteractionLock'
 
 interface CursorPos {
   x:           number
@@ -94,6 +95,7 @@ export function useHitTest(getCurrentImage: () => HTMLImageElement | null) {
   let unlisten: UnlistenFn | null = null
   let ignoring = false       // current setIgnoreCursorEvents state
   let resizeTimer: number | null = null
+  const { isDragging } = useInteractionLock()
   // Cache: skip the canvas redraw + getImageData readback when the
   // animation frame hasn't changed since the last cursor event.
   let lastDrawnImg: HTMLImageElement | null = null
@@ -158,6 +160,15 @@ export function useHitTest(getCurrentImage: () => HTMLImageElement | null) {
   }
 
   function handleCursor(pos: CursorPos) {
+    // Mid-drag on an overlay (seek / volume): force interactive and never toggle.
+    // Toggling click-through here would break the drag's OS-level pointer capture
+    // and fire a synthetic mouseleave that collapses the hover panel — which is
+    // exactly the flapping loop that chopped one drag into many seeks.
+    if (isDragging()) {
+      void setIgnore(false)
+      return
+    }
+
     if (!pos.over_window) {
       // Outside our window — reset to interactive so a return into the
       // window with cursor over a visible pixel is detected immediately.
