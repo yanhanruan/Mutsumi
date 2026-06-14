@@ -23,6 +23,7 @@ use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSession as Session,
     GlobalSystemMediaTransportControlsSessionManager as SessionManager,
     GlobalSystemMediaTransportControlsSessionPlaybackStatus as PlaybackStatus,
+    GlobalSystemMediaTransportControlsSessionTimelineProperties as TimelineProperties,
 };
 use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
 use windows::Win32::Media::Audio::{
@@ -122,8 +123,16 @@ pub fn media_skip(delta_ms: i64) -> Result<(), String> {
     init_mta();
     let session = current_session().map_err(|_| "no active media session".to_string())?;
     let tl = session.GetTimelineProperties().map_err(|e| e.message())?;
+    let playing = session
+        .GetPlaybackInfo()
+        .and_then(|pb| pb.PlaybackStatus())
+        .map(|s| s == PlaybackStatus::Playing)
+        .unwrap_or(false);
     // Raw timeline ticks (100-ns); positions are absolute, not start-normalized.
-    let pos   = tl.Position().map(|t| t.Duration).unwrap_or(0);
+    // Position is a snapshot at LastUpdatedTime, so advance it to now while
+    // playing — otherwise a ±10 s skip is relative to a stale base and lands in
+    // the wrong place.
+    let pos   = live_position_ticks(&tl, playing);
     let start = tl.StartTime().map(|t| t.Duration).unwrap_or(0);
     let end   = tl.EndTime().map(|t| t.Duration).unwrap_or(0);
     let target = (pos + delta_ms * 10_000).clamp(start, end.max(start));
@@ -393,6 +402,45 @@ fn ts_ms(t: TimeSpan) -> i64 {
     t.Duration / 10_000
 }
 
+/// 100-ns ticks between 1601-01-01 (the Windows `DateTime`/FILETIME epoch) and
+/// 1970-01-01 (the Unix epoch).
+const FILETIME_UNIX_OFFSET: i64 = 116_444_736_000_000_000;
+
+/// Current wall-clock time as 100-ns ticks since 1601 — directly comparable to
+/// a `DateTime::UniversalTime`, which is what SMTC's `LastUpdatedTime` reports.
+fn now_universal_ticks() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| (d.as_nanos() / 100) as i64 + FILETIME_UNIX_OFFSET)
+        .unwrap_or(0)
+}
+
+/// Live playback position in raw 100-ns ticks (absolute, not start-normalized).
+///
+/// SMTC's `TimelineProperties::Position` is a *snapshot* captured at
+/// `LastUpdatedTime`, not a continuously-advancing value: apps push timeline
+/// updates at their own (often coarse, event-driven) cadence, so between pushes
+/// `Position` is frozen. Reading it raw therefore reports a position that lags
+/// real playback by however long ago the last push was — and because an
+/// unchanged snapshot is never re-emitted, the staleness only surfaces when
+/// some *other* field forces a `media-update` (e.g. a volume change), snapping
+/// the UI back to the frozen spot. While playing, advance `Position` by the
+/// wall-clock elapsed since `LastUpdatedTime` so it tracks actual playback.
+/// (Assumes 1× playback rate, matching the frontend's interpolation.)
+fn live_position_ticks(tl: &TimelineProperties, playing: bool) -> i64 {
+    let pos = tl.Position().map(|t| t.Duration).unwrap_or(0);
+    if !playing {
+        return pos;
+    }
+    let last_updated = tl.LastUpdatedTime().map(|dt| dt.UniversalTime).unwrap_or(0);
+    if last_updated <= 0 {
+        return pos;
+    }
+    let elapsed = now_universal_ticks() - last_updated;
+    if elapsed > 0 { pos + elapsed } else { pos }
+}
+
 fn status_str(s: PlaybackStatus) -> &'static str {
     if s == PlaybackStatus::Playing { "playing" }
     else if s == PlaybackStatus::Paused { "paused" }
@@ -461,7 +509,10 @@ fn read_snapshot() -> MediaSnapshot {
     if let Ok(tl) = session.GetTimelineProperties() {
         let start = tl.StartTime().map(ts_ms).unwrap_or(0);
         let end   = tl.EndTime().map(ts_ms).unwrap_or(0);
-        let pos   = tl.Position().map(ts_ms).unwrap_or(0);
+        // Position is only a snapshot at LastUpdatedTime; advance it to now while
+        // playing so the reported position tracks real playback instead of the
+        // (often stale) last value the app pushed to SMTC.
+        let pos   = live_position_ticks(&tl, snap.status == "playing") / 10_000;
         snap.duration_ms = (end - start).max(0);
         snap.position_ms = (pos - start).clamp(0, snap.duration_ms);
     }
