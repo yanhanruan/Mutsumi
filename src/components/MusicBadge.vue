@@ -106,10 +106,15 @@ const title    = computed(() => data.value?.title?.trim() || t.value.music.unkno
 const artist   = computed(() => data.value?.artist?.trim() || t.value.music.unknownArtist)
 const duration = computed(() => data.value?.duration_ms ?? 0)
 const pct = computed(() => pctOf(displayMs.value, duration.value))
+// Whether a controllable media session exists (a media app is registered with
+// SMTC), regardless of play/pause. With no active session there's nothing to
+// drive, so every transport control is disabled and the progress bar hidden —
+// a paused track still counts as active, so play stays enabled to resume it.
+const hasSession = computed(() => data.value?.active ?? false)
 // Whether the current source honors position changes (progress bar, ±10 s skip,
 // replay). Some apps integrate play/pause/next but bind no seek handler, so
 // these controls would be silently rejected — grey them out instead.
-const canSeek = computed(() => (data.value?.can_seek ?? false) && duration.value > 0)
+const canSeek = computed(() => hasSession.value && (data.value?.can_seek ?? false) && duration.value > 0)
 
 const sessions    = computed<SessionInfo[]>(() => data.value?.sessions ?? [])
 const multiSource = computed(() => sessions.value.length > 1)
@@ -378,13 +383,13 @@ onUnmounted(() => {
         <div class="controls">
           <!-- Primary transport -->
           <div class="ctrl-row">
-            <button class="ctrl" :data-tip="t.music.prev" :aria-label="t.music.prev" @click.stop="prev">
+            <button class="ctrl" :data-tip="t.music.prev" :aria-label="t.music.prev" :disabled="!hasSession" @click.stop="prev">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6h2.2v12H6z"/><path d="M19 6v12l-9-6z"/></svg>
             </button>
-            <button class="ctrl play" :data-tip="playing ? t.music.pause : t.music.play" :aria-label="playing ? t.music.pause : t.music.play" @click.stop="playPause">
+            <button class="ctrl play" :data-tip="playing ? t.music.pause : t.music.play" :aria-label="playing ? t.music.pause : t.music.play" :disabled="!hasSession" @click.stop="playPause">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="playing ? 'M8 5h3v14H8zM13 5h3v14h-3z' : 'M8 5l11 7-11 7z'" /></svg>
             </button>
-            <button class="ctrl" :data-tip="t.music.next" :aria-label="t.music.next" @click.stop="next">
+            <button class="ctrl" :data-tip="t.music.next" :aria-label="t.music.next" :disabled="!hasSession" @click.stop="next">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.8 6H18v12h-2.2z"/><path d="M5 6v12l9-6z"/></svg>
             </button>
           </div>
@@ -410,17 +415,18 @@ onUnmounted(() => {
               </svg>
             </button>
             <div class="vol-control">
-              <!-- Vertical volume slider, shown only while hovering the mute button -->
-              <div class="vol-popup">
+              <!-- Vertical volume slider, shown only while hovering the mute button.
+                   Suppressed entirely when no session is active — nothing to set. -->
+              <div v-if="hasSession" class="vol-popup">
                 <span class="vol-val">{{ Math.round(vol * 100) }}</span>
                 <input
                   type="range" class="vol-slider" min="0" max="1" step="0.01"
                   :value="vol" :style="{ '--v': (vol * 100) + '%' }"
-                  :aria-label="t.music.volume"
+                  :aria-label="t.music.volume" :disabled="!hasSession"
                   @input="onVolumeInput" @pointerdown="onVolStart" @pointerup="onVolEnd" @click.stop
                 />
               </div>
-              <button class="ctrl small mute" :class="{ active: muted }" :aria-label="muted ? t.music.unmute : t.music.mute" @click.stop="toggleMute">
+              <button class="ctrl small mute" :class="{ active: muted }" :aria-label="muted ? t.music.unmute : t.music.mute" :disabled="!hasSession" @click.stop="toggleMute">
                 <svg v-if="muted" viewBox="0 0 24 24" aria-hidden="true"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>
                 <svg v-else viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
               </button>
@@ -767,6 +773,8 @@ onUnmounted(() => {
   box-shadow: 0 1px 3px rgba(40, 70, 40, 0.25);
   cursor: pointer;
 }
+.vol-slider:disabled { opacity: 0.4; cursor: not-allowed; }
+.vol-slider:disabled::-webkit-slider-thumb { cursor: not-allowed; }
 
 /* ── Panel enter/leave ───────────────────────────────────────────── */
 /* Fade + a uniform vertical slide (NOT scale). Scaling changed the panel's
