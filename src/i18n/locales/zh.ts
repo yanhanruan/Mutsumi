@@ -93,6 +93,7 @@ export const zh: Translations = {
     volume:        '音量',
     source:        '音频来源',
     autoSource:    '自动（活动）',
+    unknownSource: '未知应用',
   },
 
   lateNightReminder: '都这么晚了，早点睡吧！',

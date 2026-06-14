@@ -117,6 +117,7 @@ export interface Translations {
     volume:        string   // volume slider aria-label
     source:        string   // source-switcher button tooltip / heading
     autoSource:    string   // "Auto" entry — follow the active source
+    unknownSource: string   // fallback app name when the source app id is empty
   }
 
   // ── Late-night reminder ─────────────────────────────────────────

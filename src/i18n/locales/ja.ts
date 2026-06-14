@@ -93,6 +93,7 @@ export const ja: Translations = {
     volume:        '音量',
     source:        'オーディオソース',
     autoSource:    '自動（再生中）',
+    unknownSource: '不明なアプリ',
   },
 
   lateNightReminder: '夜更かしは健康によくない！',

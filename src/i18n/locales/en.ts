@@ -93,6 +93,7 @@ export const en: Translations = {
     volume:        'Volume',
     source:        'Audio source',
     autoSource:    'Auto (active)',
+    unknownSource: 'Unknown app',
   },
 
   lateNightReminder: "You shouldn't stay up so late!",

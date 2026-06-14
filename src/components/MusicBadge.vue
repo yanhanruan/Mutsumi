@@ -121,6 +121,42 @@ const multiSource = computed(() => sessions.value.length > 1)
 // Close the source menu whenever the panel itself hides.
 watch(hovered, v => { if (!v) showSources.value = false })
 
+// Friendly source name for the switcher. SMTC reports each session's
+// SourceAppUserModelId (typically the app's exe / AUMID, e.g. "chrome.exe",
+// "cloudmusic.exe"), which is opaque. Map the common ones to a recognizable
+// brand name; brand names are proper nouns identical across locales, so they
+// are not routed through i18n. Unknown ids fall back to the bare exe name.
+const SOURCE_NAMES: ReadonlyArray<readonly [string, string]> = [
+  ['msedge',     'Edge'],
+  ['chrome',     'Chrome'],
+  ['firefox',    'Firefox'],
+  ['brave',      'Brave'],
+  ['vivaldi',    'Vivaldi'],
+  ['opera',      'Opera'],
+  ['spotify',    'Spotify'],
+  ['cloudmusic', '网易云音乐'],
+  ['qqmusic',    'QQ音乐'],
+  ['kugou',      '酷狗音乐'],
+  ['kuwo',       '酷我音乐'],
+  ['foobar',     'foobar2000'],
+  ['potplayer',  'PotPlayer'],
+  ['vlc',        'VLC'],
+  ['itunes',     'iTunes'],
+  ['applemusic', 'Apple Music'],
+  ['music.ui',   'Groove'],
+  ['bilibili',   'bilibili'],
+]
+function sourceName(id: string): string {
+  if (!id) return t.value.music.unknownSource
+  const lc = id.toLowerCase()
+  for (const [needle, name] of SOURCE_NAMES) {
+    if (lc.includes(needle)) return name
+  }
+  // Fall back to the last path segment without the .exe suffix.
+  const tail = id.split(/[\\/]/).pop() || id
+  return tail.replace(/\.exe$/i, '')
+}
+
 const fmt = fmtTime
 
 // Optimistic play/pause guard: clicking flips the status (and icon) instantly;
@@ -349,7 +385,10 @@ onUnmounted(() => {
                 @click.stop="selectSource(se.id)"
               >
                 <span class="src-dot" :class="{ on: se.playing }" />
-                <span class="src-name">{{ se.title || se.artist || se.id || t.music.unknownTitle }}</span>
+                <span class="src-text">
+                  <span class="src-app">{{ sourceName(se.id) }}</span>
+                  <span v-if="se.title || se.artist" class="src-track">{{ se.title || se.artist }}</span>
+                </span>
               </button>
             </div>
           </Transition>
@@ -576,6 +615,25 @@ onUnmounted(() => {
   font-size: 10.5px; font-weight: 600;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+/* Two-line source entry: the app/source name on top, the now-playing track
+   beneath it (so the switcher reads by source, not just by song title). */
+.src-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.src-app {
+  font-size: 10.5px; font-weight: 700;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.src-track {
+  font-size: 9px; font-weight: 500;
+  color: rgba(42, 74, 42, 0.6);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.src-item.active .src-track { color: rgba(255, 255, 255, 0.8); }
 .src-dot {
   width: 7px; height: 7px; border-radius: 50%;
   flex-shrink: 0;
