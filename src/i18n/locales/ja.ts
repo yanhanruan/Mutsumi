@@ -52,6 +52,9 @@ export const ja: Translations = {
   // ── Weather visibility ────────────────────────────────────────────
   showWeather: '天気を表示',
 
+  // ── Music controller visibility ───────────────────────────────────
+  showMusic: '音楽コントローラーを表示',
+
   // ── Pomodoro badge ────────────────────────────────────────────────
   pomFocus: '集中',
   pomBreak: '休憩',
@@ -75,6 +78,24 @@ export const ja: Translations = {
   },
 
   // ── Late-night reminder ───────────────────────────────────────────
+  music: {
+    unknownTitle:  '不明な曲',
+    unknownArtist: '不明なアーティスト',
+    prev:          '前の曲',
+    play:          '再生',
+    pause:         '一時停止',
+    next:          '次の曲',
+    replay:        '最初から',
+    skipBack:      '10秒戻る',
+    skipForward:   '10秒進む',
+    mute:          'ミュート',
+    unmute:        'ミュート解除',
+    volume:        '音量',
+    source:        'オーディオソース',
+    autoSource:    '自動（再生中）',
+    unknownSource: '不明なアプリ',
+  },
+
   lateNightReminder: '夜更かしは健康によくない！',
 
   // ── Tarot overlay UI chrome ───────────────────────────────────────

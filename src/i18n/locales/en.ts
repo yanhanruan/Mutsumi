@@ -52,6 +52,9 @@ export const en: Translations = {
   // ── Weather visibility ────────────────────────────────────────────
   showWeather: 'Show Weather',
 
+  // ── Music controller visibility ───────────────────────────────────
+  showMusic: 'Show Music Controller',
+
   // ── Pomodoro badge ────────────────────────────────────────────────
   pomFocus: 'Focus',
   pomBreak: 'Break',
@@ -75,6 +78,24 @@ export const en: Translations = {
   },
 
   // ── Late-night reminder ───────────────────────────────────────────
+  music: {
+    unknownTitle:  'Unknown track',
+    unknownArtist: 'Unknown artist',
+    prev:          'Previous',
+    play:          'Play',
+    pause:         'Pause',
+    next:          'Next',
+    replay:        'Replay',
+    skipBack:      'Back 10s',
+    skipForward:   'Forward 10s',
+    mute:          'Mute',
+    unmute:        'Unmute',
+    volume:        'Volume',
+    source:        'Audio source',
+    autoSource:    'Auto (active)',
+    unknownSource: 'Unknown app',
+  },
+
   lateNightReminder: "You shouldn't stay up so late!",
 
   // ── Tarot overlay UI chrome ───────────────────────────────────────

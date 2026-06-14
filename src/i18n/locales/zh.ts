@@ -52,6 +52,9 @@ export const zh: Translations = {
   // ── Weather visibility ────────────────────────────────────────────
   showWeather: '显示天气',
 
+  // ── Music controller visibility ───────────────────────────────────
+  showMusic: '显示音乐控制器',
+
   // ── Pomodoro badge ────────────────────────────────────────────────
   pomFocus: '专注',
   pomBreak: '休息',
@@ -75,6 +78,24 @@ export const zh: Translations = {
   },
 
   // ── Late-night reminder ───────────────────────────────────────────
+  music: {
+    unknownTitle:  '未知曲目',
+    unknownArtist: '未知歌手',
+    prev:          '上一首',
+    play:          '播放',
+    pause:         '暂停',
+    next:          '下一首',
+    replay:        '重播',
+    skipBack:      '后退10秒',
+    skipForward:   '快进10秒',
+    mute:          '静音',
+    unmute:        '取消静音',
+    volume:        '音量',
+    source:        '音频来源',
+    autoSource:    '自动（活动）',
+    unknownSource: '未知应用',
+  },
+
   lateNightReminder: '都这么晚了，早点睡吧！',
 
   // ── Tarot overlay UI chrome ───────────────────────────────────────

@@ -43,9 +43,14 @@ windows = { version = "0.61", features = [
     "Win32_Media_Audio_Endpoints",
     "Win32_System_Com",
     "Win32_System_Com_StructuredStorage",
+    "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_Power",
     "Win32_System_SystemInformation",
     "Win32_System_Variant",
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_WindowsAndMessaging",
+    # WinRT System Media Transport Controls — drives the mini music controller
+    # (Spotify / browsers / 网易云音乐 / any SMTC-integrated player).
+    "Media_Control",
+    "Foundation",
 ] }

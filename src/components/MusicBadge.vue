@@ -1,0 +1,867 @@
+<script setup lang="ts">
+/**
+ * MusicBadge — mini music controller pinned to the bottom-right of the pet.
+ *
+ * Mirrors WeatherBadge: seed the cached snapshot via `get_media` on mount, then
+ * subscribe to `media-update`. A compact equalizer badge shows whenever a media
+ * session is active; hovering expands a frosted panel with title / artist, a
+ * progress bar, and transport controls (prev / play-pause / next).
+ *
+ * The backend (SMTC, src-tauri/src/media.rs) drives any app that integrates with
+ * Windows media controls — Spotify, browsers, 网易云音乐, etc. The progress bar
+ * is interpolated from a local clock between ~1 Hz backend updates so it ticks
+ * smoothly.
+ */
+import { onMounted, onUnmounted, ref, computed, watch, nextTick } from 'vue'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import { invoke } from '@tauri-apps/api/core'
+import lottie from 'lottie-web'
+import { useI18n } from '../i18n'
+import { useAppConfig, type CharacterSize } from '../composables/useAppConfig'
+import { useInteractionLock } from '../composables/useInteractionLock'
+import {
+  createClock, reconcile, commitSeek, tickPosition,
+  pctOf, fmtTime, seekPositionFromPointer, type ProgressClock,
+} from '../composables/mediaProgress'
+import speakersAnim from '../assets/speakers.json'
+
+interface SessionInfo {
+  id:      string
+  title:   string
+  artist:  string
+  playing: boolean
+}
+
+interface MediaSnapshot {
+  active:      boolean
+  title:       string
+  artist:      string
+  status:      string
+  position_ms: number
+  duration_ms: number
+  can_next:    boolean
+  can_prev:    boolean
+  can_play:    boolean
+  can_pause:   boolean
+  can_seek:    boolean
+  muted:       boolean
+  volume:      number
+  app_id:      string
+  sessions:    SessionInfo[]
+}
+
+const { t } = useI18n()
+const { config } = useAppConfig()
+const { beginDrag, endDrag } = useInteractionLock()
+
+// Badge size tracks the character-size setting (大中小), mirroring how the rest
+// of the pet UI scales with the window. The Lottie itself is an SVG, so it
+// fills whatever box we give it crisply at any size.
+const BADGE_PX: Record<CharacterSize, number> = {
+  small:  28,
+  medium: 34,
+  large:  40,
+}
+const badgePx = computed(() => BADGE_PX[config.value.characterSize])
+
+const data    = ref<MediaSnapshot | null>(null)
+const hovered = ref(false)
+// System-audio activity (from the WASAPI detector). The Lottie speakers spin
+// while audio is actually playing and rest when it stops — independent of
+// whether a controllable SMTC session exists. Whether the badge is *shown* at
+// all is decided in Settings (config.showMusic), not here.
+const audioOn = ref(false)
+
+// Volume slider state (local so dragging stays smooth between backend polls).
+const vol = ref(0)
+const draggingVol = ref(false)
+
+// Progress-bar seek state. While dragging we drive displayMs locally and hold
+// off the interpolation tick so the bar tracks the pointer crisply.
+const progressEl   = ref<HTMLElement | null>(null)
+const draggingSeek = ref(false)
+
+// Source switcher: when several apps each hold a media session, the user can pin
+// which one the controller targets (so a paused source can be resumed instead of
+// the controller auto-jumping to whatever else is playing).
+const showSources = ref(false)
+// Local echo of the pin so the menu can highlight "Auto" vs a specific source
+// without waiting for the next backend poll. '' means auto-follow.
+const pinnedLocal = ref('')
+
+// Lottie speakers animation for the badge.
+const lottieEl = ref<HTMLElement | null>(null)
+let anim: ReturnType<typeof lottie.loadAnimation> | null = null
+
+// Local progress interpolation between backend updates. The clock + all the
+// re-base / seek-guard / track-change logic is pure and lives in mediaProgress;
+// this component just owns the refs, the rAF loop, and the pointer events.
+let clock: ProgressClock = createClock()
+const displayMs = ref(0)
+let raf = 0
+
+const playing  = computed(() => data.value?.status === 'playing')
+const muted    = computed(() => data.value?.muted ?? false)
+const title    = computed(() => data.value?.title?.trim() || t.value.music.unknownTitle)
+const artist   = computed(() => data.value?.artist?.trim() || t.value.music.unknownArtist)
+const duration = computed(() => data.value?.duration_ms ?? 0)
+const pct = computed(() => pctOf(displayMs.value, duration.value))
+// Whether a controllable media session exists (a media app is registered with
+// SMTC), regardless of play/pause. With no active session there's nothing to
+// drive, so every transport control is disabled and the progress bar hidden —
+// a paused track still counts as active, so play stays enabled to resume it.
+const hasSession = computed(() => data.value?.active ?? false)
+// Some sources have no previous/next track (a single video, a radio stream, the
+// last item in a queue): SMTC reports the capability per source, so grey the
+// transport buttons out instead of firing a control the source will reject.
+const canPrev = computed(() => hasSession.value && (data.value?.can_prev ?? false))
+const canNext = computed(() => hasSession.value && (data.value?.can_next ?? false))
+// Whether the current source honors position changes (progress bar, ±10 s skip,
+// replay). Some apps integrate play/pause/next but bind no seek handler, so
+// these controls would be silently rejected — grey them out instead.
+const canSeek = computed(() => hasSession.value && (data.value?.can_seek ?? false) && duration.value > 0)
+
+const sessions    = computed<SessionInfo[]>(() => data.value?.sessions ?? [])
+const multiSource = computed(() => sessions.value.length > 1)
+// Close the source menu whenever the panel itself hides.
+watch(hovered, v => { if (!v) showSources.value = false })
+
+// Friendly source name for the switcher. SMTC reports each session's
+// SourceAppUserModelId (typically the app's exe / AUMID, e.g. "chrome.exe",
+// "cloudmusic.exe"), which is opaque. Map the common ones to a recognizable
+// brand name; brand names are proper nouns identical across locales, so they
+// are not routed through i18n. Unknown ids fall back to the bare exe name.
+const SOURCE_NAMES: ReadonlyArray<readonly [string, string]> = [
+  ['msedge',     'Edge'],
+  ['chrome',     'Chrome'],
+  ['firefox',    'Firefox'],
+  ['brave',      'Brave'],
+  ['vivaldi',    'Vivaldi'],
+  ['opera',      'Opera'],
+  ['spotify',    'Spotify'],
+  ['cloudmusic', '网易云音乐'],
+  ['qqmusic',    'QQ音乐'],
+  ['kugou',      '酷狗音乐'],
+  ['kuwo',       '酷我音乐'],
+  ['foobar',     'foobar2000'],
+  ['potplayer',  'PotPlayer'],
+  ['vlc',        'VLC'],
+  ['itunes',     'iTunes'],
+  ['applemusic', 'Apple Music'],
+  ['music.ui',   'Groove'],
+  ['bilibili',   'bilibili'],
+]
+function sourceName(id: string): string {
+  if (!id) return t.value.music.unknownSource
+  const lc = id.toLowerCase()
+  for (const [needle, name] of SOURCE_NAMES) {
+    if (lc.includes(needle)) return name
+  }
+  // Fall back to the last path segment without the .exe suffix.
+  const tail = id.split(/[\\/]/).pop() || id
+  return tail.replace(/\.exe$/i, '')
+}
+
+const fmt = fmtTime
+
+// Optimistic play/pause guard: clicking flips the status (and icon) instantly;
+// hold that optimistic status + clock until a backend poll confirms it (or a
+// timeout), so a stale ~1 Hz poll can't bounce the icon/bar back for a moment.
+let pendingStatus: 'playing' | 'paused' | null = null
+let pendingStatusAt = 0
+const PLAYPAUSE_GUARD_MS = 2500
+
+function applySnapshot(s: MediaSnapshot): void {
+  if (pendingStatus !== null) {
+    const settled = s.status === pendingStatus
+    const expired = performance.now() - pendingStatusAt > PLAYPAUSE_GUARD_MS
+    if (settled || expired) {
+      pendingStatus = null
+    } else {
+      // Backend hasn't applied the toggle yet: keep the optimistic status + clock,
+      // only refreshing metadata / volume / sessions from the poll.
+      data.value = { ...s, status: pendingStatus }
+      if (!draggingVol.value) vol.value = s.volume
+      return
+    }
+  }
+
+  data.value = s
+  if (!draggingVol.value) vol.value = s.volume   // don't fight the user mid-drag
+
+  clock = reconcile(clock, s, performance.now(), draggingSeek.value)
+  if (!draggingSeek.value) {
+    displayMs.value = tickPosition(clock, performance.now(), s.status === 'playing', s.duration_ms)
+  }
+}
+
+// Advance the displayed position each frame (rAF; cheap, only updates a ref).
+// The pointer owns displayMs mid-drag, so skip interpolation then.
+function tick(): void {
+  raf = requestAnimationFrame(tick)
+  if (draggingSeek.value) return
+  displayMs.value = tickPosition(clock, performance.now(), playing.value, duration.value)
+}
+
+// ── Controls ───────────────────────────────────────────────────────
+function prev()      { void invoke('media_prev').catch(() => {}) }
+function next()      { void invoke('media_next').catch(() => {}) }
+function playPause() {
+  if (data.value) {
+    const next = data.value.status === 'playing' ? 'paused' : 'playing'
+    pendingStatus   = next
+    pendingStatusAt = performance.now()
+    // Re-base the clock so the bar continues smoothly from the current spot
+    // under the new status (resume keeps advancing, pause freezes in place).
+    clock = { ...clock, basePos: displayMs.value, baseAt: performance.now() }
+    data.value = { ...data.value, status: next }   // instant icon/label flip
+  }
+  void invoke('media_play_pause').catch(() => {})
+}
+function replay()    { void invoke('media_replay').catch(() => {}) }
+function skipBack()    { void invoke('media_skip', { deltaMs: -10_000 }).catch(() => {}) }
+function skipForward() { void invoke('media_skip', { deltaMs:  10_000 }).catch(() => {}) }
+// Source switcher: pin a specific source, or '' to auto-follow the active one.
+function selectSource(id: string) {
+  pinnedLocal.value = id
+  showSources.value = false
+  void invoke('media_select', { appId: id }).catch(() => {})
+}
+function selectAuto() {
+  pinnedLocal.value = ''
+  showSources.value = false
+  void invoke('media_select', { appId: '' }).catch(() => {})
+}
+async function toggleMute() {
+  try {
+    const m = await invoke<boolean>('media_toggle_mute')
+    if (data.value) data.value = { ...data.value, muted: m }   // optimistic; poll re-syncs
+  } catch { /* ignore */ }
+}
+function onVolumeInput(e: Event) {
+  const v = Number((e.target as HTMLInputElement).value)
+  vol.value = v
+  void invoke('media_set_volume', { level: v }).catch(() => {})
+}
+function onVolStart() { draggingVol.value = true;  beginDrag() }
+function onVolEnd()   { draggingVol.value = false; endDrag()   }
+
+// ── Seek (click / drag the progress bar) ───────────────────────────
+// Map a pointer x to a start-normalized position in ms.
+function posFromEvent(e: PointerEvent): number {
+  const el = progressEl.value
+  if (!el) return 0
+  const rect = el.getBoundingClientRect()
+  return seekPositionFromPointer(e.clientX, rect.left, rect.width, duration.value)
+}
+// Coalesce the backend seek: the bar follows the pointer instantly (optimistic
+// clock), but the actual media_seek is sent on a short trailing debounce. If a
+// release lands within the window (e.g. the OS chops one drag into several
+// gestures), only the final position is sent — so the player is never set to a
+// handful of positions in quick succession (which audibly stutters the track).
+const SEEK_DEBOUNCE_MS = 120
+let seekTimer: ReturnType<typeof setTimeout> | null = null
+function scheduleSeek(positionMs: number) {
+  if (seekTimer !== null) clearTimeout(seekTimer)
+  seekTimer = setTimeout(() => {
+    seekTimer = null
+    void invoke('media_seek', { positionMs }).catch(() => {})
+  }, SEEK_DEBOUNCE_MS)
+}
+
+function onSeekDown(e: PointerEvent) {
+  if (!canSeek.value) return
+  draggingSeek.value = true
+  beginDrag()   // hold the window interactive so the drag isn't chopped up
+  displayMs.value = posFromEvent(e)
+  ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
+}
+function onSeekMove(e: PointerEvent) {
+  if (!draggingSeek.value) return
+  displayMs.value = posFromEvent(e)
+}
+function onSeekUp(e: PointerEvent) {
+  if (!draggingSeek.value) return
+  const pos = posFromEvent(e)
+  draggingSeek.value = false
+  endDrag()
+  // Optimistically hold the bar at the target; the seek guard ignores stale
+  // polls until the backend position catches up.
+  clock = commitSeek(clock, pos, performance.now(), duration.value)
+  displayMs.value = clock.basePos
+  scheduleSeek(Math.round(clock.basePos))
+}
+
+// ── Lottie badge ───────────────────────────────────────────────────
+// Spin while system audio plays; rest (reset to the first frame) when silent.
+function syncLottie() {
+  if (!anim) return
+  if (audioOn.value) anim.play()
+  else anim.stop()
+}
+function ensureLottie() {
+  if (anim || !lottieEl.value) return
+  anim = lottie.loadAnimation({
+    container: lottieEl.value,
+    renderer: 'svg',
+    loop: true,
+    autoplay: false,
+    animationData: speakersAnim,
+    // The 400×400 source canvas is mostly empty padding — the speaker artwork is
+    // only the centre ~168px circle, so by default it renders at ~40% of the
+    // badge (tiny). Crop the SVG viewBox to the artwork region (with headroom for
+    // the floating notes, which stay within ~100–300) so it fills the badge.
+    rendererSettings: { viewBoxSize: '100 100 200 200' },
+  })
+  syncLottie()
+}
+watch(audioOn, syncLottie)
+
+let unlisten:      UnlistenFn | null = null
+let unlistenStart: UnlistenFn | null = null
+let unlistenStop:  UnlistenFn | null = null
+
+onMounted(async () => {
+  try {
+    const cached = await invoke<MediaSnapshot | null>('get_media')
+    if (cached) applySnapshot(cached)
+  } catch { /* ignore — events will populate it */ }
+
+  // Seed + subscribe to the system-audio detector so the speakers animate in
+  // lock-step with real playback (same events as the pet's headphones).
+  try { audioOn.value = await invoke<boolean>('get_audio_state') } catch { /* ignore */ }
+  unlistenStart = await listen('audio-started', () => { audioOn.value = true  })
+  unlistenStop  = await listen('audio-stopped', () => { audioOn.value = false })
+
+  unlisten = await listen<MediaSnapshot>('media-update', e => applySnapshot(e.payload))
+  raf = requestAnimationFrame(tick)
+  await nextTick()
+  ensureLottie()
+})
+
+onUnmounted(() => {
+  unlisten?.()
+  unlistenStart?.()
+  unlistenStop?.()
+  cancelAnimationFrame(raf)
+  if (seekTimer !== null) clearTimeout(seekTimer)
+  endDrag()
+  anim?.destroy()
+  anim = null
+})
+</script>
+
+<template>
+  <div
+    class="music-anchor pet-ui-overlay"
+    @mouseenter="hovered = true"
+    @mouseleave="hovered = false"
+    @mousedown.stop
+    @mouseup.stop
+    @click.stop
+  >
+    <!-- Hover panel (above the badge). Stays mounted while a drag is in flight
+         so the progress / volume element is never destroyed mid-gesture. -->
+    <Transition name="tip">
+      <div v-if="hovered || draggingSeek || draggingVol" class="panel">
+        <!-- Source switcher — only when several apps hold a media session -->
+        <div v-if="multiSource" class="source-bar">
+          <button
+            class="src-toggle"
+            :class="{ open: showSources }"
+            :aria-label="t.music.source"
+            @click.stop="showSources = !showSources"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            <span class="src-label">{{ t.music.source }}</span>
+            <svg class="src-caret" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10l5 5 5-5z"/></svg>
+          </button>
+          <Transition name="drop">
+            <div v-if="showSources" class="src-list">
+              <button class="src-item" :class="{ active: pinnedLocal === '' }" @click.stop="selectAuto">
+                <span class="src-dot auto" />
+                <span class="src-name">{{ t.music.autoSource }}</span>
+              </button>
+              <button
+                v-for="se in sessions"
+                :key="se.id"
+                class="src-item"
+                :class="{ active: se.id === data?.app_id }"
+                @click.stop="selectSource(se.id)"
+              >
+                <span class="src-dot" :class="{ on: se.playing }" />
+                <span class="src-text">
+                  <span class="src-app">{{ sourceName(se.id) }}</span>
+                  <span v-if="se.title || se.artist" class="src-track">{{ se.title || se.artist }}</span>
+                </span>
+              </button>
+            </div>
+          </Transition>
+        </div>
+        <div class="meta">
+          <div class="title">{{ title }}</div>
+          <div class="artist">{{ artist }}</div>
+        </div>
+        <!-- Progress bar + time readout only for seekable sources. Sources that
+             expose no position handler (e.g. 网易云音乐) report no timeline at
+             all, so the bar would be dead and the duration stuck at 0:00 — hide
+             both and fall back to a simple controller. -->
+        <template v-if="canSeek">
+          <div
+            ref="progressEl"
+            class="progress seekable"
+            :class="{ dragging: draggingSeek }"
+            @pointerdown.stop="onSeekDown"
+            @pointermove="onSeekMove"
+            @pointerup="onSeekUp"
+            @pointercancel="onSeekUp"
+          >
+            <div class="bar" :style="{ width: pct + '%' }" />
+            <div class="seek-thumb" :style="{ left: pct + '%' }" />
+          </div>
+          <div class="times">
+            <span>{{ fmt(displayMs) }}</span>
+            <span>{{ fmt(duration) }}</span>
+          </div>
+        </template>
+        <div class="controls">
+          <!-- Primary transport -->
+          <div class="ctrl-row">
+            <button class="ctrl" :data-tip="t.music.prev" :aria-label="t.music.prev" :disabled="!canPrev" @click.stop="prev">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6h2.2v12H6z"/><path d="M19 6v12l-9-6z"/></svg>
+            </button>
+            <button class="ctrl play" :data-tip="playing ? t.music.pause : t.music.play" :aria-label="playing ? t.music.pause : t.music.play" :disabled="!hasSession" @click.stop="playPause">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="playing ? 'M8 5h3v14H8zM13 5h3v14h-3z' : 'M8 5l11 7-11 7z'" /></svg>
+            </button>
+            <button class="ctrl" :data-tip="t.music.next" :aria-label="t.music.next" :disabled="!canNext" @click.stop="next">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.8 6H18v12h-2.2z"/><path d="M5 6v12l9-6z"/></svg>
+            </button>
+          </div>
+          <!-- Secondary: replay + mute (with a vertical volume popup on hover) -->
+          <div class="ctrl-row">
+            <button class="ctrl small" :data-tip="t.music.replay" :aria-label="t.music.replay" :disabled="!canSeek" @click.stop="replay">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>
+            </button>
+            <!-- Seek back 10 s (counter-clockwise ring surrounding "10") -->
+            <button class="ctrl small" :data-tip="t.music.skipBack" :aria-label="t.music.skipBack" :disabled="!canSeek" @click.stop="skipBack">
+              <svg class="ic-seek" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+                <path d="M3 3v5h5"/>
+                <text x="12" y="15.7" text-anchor="middle" font-size="10.5" font-weight="700" fill="currentColor" stroke="none">10</text>
+              </svg>
+            </button>
+            <!-- Seek forward 10 s (clockwise ring surrounding "10") -->
+            <button class="ctrl small" :data-tip="t.music.skipForward" :aria-label="t.music.skipForward" :disabled="!canSeek" @click.stop="skipForward">
+              <svg class="ic-seek" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M21 12a9 9 0 1 1-9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
+                <path d="M21 3v5h-5"/>
+                <text x="12" y="15.7" text-anchor="middle" font-size="10.5" font-weight="700" fill="currentColor" stroke="none">10</text>
+              </svg>
+            </button>
+            <div class="vol-control">
+              <!-- Vertical volume slider, shown only while hovering the mute button.
+                   Suppressed entirely when no session is active — nothing to set. -->
+              <div v-if="hasSession" class="vol-popup">
+                <span class="vol-val">{{ Math.round(vol * 100) }}</span>
+                <input
+                  type="range" class="vol-slider" min="0" max="1" step="0.01"
+                  :value="vol" :style="{ '--v': (vol * 100) + '%' }"
+                  :aria-label="t.music.volume" :disabled="!hasSession"
+                  @input="onVolumeInput" @pointerdown="onVolStart" @pointerup="onVolEnd" @click.stop
+                />
+              </div>
+              <button class="ctrl small mute" :class="{ active: muted }" :aria-label="muted ? t.music.unmute : t.music.mute" :disabled="!hasSession" @click.stop="toggleMute">
+                <svg v-if="muted" viewBox="0 0 24 24" aria-hidden="true"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>
+                <svg v-else viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
+    <!-- Animated speakers badge (Lottie) — scales with the 大中小 setting -->
+    <div class="badge" :style="{ width: badgePx + 'px', height: badgePx + 'px' }">
+      <div ref="lottieEl" class="lottie" />
+    </div>
+  </div>
+</template>
+
+<style scoped>
+/* ── Anchor (bottom-right; panel stacks above the badge) ─────────── */
+.music-anchor {
+  position: absolute;
+  /* Mirror WeatherBadge's anchor so the two badges share a right edge:
+     weather sits top-right, music sits bottom-right, both inset 8px. */
+  bottom: 8px;
+  right: 8px;
+  display: flex;
+  flex-direction: column;       /* panel on top, badge anchored at the bottom */
+  align-items: flex-end;
+  gap: 6px;
+  pointer-events: auto;
+  user-select: none;
+  z-index: 1;
+}
+
+/* ── Badge (animated Lottie speakers) ────────────────────────────── */
+/* Mirror WeatherBadge's frosted rounded square so the two badges read as a
+   matched pair: same 10px corner radius, and the visible box edge (not an inset
+   icon) sits at the anchor's right: 8px — so their right edges line up exactly.
+   overflow:hidden clips the Lottie to the rounded corners. */
+.badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* width / height set inline from the 大中小 character-size setting. */
+  cursor: default;
+  transition: transform 160ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  filter: drop-shadow(0 2px 5px rgba(40, 70, 40, 0.18));
+}
+.music-anchor:hover .badge { transform: scale(1.10); }
+.lottie { width: 100%; height: 100%; }
+
+/* ── Panel ───────────────────────────────────────────────────────── */
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  /* Fit within the (small) pet window — 8px margins each side — capped so it
+     doesn't get oversized on the large character setting. */
+  width: calc(100vw - 12px);
+  max-width: 240px;
+  box-sizing: border-box;
+  padding: 9px 10px;
+  border-radius: 14px;
+  /* Match the tarot reading panel (frosted green glass). */
+  background: rgba(245, 250, 245, 0.94);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  border: 1px solid rgba(148, 185, 148, 0.45);
+  /* Light, soft drop shadow. */
+  box-shadow: 0 3px 12px rgba(40, 70, 40, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.65);
+  pointer-events: auto;
+  /* Collapse toward the badge (bottom-right) on enter/leave. */
+  transform-origin: bottom right;
+}
+.meta { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.title {
+  font-family: system-ui, "Segoe UI", "Noto Sans SC", "Noto Sans JP", sans-serif;
+  font-size: 12px; font-weight: 700; color: #1a2e1a;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.artist {
+  font-family: system-ui, "Segoe UI", sans-serif;
+  font-size: 10px; color: rgba(42, 74, 42, 0.65);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* ── Source switcher ─────────────────────────────────────────────── */
+.source-bar { position: relative; }
+.src-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 7px;
+  border-radius: 9px;
+  border: 1px solid rgba(119, 153, 119, 0.35);
+  background: rgba(255, 255, 255, 0.55);
+  color: #2a4a2a;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease;
+}
+.src-toggle:hover { background: rgba(255, 255, 255, 0.8); }
+.src-toggle.open  { background: #fff; border-color: rgba(119, 153, 119, 0.55); }
+.src-toggle > svg { width: 13px; height: 13px; fill: currentColor; flex-shrink: 0; }
+.src-label {
+  flex: 1;
+  text-align: left;
+  font-size: 10.5px; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.src-caret { opacity: 0.55; transition: transform 160ms ease; }
+.src-toggle.open .src-caret { transform: rotate(180deg); }
+
+.src-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 7;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 134px;
+  overflow-y: auto;
+  padding: 4px;
+  border-radius: 10px;
+  background: rgba(245, 250, 245, 0.98);
+  border: 1px solid rgba(148, 185, 148, 0.5);
+  box-shadow: 0 4px 14px rgba(40, 70, 40, 0.18);
+}
+.src-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 7px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: #2a4a2a;
+  cursor: pointer;
+  text-align: left;
+  transition: background 120ms ease;
+}
+.src-item:hover  { background: rgba(119, 153, 119, 0.16); }
+.src-item.active { background: linear-gradient(135deg, #779977, #5a8060); color: #fff; }
+.src-name {
+  flex: 1;
+  font-size: 10.5px; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* Two-line source entry: the app/source name on top, the now-playing track
+   beneath it (so the switcher reads by source, not just by song title). */
+.src-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.src-app {
+  font-size: 10.5px; font-weight: 700;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.src-track {
+  font-size: 9px; font-weight: 500;
+  color: rgba(42, 74, 42, 0.6);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.src-item.active .src-track { color: rgba(255, 255, 255, 0.8); }
+.src-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  flex-shrink: 0;
+  background: rgba(90, 128, 96, 0.35);
+}
+.src-dot.on   { background: #4caf50; box-shadow: 0 0 4px rgba(76, 175, 80, 0.7); }
+.src-dot.auto { background: transparent; border: 1.5px dashed rgba(90, 128, 96, 0.6); }
+.src-item.active .src-dot    { background: rgba(255, 255, 255, 0.85); }
+.src-item.active .src-dot.on { background: #b8f5bb; box-shadow: none; }
+
+/* ── Progress (click / drag to seek) ─────────────────────────────── */
+.progress {
+  position: relative;
+  height: 4px;
+  /* Thin visible track, but a taller transparent hit area for easy grabbing.
+     background-clip keeps the painted track at the 4px content box. */
+  padding: 6px 0;
+  margin: 1px 0;
+  border-radius: 999px;
+  background: rgba(119, 153, 119, 0.25);
+  background-clip: content-box;
+  cursor: default;
+  touch-action: none;
+}
+.progress.seekable { cursor: pointer; }
+.bar {
+  position: absolute;
+  left: 0;
+  top: 6px;
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #779977, #5a8060);
+  /* No width transition: the bar is driven by a 60fps rAF clock, so it's
+     already smooth — a CSS transition would only lag it behind the playhead
+     and animate a visible slide on every seek. */
+  pointer-events: none;
+}
+/* Draggable handle — appears on hover / while dragging. */
+.seek-thumb {
+  position: absolute;
+  top: 8px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #fff;
+  border: 1px solid rgba(119, 153, 119, 0.6);
+  box-shadow: 0 1px 3px rgba(40, 70, 40, 0.25);
+  transform: translate(-50%, -50%);
+  opacity: 0;
+  transition: opacity 140ms ease;
+  pointer-events: none;
+}
+.progress.seekable:hover .seek-thumb,
+.progress.dragging .seek-thumb { opacity: 1; }
+.times {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  color: rgba(45, 85, 45, 0.55);
+}
+
+/* ── Controls ────────────────────────────────────────────────────── */
+.controls { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.ctrl-row { display: flex; align-items: center; justify-content: center; gap: 12px; }
+/* Frosted circular buttons — same language as the tarot controls (.ctrl). */
+.ctrl {
+  position: relative;
+  display: flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; padding: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(119, 153, 119, 0.40);
+  background: rgba(245, 250, 245, 0.92);
+  color: #2a4a2a;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(40, 70, 40, 0.14);
+  transition: background 150ms ease, box-shadow 150ms ease, transform 120ms ease, opacity 150ms ease;
+}
+
+/* Custom frosted tooltip above each button (replaces the native title box). */
+.ctrl[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  padding: 3px 7px;
+  border-radius: 7px;
+  font-family: system-ui, "Segoe UI", "Noto Sans SC", "Noto Sans JP", sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  color: #2a4a2a;
+  background: rgba(245, 250, 245, 0.97);
+  border: 1px solid rgba(148, 185, 148, 0.45);
+  box-shadow: 0 2px 8px rgba(40, 70, 40, 0.14);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 120ms ease, visibility 120ms ease;
+  pointer-events: none;
+  z-index: 5;
+}
+.ctrl[data-tip]:hover::after { opacity: 1; visibility: visible; }
+/* No tooltip on disabled controls (seek / skip / replay for non-seekable
+   sources like 网易云音乐) — there's nothing actionable to hint at. */
+.ctrl:disabled[data-tip]::after { content: none; }
+.ctrl svg { width: 14px; height: 14px; fill: currentColor; }
+/* Seek ±10s glyphs are stroked outlines (a ring that wraps the "10"), not
+   filled shapes — override the default fill and draw with the stroke. */
+.ctrl svg.ic-seek { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.ctrl.play {
+  width: 30px; height: 30px;
+  border-color: transparent;
+  background: linear-gradient(135deg, #779977, #5a8060);
+  color: #fff;
+}
+.ctrl.play svg { width: 15px; height: 15px; }
+/* Secondary row (replay / mute) — slightly smaller. */
+.ctrl.small { width: 24px; height: 24px; }
+.ctrl.small svg { width: 13px; height: 13px; }
+/* Muted state highlight. */
+.ctrl.active {
+  background: linear-gradient(135deg, #b06a6a, #8a5050);
+  border-color: transparent;
+  color: #fff;
+}
+.ctrl.active:hover:not(:disabled) { background: linear-gradient(135deg, #c07a7a, #8a5050); }
+/* Hover feedback via background + shadow only — no scale, so the button
+   doesn't appear to pop/shift. Press still nudges for tactile feedback. */
+.ctrl:hover:not(:disabled)  { background: #fff; box-shadow: 0 3px 11px rgba(40, 70, 40, 0.20); }
+.ctrl.play:hover:not(:disabled) { background: linear-gradient(135deg, #80a880, #5a8060); box-shadow: 0 4px 12px rgba(90, 128, 96, 0.34); }
+.ctrl:active:not(:disabled) { transform: scale(0.92); }
+.ctrl:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ── Volume: vertical slider popup, shown on mute-button hover ───── */
+.vol-control { position: relative; display: flex; align-items: center; }
+.vol-popup {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 28px;
+  height: 108px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: rgba(245, 250, 245, 0.97);
+  border: 1px solid rgba(148, 185, 148, 0.45);
+  box-shadow: 0 3px 12px rgba(40, 70, 40, 0.16);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 140ms ease, visibility 140ms ease;
+  z-index: 6;
+}
+.vol-control:hover .vol-popup { opacity: 1; visibility: visible; }
+/* Live volume readout pinned above the (rotated) slider. */
+.vol-val {
+  position: absolute;
+  top: 6px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-family: system-ui, "Segoe UI", sans-serif;
+  font-size: 9.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #2a4a2a;
+  pointer-events: none;
+}
+/* A horizontal range rotated -90° → reliable vertical slider with our custom
+   track gradient (left→bottom, so it fills from the bottom up). */
+.vol-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 72px;          /* becomes the vertical length once rotated */
+  height: 5px;
+  border-radius: 999px;
+  cursor: pointer;
+  transform: rotate(-90deg);
+  background: linear-gradient(
+    to right,
+    #5a8060 var(--v, 0%),
+    rgba(119, 153, 119, 0.25) var(--v, 0%)
+  );
+}
+.vol-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #fff;
+  border: 1px solid rgba(119, 153, 119, 0.5);
+  box-shadow: 0 1px 3px rgba(40, 70, 40, 0.25);
+  cursor: pointer;
+}
+.vol-slider:disabled { opacity: 0.4; cursor: not-allowed; }
+.vol-slider:disabled::-webkit-slider-thumb { cursor: not-allowed; }
+
+/* ── Panel enter/leave ───────────────────────────────────────────── */
+/* Fade + a uniform vertical slide (NOT scale). Scaling changed the panel's
+   apparent size, which made the progress bar and controls look like they
+   shifted/expanded for a frame as the panel grew in. A uniform translate moves
+   everything together, so nothing changes size or shifts relative to siblings. */
+.tip-enter-active, .tip-leave-active { transition: opacity 160ms ease, transform 180ms cubic-bezier(0.22, 1, 0.36, 1); }
+.tip-enter-from, .tip-leave-to { opacity: 0; transform: translateY(8px); }
+
+/* ── Source dropdown enter/leave ──────────────────────────────────── */
+/* Same principle: fade + tiny downward unfold, no scale — so the list doesn't
+   render short for a frame and then expand to its final height. */
+.drop-enter-active, .drop-leave-active { transition: opacity 140ms ease, transform 160ms cubic-bezier(0.22, 1, 0.36, 1); }
+.drop-enter-from, .drop-leave-to { opacity: 0; transform: translateY(-4px); }
+
+/* ── Small character size ─────────────────────────────────────────── */
+/* On the small window (~140px) the panel content area is only ~108px wide.
+   The 4-button secondary row (4×24 + 3×12 gaps = 132px) overflowed, so the
+   buttons stuck out of the panel. Tighten the gaps and shrink the buttons a
+   touch so both rows fit. Only the small window matches (medium is 170px+). */
+@media (max-width: 155px) {
+  .ctrl-row { gap: 6px; }
+  .ctrl { width: 24px; height: 24px; }
+  .ctrl.play { width: 28px; height: 28px; }
+  .ctrl.small { width: 22px; height: 22px; }
+}
+</style>

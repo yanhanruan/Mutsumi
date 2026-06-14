@@ -57,6 +57,9 @@ export interface Translations {
   // ── Weather visibility (Task 4) ─────────────────────────────────
   showWeather: string
 
+  // ── Music controller visibility ─────────────────────────────────
+  showMusic: string
+
   // ── Pomodoro badge ──────────────────────────────────────────────
   pomFocus:  string
   pomBreak:  string
@@ -96,6 +99,25 @@ export interface Translations {
     today:        string   // "card of the day" badge
     history:      string   // history toggle / panel heading
     empty:        string   // empty-history placeholder
+  }
+
+  // ── Mini music controller ───────────────────────────────────────
+  music: {
+    unknownTitle:  string   // fallback when the track has no title
+    unknownArtist: string   // fallback when the track has no artist
+    prev:          string   // previous-track button tooltip
+    play:          string   // play button tooltip
+    pause:         string   // pause button tooltip
+    next:          string   // next-track button tooltip
+    replay:        string   // restart-current-track button tooltip
+    skipBack:      string   // seek backward 10 s button tooltip
+    skipForward:   string   // seek forward 10 s button tooltip
+    mute:          string   // mute button tooltip
+    unmute:        string   // unmute button tooltip
+    volume:        string   // volume slider aria-label
+    source:        string   // source-switcher button tooltip / heading
+    autoSource:    string   // "Auto" entry — follow the active source
+    unknownSource: string   // fallback app name when the source app id is empty
   }
 
   // ── Late-night reminder ─────────────────────────────────────────
