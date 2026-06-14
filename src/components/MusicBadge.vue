@@ -141,7 +141,7 @@ function applySnapshot(s: MediaSnapshot): void {
   }
 
   data.value = s
-  if (!draggingVol) vol.value = s.volume   // don't fight the user mid-drag
+  if (!draggingVol.value) vol.value = s.volume   // don't fight the user mid-drag
 
   clock = reconcile(clock, s, performance.now(), draggingSeek.value)
   if (!draggingSeek.value) {
