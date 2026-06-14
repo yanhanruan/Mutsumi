@@ -9,7 +9,6 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { useI18n } from '../i18n'
-import { useAppConfig } from '../composables/useAppConfig'
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -29,7 +28,6 @@ export interface SystemState {
 const emit = defineEmits<{ close: [] }>()
 
 const { t } = useI18n()
-const { config } = useAppConfig()
 
 const visible = ref(false)
 const state = ref<SystemState | null>(null)
@@ -81,11 +79,11 @@ defineExpose({ open, dismiss })
 
 <template>
   <Transition name="fade">
-    <div v-if="visible" class="system-overlay pet-ui-overlay">
-      <div class="panel">
-        <button class="ctrl-btn" @click.stop="requestClose">×</button>
+    <div v-if="visible" class="system-overlay">
+      <div class="panel pet-ui-overlay" data-tauri-drag-region>
+        <button class="ctrl-btn" @click.stop="requestClose" @mousedown.stop>×</button>
 
-        <h2 class="panel-title">{{ t.sys.title }}</h2>
+        <h2 class="panel-title" data-tauri-drag-region>{{ t.sys.title }}</h2>
 
         <div v-if="!state" class="loading-state">
           Loading...
@@ -256,7 +254,18 @@ defineExpose({ open, dismiss })
   width: 28px;
   height: 28px;
   border-radius: 50%;
-  background: conic-gradient(#5a9960 var(--p), rgba(119, 153, 119, 0.2) 0);
+  /* A hard conic stop renders a visibly serrated (stair-stepped) seam in
+     WebView2. Feathering the fill→track transition by ~1% on each side smooths
+     the seam away.
+     The conic also converges to a muddy point at its centre — ugly at small
+     percentages — so a matching radial hub covers the centre, turning the disc
+     into a clean ring and hiding the convergence entirely. */
+  background:
+    radial-gradient(circle at center, rgba(245, 250, 245, 0.9) 0 5px, transparent 5.5px),
+    conic-gradient(
+      #5a9960 calc(var(--p) - 1%),
+      rgba(119, 153, 119, 0.2) calc(var(--p) + 1%)
+    );
   box-shadow: inset 0 0 0 4px rgba(245, 250, 245, 0.9);
   flex-shrink: 0;
 }

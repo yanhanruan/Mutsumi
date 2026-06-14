@@ -46,9 +46,15 @@ const {
 } = useAnimator(DEFAULT_ANIMATIONS, imgRef)
 useAudioReaction(queueAnim, currentName, getPending, cancelPending)
 usePetStatus(setIdleVariant)
+// True while a full-window overlay (tarot card / system state panel) is open.
+// Declared before useHitTest (which reads them) and the size watch below.
+const tarotActive = ref(false)
+const sysStateActive = ref(false)
+
 // Per-pixel click-through: transparent regions of the pet pass clicks
-// through to whatever is behind the window.
-useHitTest(getCurrentImage)
+// through to whatever is behind the window. While an overlay is open, only the
+// overlay's panel is interactive; the area around it stays click-through.
+useHitTest(getCurrentImage, () => tarotActive.value || sysStateActive.value)
 
 // Animations that must not be interrupted by a click (bubble still shows).
 // pat_head: mid-animation abort would look jarring.
@@ -62,11 +68,6 @@ const NO_CLICK_INTERRUPT = new Set([
 const { t, locale } = useI18n()
 const { config } = useAppConfig()
 const { weatherAvailable } = useWeatherAvailable()
-
-// True while the tarot overlay is open (declared before the size watch below,
-// which reads it on its immediate run).
-const tarotActive = ref(false)
-const sysStateActive = ref(false)
 
 // ── Window show / hide transitions ────────────────────────────────
 // petOpacity drives a CSS opacity transition. It starts at 1, goes to 0 when
