@@ -61,6 +61,11 @@ pub struct MediaSnapshot {
     pub can_prev:    bool,
     pub can_play:    bool,
     pub can_pause:   bool,
+    /// True when the app honors seek/position changes (the progress bar, ±10 s
+    /// skip and replay). Some apps (notably 网易云音乐) integrate play/pause/next
+    /// but bind no position handler, so position changes are silently rejected;
+    /// the UI greys those controls out when this is false.
+    pub can_seek:    bool,
     /// System render-endpoint mute state (not part of SMTC — see endpoint volume).
     pub muted:       bool,
     /// System render-endpoint master volume, 0.0–1.0.
@@ -450,6 +455,7 @@ fn read_snapshot() -> MediaSnapshot {
             snap.can_prev  = c.IsPreviousEnabled().unwrap_or(false);
             snap.can_play  = c.IsPlayEnabled().unwrap_or(false);
             snap.can_pause = c.IsPauseEnabled().unwrap_or(false);
+            snap.can_seek  = c.IsPlaybackPositionEnabled().unwrap_or(false);
         }
     }
     if let Ok(tl) = session.GetTimelineProperties() {

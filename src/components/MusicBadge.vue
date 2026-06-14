@@ -43,6 +43,7 @@ interface MediaSnapshot {
   can_prev:    boolean
   can_play:    boolean
   can_pause:   boolean
+  can_seek:    boolean
   muted:       boolean
   volume:      number
   app_id:      string
@@ -105,6 +106,10 @@ const title    = computed(() => data.value?.title?.trim() || t.value.music.unkno
 const artist   = computed(() => data.value?.artist?.trim() || t.value.music.unknownArtist)
 const duration = computed(() => data.value?.duration_ms ?? 0)
 const pct = computed(() => pctOf(displayMs.value, duration.value))
+// Whether the current source honors position changes (progress bar, ±10 s skip,
+// replay). Some apps integrate play/pause/next but bind no seek handler, so
+// these controls would be silently rejected — grey them out instead.
+const canSeek = computed(() => (data.value?.can_seek ?? false) && duration.value > 0)
 
 const sessions    = computed<SessionInfo[]>(() => data.value?.sessions ?? [])
 const multiSource = computed(() => sessions.value.length > 1)
@@ -219,7 +224,7 @@ function scheduleSeek(positionMs: number) {
 }
 
 function onSeekDown(e: PointerEvent) {
-  if (duration.value <= 0) return
+  if (!canSeek.value) return
   draggingSeek.value = true
   beginDrag()   // hold the window interactive so the drag isn't chopped up
   displayMs.value = posFromEvent(e)
@@ -348,22 +353,28 @@ onUnmounted(() => {
           <div class="title">{{ title }}</div>
           <div class="artist">{{ artist }}</div>
         </div>
-        <div
-          ref="progressEl"
-          class="progress"
-          :class="{ dragging: draggingSeek, seekable: duration > 0 }"
-          @pointerdown.stop="onSeekDown"
-          @pointermove="onSeekMove"
-          @pointerup="onSeekUp"
-          @pointercancel="onSeekUp"
-        >
-          <div class="bar" :style="{ width: pct + '%' }" />
-          <div class="seek-thumb" :style="{ left: pct + '%' }" />
-        </div>
-        <div class="times">
-          <span>{{ fmt(displayMs) }}</span>
-          <span>{{ fmt(duration) }}</span>
-        </div>
+        <!-- Progress bar + time readout only for seekable sources. Sources that
+             expose no position handler (e.g. 网易云音乐) report no timeline at
+             all, so the bar would be dead and the duration stuck at 0:00 — hide
+             both and fall back to a simple controller. -->
+        <template v-if="canSeek">
+          <div
+            ref="progressEl"
+            class="progress seekable"
+            :class="{ dragging: draggingSeek }"
+            @pointerdown.stop="onSeekDown"
+            @pointermove="onSeekMove"
+            @pointerup="onSeekUp"
+            @pointercancel="onSeekUp"
+          >
+            <div class="bar" :style="{ width: pct + '%' }" />
+            <div class="seek-thumb" :style="{ left: pct + '%' }" />
+          </div>
+          <div class="times">
+            <span>{{ fmt(displayMs) }}</span>
+            <span>{{ fmt(duration) }}</span>
+          </div>
+        </template>
         <div class="controls">
           <!-- Primary transport -->
           <div class="ctrl-row">
@@ -379,11 +390,11 @@ onUnmounted(() => {
           </div>
           <!-- Secondary: replay + mute (with a vertical volume popup on hover) -->
           <div class="ctrl-row">
-            <button class="ctrl small" :data-tip="t.music.replay" :aria-label="t.music.replay" @click.stop="replay">
+            <button class="ctrl small" :data-tip="t.music.replay" :aria-label="t.music.replay" :disabled="!canSeek" @click.stop="replay">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>
             </button>
             <!-- Seek back 10 s (counter-clockwise ring surrounding "10") -->
-            <button class="ctrl small" :data-tip="t.music.skipBack" :aria-label="t.music.skipBack" @click.stop="skipBack">
+            <button class="ctrl small" :data-tip="t.music.skipBack" :aria-label="t.music.skipBack" :disabled="!canSeek" @click.stop="skipBack">
               <svg class="ic-seek" viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
                 <path d="M3 3v5h5"/>
@@ -391,7 +402,7 @@ onUnmounted(() => {
               </svg>
             </button>
             <!-- Seek forward 10 s (clockwise ring surrounding "10") -->
-            <button class="ctrl small" :data-tip="t.music.skipForward" :aria-label="t.music.skipForward" @click.stop="skipForward">
+            <button class="ctrl small" :data-tip="t.music.skipForward" :aria-label="t.music.skipForward" :disabled="!canSeek" @click.stop="skipForward">
               <svg class="ic-seek" viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M21 12a9 9 0 1 1-9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
                 <path d="M21 3v5h-5"/>
@@ -662,6 +673,9 @@ onUnmounted(() => {
   z-index: 5;
 }
 .ctrl[data-tip]:hover::after { opacity: 1; visibility: visible; }
+/* No tooltip on disabled controls (seek / skip / replay for non-seekable
+   sources like 网易云音乐) — there's nothing actionable to hint at. */
+.ctrl:disabled[data-tip]::after { content: none; }
 .ctrl svg { width: 14px; height: 14px; fill: currentColor; }
 /* Seek ±10s glyphs are stroked outlines (a ring that wraps the "10"), not
    filled shapes — override the default fill and draw with the stroke. */
