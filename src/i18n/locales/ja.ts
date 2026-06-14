@@ -99,7 +99,6 @@ export const ja: Translations = {
     title:       'システム状態',
     cpu:         'CPU',
     memory:      'メモリ',
-    temp:        '温度',
     network:     'ネットワーク',
     online:      'オンライン',
     offline:     'オフライン',

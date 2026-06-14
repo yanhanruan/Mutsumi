@@ -99,7 +99,6 @@ export const en: Translations = {
     title:       'System Status',
     cpu:         'CPU',
     memory:      'Memory',
-    temp:        'Temp',
     network:     'Network',
     online:      'Online',
     offline:     'Offline',

@@ -2,7 +2,7 @@
 /**
  * SystemStateOverlay — lightweight system state awareness module.
  *
- * Displays CPU, Memory, Temperature, Network, Uptime, and Battery status.
+ * Displays CPU, Memory, Network, Uptime, and Battery status.
  * Visuals: Small pie charts for CPU/RAM, progress bar for battery.
  * Styling is consistent with TarotCard overlay (frosted green glass).
  */
@@ -21,7 +21,6 @@ export type BatteryStatus =
 export interface SystemState {
   cpu_usage: number
   mem_usage: number
-  temperature: number | null
   network_connected: boolean
   uptime: number
   battery: BatteryStatus | null
@@ -116,11 +115,6 @@ defineExpose({ open, dismiss })
 
           <!-- List Metrics Grid -->
           <div class="list-grid">
-            <!-- Temp -->
-            <span class="icon">🌡️</span>
-            <span class="label">{{ t.sys.temp }}</span>
-            <span class="value">{{ state.temperature ? Math.round(state.temperature) + '°C' : '--' }}</span>
-
             <!-- Network -->
             <span class="icon">🌐</span>
             <span class="label">{{ t.sys.network }}</span>

@@ -16,24 +16,30 @@ pub enum BatteryStatus {
 pub struct SystemState {
     pub cpu_usage: f32,
     pub mem_usage: f32,
-    pub temperature: Option<f32>,
     pub network_connected: bool,
     pub uptime: u64,
     pub battery: Option<BatteryStatus>,
 }
 
+// NOTE: CPU/component temperature is intentionally not exposed. On Windows the
+// only OS-level source is the ACPI thermal zone via WMI
+// (`MSAcpi_ThermalZoneTemperature`), which `sysinfo` uses under the hood. That
+// query requires administrator privileges (access-denied otherwise) and, even
+// when elevated, most machines expose no usable CPU sensor — so `Components`
+// reliably returns nothing for a normal (non-elevated) desktop app. Reading
+// real CPU temperature would require bundling a signed kernel-mode driver,
+// which is out of scope for this app, so the field is omitted entirely.
+
 pub fn spawn(app: AppHandle, stop_flag: Arc<AtomicBool>) {
     tauri::async_runtime::spawn_blocking(move || {
-        use sysinfo::{System, Networks, Components};
+        use sysinfo::{System, Networks};
         let mut sys = System::new_all();
         let mut networks = Networks::new_with_refreshed_list();
-        let mut components = Components::new_with_refreshed_list();
         let battery_manager = battery::Manager::new().ok();
 
         while !stop_flag.load(Ordering::Relaxed) {
             sys.refresh_all();
             networks.refresh(true);
-            components.refresh(true);
 
             // CPU Usage
             let cpu_usage = sys.global_cpu_usage();
@@ -46,16 +52,6 @@ pub fn spawn(app: AppHandle, stop_flag: Arc<AtomicBool>) {
             } else {
                 0.0
             };
-
-            // Temperature (max)
-            let mut max_temp: Option<f32> = None;
-            for component in &components {
-                if let Some(t) = component.temperature() {
-                    if max_temp.is_none() || t > max_temp.unwrap() {
-                        max_temp = Some(t);
-                    }
-                }
-            }
 
             // Network
             let mut network_connected = false;
@@ -100,7 +96,6 @@ pub fn spawn(app: AppHandle, stop_flag: Arc<AtomicBool>) {
             let state = SystemState {
                 cpu_usage,
                 mem_usage,
-                temperature: max_temp,
                 network_connected,
                 uptime,
                 battery: battery_status,

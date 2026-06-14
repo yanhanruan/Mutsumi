@@ -108,7 +108,6 @@ export interface Translations {
     title:       string
     cpu:         string
     memory:      string
-    temp:        string
     network:     string
     online:      string
     offline:     string

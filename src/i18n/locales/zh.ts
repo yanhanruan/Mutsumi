@@ -99,7 +99,6 @@ export const zh: Translations = {
     title:       '系统状态',
     cpu:         'CPU',
     memory:      '内存',
-    temp:        '温度',
     network:     '网络',
     online:      '在线',
     offline:     '离线',
