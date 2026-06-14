@@ -121,7 +121,7 @@ pub fn media_replay() -> Result<(), String> {
 #[tauri::command]
 pub fn media_skip(delta_ms: i64) -> Result<(), String> {
     init_mta();
-    let session = current_session().map_err(|_| "no active media session".to_string())?;
+    let session = current_session().ok_or_else(|| "no active media session".to_string())?;
     let tl = session.GetTimelineProperties().map_err(|e| e.message())?;
     let playing = session
         .GetPlaybackInfo()
@@ -150,7 +150,7 @@ pub fn media_skip(delta_ms: i64) -> Result<(), String> {
 #[tauri::command]
 pub fn media_seek(position_ms: i64) -> Result<(), String> {
     init_mta();
-    let session = current_session().map_err(|_| "no active media session".to_string())?;
+    let session = current_session().ok_or_else(|| "no active media session".to_string())?;
     let tl = session.GetTimelineProperties().map_err(|e| e.message())?;
     let start = tl.StartTime().map(|t| t.Duration).unwrap_or(0);
     let end   = tl.EndTime().map(|t| t.Duration).unwrap_or(0);
@@ -236,7 +236,7 @@ where
     F: FnOnce(&Session) -> windows::core::Result<bool>,
 {
     init_mta();
-    let session = current_session().map_err(|_| "no active media session".to_string())?;
+    let session = current_session().ok_or_else(|| "no active media session".to_string())?;
     let ok = f(&session).map_err(|e| e.message())?;
     if ok { Ok(()) } else { Err("media control was rejected".into()) }
 }
@@ -264,9 +264,51 @@ fn prev_playing() -> &'static Mutex<std::collections::HashSet<String>> {
     PREV.get_or_init(|| Mutex::new(std::collections::HashSet::new()))
 }
 
+/// The source we are currently displaying / controlling (its SourceAppUserModelId),
+/// or None. Used to ride out a brief disappearance of that source: when an app
+/// (notably browser media) tears down and recreates its SMTC session across a
+/// prev/next track change, its session is absent from the list for a poll or
+/// more. Without this, selection falls through to an unrelated lingering session
+/// (e.g. a paused 网易云音乐), so the panel flashes the wrong app — and could
+/// route a control to it.
+fn focus() -> &'static Mutex<Option<String>> {
+    static FOCUS: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+    FOCUS.get_or_init(|| Mutex::new(None))
+}
+
+/// Set while we are holding the focused source through a momentary absence. The
+/// poller freezes the panel on the last good snapshot while this is set, so the
+/// display never flashes another source during a track change.
+static HOLDING: AtomicBool = AtomicBool::new(false);
+fn holding() -> bool { HOLDING.load(Ordering::Relaxed) }
+
+/// Whether to hold the focused source rather than switch away from it.
+///
+/// Deliberately latency-independent: we never time the gap, because a slow
+/// next-track load can outlast any fixed window (and timing it just trades one
+/// flash for a longer one). Instead the decision is purely a function of the
+/// current state — hold whenever the focused source is momentarily absent and
+/// no *other* source is actually playing. A track change leaves nothing else
+/// making sound, so the gap is held for exactly as long as it lasts; the moment
+/// another source genuinely starts playing (or the list empties) we release and
+/// follow it. The cost is a benign corner case: if the focused app closes while
+/// a different *paused* session lingers, we keep showing the (now silent) former
+/// source until something plays or the user picks another in the switcher.
+fn should_hold(anchor_set: bool, anchor_present: bool, other_playing: bool) -> bool {
+    anchor_set && !anchor_present && !other_playing
+}
+
 /// SourceAppUserModelId of a session (stable per app), or "" if unavailable.
 fn session_id(s: &Session) -> String {
     s.SourceAppUserModelId().map(|h| h.to_string()).unwrap_or_default()
+}
+
+/// Whether a session is currently in the Playing state (actively making sound).
+fn is_playing(s: &Session) -> bool {
+    matches!(
+        s.GetPlaybackInfo().and_then(|pb| pb.PlaybackStatus()),
+        Ok(PlaybackStatus::Playing)
+    )
 }
 
 /// (priority, last-updated ticks) — a higher tuple wins. Playing > Changing >
@@ -331,16 +373,49 @@ fn update_auto_target(sessions: &[SessionInfo]) {
 }
 
 /// Choose which session to display / control:
+///   0. if the focused source is momentarily absent and nothing else is playing,
+///      hold it (return None for this gap) rather than switch — see `should_hold`;
 ///   1. the user-pinned source, while it still exists — kept even when paused, so
 ///      it can be resumed instead of the controller jumping to another source;
 ///   2. else the sticky auto-follow target (the most recently started source),
 ///      kept while it exists so a just-paused source stays focused;
 ///   3. else the highest-scoring session.
 /// A pinned id that no longer matches any session is cleared (revert to auto).
+/// Whatever is chosen becomes the focused source for the next poll's hold check.
 fn choose_session(items: &[Session]) -> Option<Session> {
     if items.is_empty() {
+        // Nothing anywhere — release the focus so a real stop isn't held.
+        *focus().lock().unwrap() = None;
+        HOLDING.store(false, Ordering::Relaxed);
         return None;
     }
+
+    // 0. Hold: if the source we were showing/controlling has dropped out of the
+    //    list (a track-change session teardown) and nothing else is playing,
+    //    don't switch to — or clear the pin for — an unrelated session. Report
+    //    no session for this gap; the poller freezes the panel on the last good
+    //    snapshot. Checked BEFORE the pin logic so a transient absence can't
+    //    wipe a user's pin.
+    let anchor = focus().lock().unwrap().clone();
+    let anchor_present = anchor
+        .as_ref()
+        .map_or(false, |id| items.iter().any(|s| &session_id(s) == id));
+    if anchor.is_some() && !anchor_present {
+        let other_playing = items.iter().any(is_playing);
+        if should_hold(true, false, other_playing) {
+            HOLDING.store(true, Ordering::Relaxed);
+            return None;
+        }
+    }
+
+    HOLDING.store(false, Ordering::Relaxed);
+    let chosen = choose_session_inner(items);
+    *focus().lock().unwrap() = chosen.as_ref().map(|s| session_id(s));
+    chosen
+}
+
+/// The pin → auto-follow → score selection, without the focus-grace guard.
+fn choose_session_inner(items: &[Session]) -> Option<Session> {
     let pin = pinned().lock().unwrap().clone();
     if let Some(pin_id) = pin {
         if let Some(s) = items.iter().find(|s| session_id(s) == pin_id) {
@@ -368,12 +443,11 @@ fn choose_session(items: &[Session]) -> Option<Session> {
 }
 
 /// The session targeted by transport controls — the same one the UI displays.
-fn current_session() -> windows::core::Result<Session> {
-    let mgr = SessionManager::RequestAsync()?.get()?;
-    if let Some(s) = choose_session(&all_sessions(&mgr)) {
-        return Ok(s);
-    }
-    mgr.GetCurrentSession()
+/// None during a focus-grace gap, so a control issued mid-track-change is a
+/// harmless no-op rather than being routed to an unrelated session.
+fn current_session() -> Option<Session> {
+    let mgr = SessionManager::RequestAsync().and_then(|op| op.get()).ok()?;
+    choose_session(&all_sessions(&mgr))
 }
 
 /// Default render endpoint's volume control (for mute).
@@ -484,9 +558,12 @@ fn read_snapshot() -> MediaSnapshot {
     // transitions BEFORE choosing, so the choice reflects it with no lag.
     update_auto_target(&snap.sessions);
 
-    // The session we actually display + control (honors the pin, then the
-    // sticky auto-target, then the score fallback).
-    let session = match choose_session(&items).or_else(|| mgr.GetCurrentSession().ok()) {
+    // The session we actually display + control (honors the focus grace, then
+    // the pin, the sticky auto-target, and finally the score fallback). None
+    // here means either nothing is playing or the focused source is mid
+    // track-change gap; both yield an inactive snapshot (the poller freezes the
+    // panel on the last good one during a gap).
+    let session = match choose_session(&items) {
         Some(s) => s,
         None => return snap,
     };
@@ -538,7 +615,19 @@ pub fn spawn(app: AppHandle, stop_flag: Arc<AtomicBool>) {
         let mut last: Option<MediaSnapshot> = None;
 
         while !stop_flag.load(Ordering::Relaxed) {
-            let snap = read_snapshot();
+            let mut snap = read_snapshot();
+
+            // Ride out a brief disappearance of the focused source (e.g. a
+            // browser tearing down + recreating its SMTC session across a
+            // prev/next): hold the last active snapshot while `choose_session`
+            // is holding the focus, instead of flashing an unrelated session's
+            // info. Control is already a no-op during the hold, so the held
+            // snapshot is display-only.
+            if !snap.active && holding() {
+                if let Some(prev) = last.as_ref().filter(|p| p.active) {
+                    snap = prev.clone();
+                }
+            }
 
             if let Some(s) = app.try_state::<MediaState>() {
                 *s.0.lock().unwrap() = snap.clone();
@@ -556,4 +645,35 @@ pub fn spawn(app: AppHandle, stop_flag: Arc<AtomicBool>) {
 
         unsafe { CoUninitialize() };
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn holds_when_anchor_absent_and_nothing_else_plays() {
+        // The focused source dropped out and no other source is making sound —
+        // the track-change signature. Hold it for as long as that lasts.
+        assert!(should_hold(true, false, false));
+    }
+
+    #[test]
+    fn releases_when_another_source_starts_playing() {
+        // Something else is genuinely playing now → follow it, don't hold.
+        assert!(!should_hold(true, false, true));
+    }
+
+    #[test]
+    fn present_anchor_is_never_held() {
+        // Still in the list → normal selection, no gap to ride out.
+        assert!(!should_hold(true, true, false));
+        assert!(!should_hold(true, true, true));
+    }
+
+    #[test]
+    fn no_anchor_means_no_hold() {
+        // Nothing was focused → there is nothing to hold.
+        assert!(!should_hold(false, false, false));
+    }
 }
