@@ -111,6 +111,11 @@ const pct = computed(() => pctOf(displayMs.value, duration.value))
 // drive, so every transport control is disabled and the progress bar hidden —
 // a paused track still counts as active, so play stays enabled to resume it.
 const hasSession = computed(() => data.value?.active ?? false)
+// Some sources have no previous/next track (a single video, a radio stream, the
+// last item in a queue): SMTC reports the capability per source, so grey the
+// transport buttons out instead of firing a control the source will reject.
+const canPrev = computed(() => hasSession.value && (data.value?.can_prev ?? false))
+const canNext = computed(() => hasSession.value && (data.value?.can_next ?? false))
 // Whether the current source honors position changes (progress bar, ±10 s skip,
 // replay). Some apps integrate play/pause/next but bind no seek handler, so
 // these controls would be silently rejected — grey them out instead.
@@ -422,13 +427,13 @@ onUnmounted(() => {
         <div class="controls">
           <!-- Primary transport -->
           <div class="ctrl-row">
-            <button class="ctrl" :data-tip="t.music.prev" :aria-label="t.music.prev" :disabled="!hasSession" @click.stop="prev">
+            <button class="ctrl" :data-tip="t.music.prev" :aria-label="t.music.prev" :disabled="!canPrev" @click.stop="prev">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6h2.2v12H6z"/><path d="M19 6v12l-9-6z"/></svg>
             </button>
             <button class="ctrl play" :data-tip="playing ? t.music.pause : t.music.play" :aria-label="playing ? t.music.pause : t.music.play" :disabled="!hasSession" @click.stop="playPause">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="playing ? 'M8 5h3v14H8zM13 5h3v14h-3z' : 'M8 5l11 7-11 7z'" /></svg>
             </button>
-            <button class="ctrl" :data-tip="t.music.next" :aria-label="t.music.next" :disabled="!hasSession" @click.stop="next">
+            <button class="ctrl" :data-tip="t.music.next" :aria-label="t.music.next" :disabled="!canNext" @click.stop="next">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.8 6H18v12h-2.2z"/><path d="M5 6v12l9-6z"/></svg>
             </button>
           </div>

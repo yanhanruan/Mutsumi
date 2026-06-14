@@ -13,8 +13,9 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::collections::HashSet;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -25,12 +26,16 @@ use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSessionPlaybackStatus as PlaybackStatus,
     GlobalSystemMediaTransportControlsSessionTimelineProperties as TimelineProperties,
 };
+use windows::Win32::Foundation::CloseHandle;
 use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
 use windows::Win32::Media::Audio::{
     eMultimedia, eRender, IMMDevice, IMMDeviceEnumerator, MMDeviceEnumerator,
 };
 use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED,
+};
+use windows::Win32::System::Diagnostics::ToolHelp::{
+    CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
 };
 
 const POLL_INTERVAL: Duration = Duration::from_millis(1000);
@@ -243,59 +248,113 @@ where
 
 // ── SMTC reads ─────────────────────────────────────────────────────
 
-/// User-pinned source (SourceAppUserModelId), or None for auto-follow.
+// ── Selection state ────────────────────────────────────────────────
+//
+// One source of truth for "which session do we show + control". It is written
+// ONLY by the poller (`drive_selection`); transport commands are pure readers
+// (`current_session` just looks up `selected.id` in the live list). That single
+// writer is what keeps the behavior predictable — no two code paths racing to
+// reassign the source.
+
+/// How long to keep showing the current source after its SMTC session drops out
+/// of the list, before concluding it's really gone and switching away. Covers
+/// the gap when an app tears down + recreates its session across a prev/next
+/// track change. Browsers re-register quickly, so this is about session churn,
+/// not audio buffering — it need not scale with network speed. It also bounds
+/// how long after closing a source the panel takes to reveal the next one.
+const GAP_DEBOUNCE: Duration = Duration::from_millis(2000);
+
+/// User-pinned source (SourceAppUserModelId), or None to auto-select. Set by the
+/// `media_select` command; read by `drive_selection`.
 fn pinned() -> &'static Mutex<Option<String>> {
     static PINNED: OnceLock<Mutex<Option<String>>> = OnceLock::new();
     PINNED.get_or_init(|| Mutex::new(None))
 }
 
-/// Auto-follow target (SourceAppUserModelId): the source that most recently
-/// transitioned into Playing. It stays put when that source merely pauses, so it
-/// can be resumed without the controller jumping to another playing source.
-fn auto_target() -> &'static Mutex<Option<String>> {
-    static AUTO: OnceLock<Mutex<Option<String>>> = OnceLock::new();
-    AUTO.get_or_init(|| Mutex::new(None))
+/// Ids that were Playing on the previous poll, to detect play-start transitions.
+fn prev_playing() -> &'static Mutex<HashSet<String>> {
+    static PREV: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    PREV.get_or_init(|| Mutex::new(HashSet::new()))
 }
 
-/// Source ids that were playing on the previous poll, for play-start transition
-/// detection. Maintained by the poller via `update_auto_target`.
-fn prev_playing() -> &'static Mutex<std::collections::HashSet<String>> {
-    static PREV: OnceLock<Mutex<std::collections::HashSet<String>>> = OnceLock::new();
-    PREV.get_or_init(|| Mutex::new(std::collections::HashSet::new()))
+/// The session we present + control, and when it last went missing from the list
+/// (`None` while present). Only `drive_selection` mutates this.
+#[derive(Default)]
+struct Selected {
+    id: Option<String>,
+    missing_since: Option<Instant>,
+}
+fn selected() -> &'static Mutex<Selected> {
+    static SELECTED: OnceLock<Mutex<Selected>> = OnceLock::new();
+    SELECTED.get_or_init(|| Mutex::new(Selected::default()))
 }
 
-/// The source we are currently displaying / controlling (its SourceAppUserModelId),
-/// or None. Used to ride out a brief disappearance of that source: when an app
-/// (notably browser media) tears down and recreates its SMTC session across a
-/// prev/next track change, its session is absent from the list for a poll or
-/// more. Without this, selection falls through to an unrelated lingering session
-/// (e.g. a paused 网易云音乐), so the panel flashes the wrong app — and could
-/// route a control to it.
-fn focus() -> &'static Mutex<Option<String>> {
-    static FOCUS: OnceLock<Mutex<Option<String>>> = OnceLock::new();
-    FOCUS.get_or_init(|| Mutex::new(None))
+/// The outcome of one selection step.
+#[derive(Debug, PartialEq, Eq)]
+enum Decision {
+    /// Present + control this source (guaranteed to be in the live list).
+    Show(String),
+    /// The selected source is briefly absent (a track-change gap) — freeze the
+    /// panel on the last good snapshot rather than switch or blank.
+    Hold,
+    /// Nothing to show.
+    Inactive,
 }
 
-/// Set while we are holding the focused source through a momentary absence. The
-/// poller freezes the panel on the last good snapshot while this is set, so the
-/// display never flashes another source during a track change.
-static HOLDING: AtomicBool = AtomicBool::new(false);
-fn holding() -> bool { HOLDING.load(Ordering::Relaxed) }
-
-/// Whether to hold the focused source rather than switch away from it.
-///
-/// Deliberately latency-independent: we never time the gap, because a slow
-/// next-track load can outlast any fixed window (and timing it just trades one
-/// flash for a longer one). Instead the decision is purely a function of the
-/// current state — hold whenever the focused source is momentarily absent and
-/// no *other* source is actually playing. A track change leaves nothing else
-/// making sound, so the gap is held for exactly as long as it lasts; the moment
-/// another source genuinely starts playing (or the list empties) we release and
-/// follow it. The cost is a benign corner case: if the focused app closes while
-/// a different *paused* session lingers, we keep showing the (now silent) former
-/// source until something plays or the user picks another in the switcher.
-fn should_hold(anchor_set: bool, anchor_present: bool, other_playing: bool) -> bool {
-    anchor_set && !anchor_present && !other_playing
+/// Pure selection core. Decides the next source from the current world only —
+/// see the numbered rules. `newly_started` is a present source that transitioned
+/// into Playing this poll (if any); `selected_alive` is whether the (absent)
+/// selection's process is still running; `best_available` is the highest-scoring
+/// present source (the replacement when the selection is really gone). Keeping
+/// this free of WinRT + clocks makes the whole policy unit-testable.
+fn decide(
+    present: &HashSet<String>,
+    newly_started: Option<&String>,
+    pin: &Option<String>,
+    selected: &Option<String>,
+    selected_alive: Option<bool>,
+    missing_elapsed: Option<Duration>,
+    debounce: Duration,
+    best_available: Option<&String>,
+) -> Decision {
+    // 1. An explicit pin wins while its source exists.
+    if let Some(p) = pin {
+        if present.contains(p) {
+            return Decision::Show(p.clone());
+        }
+    }
+    // 2. A source that just started playing grabs focus (follow real intent).
+    if let Some(started) = newly_started {
+        return Decision::Show(started.clone());
+    }
+    // 3. Stick with the current source while it's present (don't chase others
+    //    around just because they're playing, and don't drop it when it pauses).
+    if let Some(cur) = selected {
+        if present.contains(cur) {
+            return Decision::Show(cur.clone());
+        }
+        // 4. It's gone from the list. Decide whether this is a transient
+        //    track-change teardown (hold) or the source really closing (switch),
+        //    using process liveness rather than a clock — a slow track load can
+        //    outlast any fixed window, but the app's process stays alive across
+        //    it and dies on a real close:
+        let held = missing_elapsed.unwrap_or_default();
+        match selected_alive {
+            // App still running → track-change gap; hold until its session
+            // returns (no time limit), bounded only by the MAX_HOLD safety cap.
+            Some(true) if held < MAX_HOLD => return Decision::Hold,
+            // App gone → it really closed; switch away now (rule 5).
+            Some(false) => {}
+            // Liveness unknown (non-exe id / snapshot failed) → short debounce.
+            None if held < debounce => return Decision::Hold,
+            _ => {}
+        }
+    }
+    // 5. Adopt the best remaining source (reveals B when A closes), else nothing.
+    match best_available {
+        Some(id) => Decision::Show(id.clone()),
+        None => Decision::Inactive,
+    }
 }
 
 /// SourceAppUserModelId of a session (stable per app), or "" if unavailable.
@@ -341,113 +400,135 @@ fn all_sessions(mgr: &SessionManager) -> Vec<Session> {
     items
 }
 
-/// Update the auto-follow target from play-start transitions, once per poll. A
-/// source that just began playing becomes the focus; a source merely pausing
-/// keeps the focus (so it can be resumed) as long as its session still exists.
-fn update_auto_target(sessions: &[SessionInfo]) {
-    use std::collections::HashSet;
-    let current: HashSet<String> = sessions
-        .iter()
-        .filter(|s| s.playing && !s.id.is_empty())
-        .map(|s| s.id.clone())
-        .collect();
-
-    let mut prev = prev_playing().lock().unwrap();
-    let mut target = auto_target().lock().unwrap();
-
-    if let Some(started) = current.difference(&prev).next() {
-        // A source just started playing — follow it.
-        *target = Some(started.clone());
-    } else {
-        // No new start: keep the current target while its session exists,
-        // otherwise adopt any currently-playing source (else leave None so the
-        // score fallback in choose_session decides).
-        let alive = target
-            .as_ref()
-            .map_or(false, |id| sessions.iter().any(|s| &s.id == id));
-        if !alive {
-            *target = current.iter().next().cloned();
-        }
-    }
-    *prev = current;
+/// The highest-scoring session (Playing > Changing > other, then most recently
+/// updated). The replacement adopted when the current selection is really gone.
+fn best_session(items: &[Session]) -> Option<&Session> {
+    items.iter().max_by_key(|s| session_score(*s))
 }
 
-/// Choose which session to display / control:
-///   0. if the focused source is momentarily absent and nothing else is playing,
-///      hold it (return None for this gap) rather than switch — see `should_hold`;
-///   1. the user-pinned source, while it still exists — kept even when paused, so
-///      it can be resumed instead of the controller jumping to another source;
-///   2. else the sticky auto-follow target (the most recently started source),
-///      kept while it exists so a just-paused source stays focused;
-///   3. else the highest-scoring session.
-/// A pinned id that no longer matches any session is cleared (revert to auto).
-/// Whatever is chosen becomes the focused source for the next poll's hold check.
-fn choose_session(items: &[Session]) -> Option<Session> {
-    if items.is_empty() {
-        // Nothing anywhere — release the focus so a real stop isn't held.
-        *focus().lock().unwrap() = None;
-        HOLDING.store(false, Ordering::Relaxed);
+/// Cap on holding an absent-but-alive source. Process liveness tells a *whole-app*
+/// close (process gone → switch instantly) apart from a track change, but it can't
+/// tell a closed browser *tab* from a track change — both leave the process alive
+/// with the session simply gone, and nothing Windows exposes says whether it will
+/// return. So this is the one irreducible knob: long enough to clear a real
+/// track-change gap (≈5 s on slow mobile data) so we never flash to another source
+/// mid-change, short enough that closing a tab updates the panel promptly.
+const MAX_HOLD: Duration = Duration::from_secs(7);
+
+/// Lowercased exe names of all running processes, or None if the snapshot failed
+/// (so callers treat "unknown" rather than "nothing is running").
+fn running_exe_names() -> Option<HashSet<String>> {
+    let mut names = HashSet::new();
+    unsafe {
+        let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0).ok()?;
+        let mut entry = PROCESSENTRY32W {
+            dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+            ..Default::default()
+        };
+        let mut ok = Process32FirstW(snap, &mut entry).is_ok();
+        while ok {
+            let len = entry
+                .szExeFile
+                .iter()
+                .position(|&c| c == 0)
+                .unwrap_or(entry.szExeFile.len());
+            let name = String::from_utf16_lossy(&entry.szExeFile[..len]).to_lowercase();
+            if !name.is_empty() {
+                names.insert(name);
+            }
+            ok = Process32NextW(snap, &mut entry).is_ok();
+        }
+        let _ = CloseHandle(snap);
+    }
+    (!names.is_empty()).then_some(names)
+}
+
+/// Whether the app behind a SourceAppUserModelId is still running.
+///   `Some(true)`  — a matching process exists (a missing session is a track-change gap);
+///   `Some(false)` — exe-shaped id, no matching process (the app has closed);
+///   `None`        — can't tell (id isn't an exe name, or the snapshot failed) → caller
+///                   falls back to the time debounce.
+/// SMTC reports these ids as bare exe names (e.g. `chrome.exe`, `cloudmusic.exe`),
+/// so a name match against the process list is exact for the common players.
+fn source_alive(id: &str) -> Option<bool> {
+    let lc = id.to_lowercase();
+    if !lc.ends_with(".exe") {
         return None;
     }
-
-    // 0. Hold: if the source we were showing/controlling has dropped out of the
-    //    list (a track-change session teardown) and nothing else is playing,
-    //    don't switch to — or clear the pin for — an unrelated session. Report
-    //    no session for this gap; the poller freezes the panel on the last good
-    //    snapshot. Checked BEFORE the pin logic so a transient absence can't
-    //    wipe a user's pin.
-    let anchor = focus().lock().unwrap().clone();
-    let anchor_present = anchor
-        .as_ref()
-        .map_or(false, |id| items.iter().any(|s| &session_id(s) == id));
-    if anchor.is_some() && !anchor_present {
-        let other_playing = items.iter().any(is_playing);
-        if should_hold(true, false, other_playing) {
-            HOLDING.store(true, Ordering::Relaxed);
-            return None;
-        }
-    }
-
-    HOLDING.store(false, Ordering::Relaxed);
-    let chosen = choose_session_inner(items);
-    *focus().lock().unwrap() = chosen.as_ref().map(|s| session_id(s));
-    chosen
+    let exe = lc.rsplit(['\\', '/']).next().unwrap_or(&lc).to_string();
+    Some(running_exe_names()?.contains(&exe))
 }
 
-/// The pin → auto-follow → score selection, without the focus-grace guard.
-fn choose_session_inner(items: &[Session]) -> Option<Session> {
+/// One step of the selection state machine, run once per poll. Gathers the live
+/// world, runs the pure `decide`, and commits the result to `selected` (the only
+/// place that state is written). Returns what the snapshot builder should do.
+fn drive_selection(items: &[Session]) -> Decision {
+    let present: HashSet<String> = items.iter().map(session_id).collect();
+    let playing_now: HashSet<String> =
+        items.iter().filter(|s| is_playing(s)).map(session_id).collect();
+    // A pin is an explicit, sticky user choice — keep it until the user changes
+    // it (via `media_select`). While its source is absent, `decide`'s rule 1
+    // simply doesn't match and selection falls through; if the source returns,
+    // the pin takes effect again.
     let pin = pinned().lock().unwrap().clone();
-    if let Some(pin_id) = pin {
-        if let Some(s) = items.iter().find(|s| session_id(s) == pin_id) {
-            return Some(s.clone());
+
+    let mut sel = selected().lock().unwrap();
+    // Track how long the current selection has been missing from the list, and
+    // whether its app is still running (only meaningful while it's absent).
+    let sel_id = sel.id.clone();
+    let (missing_elapsed, selected_alive) = match &sel_id {
+        Some(id) if !present.contains(id) => {
+            let elapsed = sel.missing_since.get_or_insert_with(Instant::now).elapsed();
+            (Some(elapsed), source_alive(id))
         }
-        *pinned().lock().unwrap() = None; // pinned source vanished → auto
-    }
-    // 2. Auto-follow target: the source most recently started playing, kept even
-    //    when paused, so a just-paused source stays focused and can be resumed.
-    let auto = auto_target().lock().unwrap().clone();
-    if let Some(auto_id) = auto {
-        if let Some(s) = items.iter().find(|s| session_id(s) == auto_id) {
-            return Some(s.clone());
+        _ => {
+            sel.missing_since = None;
+            (None, None)
+        }
+    };
+
+    // A source that transitioned into Playing since the last poll.
+    let prev = prev_playing().lock().unwrap().clone();
+    let newly_started = playing_now
+        .difference(&prev)
+        .find(|id| present.contains(*id))
+        .cloned();
+    *prev_playing().lock().unwrap() = playing_now;
+
+    let best = best_session(items).map(session_id);
+    let decision = decide(
+        &present,
+        newly_started.as_ref(),
+        &pin,
+        &sel.id,
+        selected_alive,
+        missing_elapsed,
+        GAP_DEBOUNCE,
+        best.as_ref(),
+    );
+
+    match &decision {
+        Decision::Show(id) => {
+            sel.id = Some(id.clone());
+            sel.missing_since = None;
+        }
+        // Hold: leave `selected` as-is (and keep `missing_since` counting).
+        Decision::Hold => {}
+        Decision::Inactive => {
+            sel.id = None;
+            sel.missing_since = None;
         }
     }
-    // 3. Fallback: the highest-scoring session.
-    let mut best: Option<(&Session, (i32, i64))> = None;
-    for s in items {
-        let sc = session_score(s);
-        if best.as_ref().map_or(true, |(_, b)| sc > *b) {
-            best = Some((s, sc));
-        }
-    }
-    best.map(|(s, _)| s.clone())
+    decision
 }
 
-/// The session targeted by transport controls — the same one the UI displays.
-/// None during a focus-grace gap, so a control issued mid-track-change is a
-/// harmless no-op rather than being routed to an unrelated session.
+/// The session transport controls act on — exactly the one the UI shows. A pure
+/// reader of `selected`: it looks the id up in the live list, so a control during
+/// a Hold gap (selection momentarily absent) is a harmless no-op.
 fn current_session() -> Option<Session> {
+    let id = selected().lock().unwrap().id.clone()?;
     let mgr = SessionManager::RequestAsync().and_then(|op| op.get()).ok()?;
-    choose_session(&all_sessions(&mgr))
+    all_sessions(&mgr).into_iter().find(|s| session_id(s) == id)
 }
 
 /// Default render endpoint's volume control (for mute).
@@ -525,10 +606,11 @@ fn status_str(s: PlaybackStatus) -> &'static str {
     else { "unknown" }
 }
 
-/// Read a full snapshot: the chosen session's now-playing state plus the list of
-/// all sessions for the source switcher. Returns a default (inactive) snapshot
-/// when no session manager is available.
-fn read_snapshot() -> MediaSnapshot {
+/// Read a full snapshot: the selected session's now-playing state plus the list
+/// of all sessions for the source switcher. The bool is `hold` — true when the
+/// selection is briefly absent (a track-change gap) and the poller should keep
+/// the previous snapshot rather than show this (inactive) one.
+fn read_snapshot() -> (MediaSnapshot, bool) {
     let mut snap = MediaSnapshot::default();
     let (muted, volume) = read_endpoint();
     snap.muted  = muted;
@@ -536,7 +618,7 @@ fn read_snapshot() -> MediaSnapshot {
 
     let mgr = match SessionManager::RequestAsync().and_then(|op| op.get()) {
         Ok(m) => m,
-        Err(_) => return snap,
+        Err(_) => return (snap, false),
     };
     let items = all_sessions(&mgr);
 
@@ -547,25 +629,18 @@ fn read_snapshot() -> MediaSnapshot {
             info.title  = props.Title().map(|h| h.to_string()).unwrap_or_default();
             info.artist = props.Artist().map(|h| h.to_string()).unwrap_or_default();
         }
-        info.playing = matches!(
-            s.GetPlaybackInfo().and_then(|pb| pb.PlaybackStatus()),
-            Ok(PlaybackStatus::Playing)
-        );
+        info.playing = is_playing(s);
         snap.sessions.push(info);
     }
 
-    // Refresh the sticky auto-follow target from this poll's play-start
-    // transitions BEFORE choosing, so the choice reflects it with no lag.
-    update_auto_target(&snap.sessions);
-
-    // The session we actually display + control (honors the focus grace, then
-    // the pin, the sticky auto-target, and finally the score fallback). None
-    // here means either nothing is playing or the focused source is mid
-    // track-change gap; both yield an inactive snapshot (the poller freezes the
-    // panel on the last good one during a gap).
-    let session = match choose_session(&items) {
-        Some(s) => s,
-        None => return snap,
+    // Advance the selection state machine and act on its decision.
+    let session = match drive_selection(&items) {
+        Decision::Show(id) => match items.iter().find(|s| session_id(s) == id) {
+            Some(s) => s.clone(),
+            None => return (snap, false), // shouldn't happen; treat as inactive
+        },
+        Decision::Hold => return (snap, true), // freeze the panel on the last snapshot
+        Decision::Inactive => return (snap, false),
     };
     snap.app_id = session_id(&session);
 
@@ -594,7 +669,7 @@ fn read_snapshot() -> MediaSnapshot {
         snap.position_ms = (pos - start).clamp(0, snap.duration_ms);
     }
     snap.active = matches!(snap.status.as_str(), "playing" | "paused" | "changing");
-    snap
+    (snap, false)
 }
 
 // ── Apartment init ─────────────────────────────────────────────────
@@ -615,15 +690,13 @@ pub fn spawn(app: AppHandle, stop_flag: Arc<AtomicBool>) {
         let mut last: Option<MediaSnapshot> = None;
 
         while !stop_flag.load(Ordering::Relaxed) {
-            let mut snap = read_snapshot();
+            let (mut snap, hold) = read_snapshot();
 
-            // Ride out a brief disappearance of the focused source (e.g. a
-            // browser tearing down + recreating its SMTC session across a
-            // prev/next): hold the last active snapshot while `choose_session`
-            // is holding the focus, instead of flashing an unrelated session's
-            // info. Control is already a no-op during the hold, so the held
-            // snapshot is display-only.
-            if !snap.active && holding() {
+            // During a track-change gap the selection is briefly absent; keep
+            // presenting the last good snapshot so the panel doesn't blink to
+            // inactive (or flash another source). The selection state machine
+            // bounds the hold, so a genuine close still resolves afterward.
+            if hold {
                 if let Some(prev) = last.as_ref().filter(|p| p.active) {
                     snap = prev.clone();
                 }
@@ -651,29 +724,111 @@ pub fn spawn(app: AppHandle, stop_flag: Arc<AtomicBool>) {
 mod tests {
     use super::*;
 
-    #[test]
-    fn holds_when_anchor_absent_and_nothing_else_plays() {
-        // The focused source dropped out and no other source is making sound —
-        // the track-change signature. Hold it for as long as that lasts.
-        assert!(should_hold(true, false, false));
+    fn set(ids: &[&str]) -> HashSet<String> {
+        ids.iter().map(|s| s.to_string()).collect()
+    }
+    const DEBOUNCE: Duration = Duration::from_millis(2000);
+
+    // Convenience: no pin, no newly-started. `alive` is the liveness of the
+    // (absent) selection; None means "unknown" → the time-debounce fallback.
+    fn decide_simple(
+        present: &[&str],
+        selected: Option<&str>,
+        alive: Option<bool>,
+        missing_elapsed: Option<Duration>,
+        best: Option<&str>,
+    ) -> Decision {
+        let present = set(present);
+        let sel = selected.map(|s| s.to_string());
+        let best = best.map(|s| s.to_string());
+        decide(&present, None, &None, &sel, alive, missing_elapsed, DEBOUNCE, best.as_ref())
     }
 
     #[test]
-    fn releases_when_another_source_starts_playing() {
-        // Something else is genuinely playing now → follow it, don't hold.
-        assert!(!should_hold(true, false, true));
+    fn pin_present_wins() {
+        let present = set(&["a", "b"]);
+        let pin = Some("b".to_string());
+        let d = decide(&present, None, &pin, &Some("a".into()), None, None, DEBOUNCE, Some(&"a".into()));
+        assert_eq!(d, Decision::Show("b".into()));
     }
 
     #[test]
-    fn present_anchor_is_never_held() {
-        // Still in the list → normal selection, no gap to ride out.
-        assert!(!should_hold(true, true, false));
-        assert!(!should_hold(true, true, true));
+    fn newly_started_grabs_focus() {
+        let present = set(&["a", "b"]);
+        let started = "b".to_string();
+        let d = decide(&present, Some(&started), &None, &Some("a".into()), None, None, DEBOUNCE, Some(&"a".into()));
+        assert_eq!(d, Decision::Show("b".into()));
     }
 
     #[test]
-    fn no_anchor_means_no_hold() {
-        // Nothing was focused → there is nothing to hold.
-        assert!(!should_hold(false, false, false));
+    fn sticks_with_present_selection() {
+        // No pin / no new start → keep showing the current source even though
+        // another (b) is the higher-scoring "best".
+        assert_eq!(
+            decide_simple(&["a", "b"], Some("a"), None, None, Some("b")),
+            Decision::Show("a".into())
+        );
+    }
+
+    #[test]
+    fn holds_an_alive_source_even_past_the_debounce() {
+        // The slow-4G case: a's session has been gone 5 s (longer than the
+        // debounce) but a's process is alive → it's a track change, keep holding.
+        assert_eq!(
+            decide_simple(&["b"], Some("a"), Some(true), Some(Duration::from_secs(5)), Some("b")),
+            Decision::Hold
+        );
+    }
+
+    #[test]
+    fn switches_immediately_when_the_process_is_gone() {
+        // a closed (its process is gone) → reveal b at once, no debounce wait,
+        // even though b is only paused.
+        assert_eq!(
+            decide_simple(&["b"], Some("a"), Some(false), Some(Duration::from_millis(100)), Some("b")),
+            Decision::Show("b".into())
+        );
+    }
+
+    #[test]
+    fn safety_cap_releases_a_lingering_alive_source() {
+        // Process alive but the session never came back (e.g. a closed browser
+        // tab) → after MAX_HOLD, switch away so the panel can't freeze forever.
+        assert_eq!(
+            decide_simple(&["b"], Some("a"), Some(true), Some(MAX_HOLD + Duration::from_secs(1)), Some("b")),
+            Decision::Show("b".into())
+        );
+    }
+
+    #[test]
+    fn unknown_liveness_falls_back_to_the_debounce() {
+        // Non-exe id / failed snapshot → behave as before: hold briefly…
+        assert_eq!(
+            decide_simple(&["b"], Some("a"), None, Some(Duration::from_millis(500)), Some("b")),
+            Decision::Hold
+        );
+        // …then switch once the debounce elapses.
+        assert_eq!(
+            decide_simple(&["b"], Some("a"), None, Some(Duration::from_millis(2500)), Some("b")),
+            Decision::Show("b".into())
+        );
+    }
+
+    #[test]
+    fn inactive_when_nothing_remains() {
+        // a closed and there is no other source at all.
+        assert_eq!(
+            decide_simple(&[], Some("a"), Some(false), Some(Duration::from_millis(100)), None),
+            Decision::Inactive
+        );
+    }
+
+    #[test]
+    fn picks_best_on_cold_start() {
+        // No prior selection → adopt the best available source.
+        assert_eq!(
+            decide_simple(&["a", "b"], None, None, None, Some("a")),
+            Decision::Show("a".into())
+        );
     }
 }
