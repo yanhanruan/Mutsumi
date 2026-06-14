@@ -17,10 +17,12 @@ export type BatteryStatus =
   | { type: 'Discharging'; percent: number; time_to_empty: number | null }
   | { type: 'PluggedIn'; percent: number }
 
+export type NetworkKind = 'ethernet' | 'wifi' | 'other' | 'offline'
+
 export interface SystemState {
   cpu_usage: number
   mem_usage: number
-  network_connected: boolean
+  network: NetworkKind
   uptime: number
   battery: BatteryStatus | null
 }
@@ -47,6 +49,19 @@ const formatTime = (seconds: number) => {
   const m = Math.floor((seconds % 3600) / 60)
   if (h > 0) return `${h}h ${m}m`
   return `${m}m`
+}
+
+const networkIcon = (kind: NetworkKind) => {
+  if (kind === 'wifi' || kind === 'ethernet') return '🌐'
+  if (kind === 'offline') return '🚫'
+  return '🌐'
+}
+
+const networkLabel = (kind: NetworkKind) => {
+  if (kind === 'wifi') return t.value.sys.wifi
+  if (kind === 'ethernet') return t.value.sys.ethernet
+  if (kind === 'offline') return t.value.sys.offline
+  return t.value.sys.online
 }
 
 // ── Lifecycle ──────────────────────────────────────────────────────
@@ -114,10 +129,10 @@ defineExpose({ open, dismiss })
           <!-- List Metrics Grid -->
           <div class="list-grid">
             <!-- Network -->
-            <span class="icon">🌐</span>
+            <span class="icon">{{ networkIcon(state.network) }}</span>
             <span class="label">{{ t.sys.network }}</span>
-            <span class="value" :class="state.network_connected ? 'online' : 'offline'">
-              {{ state.network_connected ? t.sys.online : t.sys.offline }}
+            <span class="value" :class="state.network === 'offline' ? 'offline' : 'online'">
+              {{ networkLabel(state.network) }}
             </span>
 
             <!-- Uptime -->
@@ -139,11 +154,15 @@ defineExpose({ open, dismiss })
               <div class="battery-fill" :style="{ width: state.battery.percent + '%' }"
                    :class="state.battery.type.toLowerCase()"></div>
             </div>
-            <div class="battery-status" v-if="state.battery.type === 'Charging' && state.battery.time_to_full">
-              {{ t.sys.charging.replace('{time}', formatTime(state.battery.time_to_full)) }}
+            <div class="battery-status" v-if="state.battery.type === 'Charging'">
+              {{ state.battery.time_to_full
+                   ? t.sys.charging.replace('{time}', formatTime(state.battery.time_to_full))
+                   : t.sys.chargingPlain }}
             </div>
-            <div class="battery-status" v-if="state.battery.type === 'Discharging' && state.battery.time_to_empty">
-              {{ t.sys.discharging.replace('{time}', formatTime(state.battery.time_to_empty)) }}
+            <div class="battery-status" v-if="state.battery.type === 'Discharging'">
+              {{ state.battery.time_to_empty
+                   ? t.sys.discharging.replace('{time}', formatTime(state.battery.time_to_empty))
+                   : t.sys.dischargingPlain }}
             </div>
             <div class="battery-status" v-if="state.battery.type === 'PluggedIn'">
               {{ t.sys.pluggedIn }}

@@ -111,10 +111,14 @@ export interface Translations {
     network:     string
     online:      string
     offline:     string
+    wifi:        string
+    ethernet:    string
     uptime:      string
     battery:     string
     charging:    string
+    chargingPlain: string
     discharging: string
+    dischargingPlain: string
     pluggedIn:   string
   }
 }
