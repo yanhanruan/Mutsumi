@@ -40,5 +40,9 @@ frames_raw/**/*
 # Local runtime state
 state.json
 
+# Secrets (auth tokens, reCAPTCHA, etc.) — keep .env.example committed
+.env
+!.env.example
+
 # Icons (these are generated and can be recreated from the source SVGs in
 /src-tauri/icons/

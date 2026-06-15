@@ -3,12 +3,14 @@ mod app_state;
 mod audio;
 mod card_export;
 mod cursor;
+mod http;
 mod idle;
 mod late_night;
 #[cfg(windows)]
 mod media;
 mod persistence;
 mod pomodoro;
+mod services;
 mod state;
 mod tray;
 mod weather;
@@ -29,10 +31,16 @@ async fn hide_pet(app: tauri::AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+  // Load `src-tauri/.env` (auth token + reCAPTCHA for external services) into the
+  // process environment before any service config is read. Absent file is fine.
+  let _ = dotenvy::dotenv();
+
   let shared = SharedState::new();
   let weather_state = weather::WeatherState::new();
   let audio_state   = audio::AudioState(AtomicBool::new(false));
   let media_state   = media::MediaState::new();
+  let fish_audio_state = services::FishAudioState::new(services::fish_audio::config_from_env())
+    .expect("failed to build Fish Audio TTS service");
 
   tauri::Builder::default()
     // ── Single-instance guard ─────────────────────────────────────────────
@@ -53,6 +61,7 @@ pub fn run() {
     .manage(weather_state)
     .manage(audio_state)
     .manage(media_state)
+    .manage(fish_audio_state)
     .invoke_handler(tauri::generate_handler![
       app_state::get_state,
       app_state::pet_click,
@@ -81,6 +90,8 @@ pub fn run() {
       window_ops::set_window_bounds,
       card_export::save_card_image,
       card_export::reveal_in_folder,
+      services::tts_synthesize,
+      services::tts_set_recaptcha,
       hide_pet,
     ])
     .setup(move |app| {
