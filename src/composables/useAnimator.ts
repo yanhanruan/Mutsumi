@@ -70,8 +70,9 @@ interface LoadedAnimation {
 //               Everything from pingEnd onward is the outro, played once.
 //   passes    — number of directional passes over [pingStart, pingEnd),
 //               alternating fwd/rev and always starting fwd.
-//               Must be OddNumber so the sequence ends on a forward pass.
-//               Use the odd() helper to construct the value.
+//               An OddNumber ends the sequence on a forward pass; an
+//               EvenNumber ends it on a reverse pass. Construct the value
+//               with the odd() / even() helper to make the parity explicit.
 //
 // Exported so the sequence logic can be unit-tested independently.
 
@@ -79,17 +80,27 @@ declare const _ODD: unique symbol
 /** Branded type for odd integers. Construct via odd(). */
 export type OddNumber = number & { readonly [_ODD]: true }
 
+declare const _EVEN: unique symbol
+/** Branded type for even integers. Construct via even(). */
+export type EvenNumber = number & { readonly [_EVEN]: true }
+
 /** Cast n to OddNumber. Throws a RangeError at runtime if n is even. */
 export function odd(n: number): OddNumber {
   if (n % 2 === 0) throw new RangeError(`passes must be odd, got ${n}`)
   return n as OddNumber
 }
 
+/** Cast n to EvenNumber. Throws a RangeError at runtime if n is odd. */
+export function even(n: number): EvenNumber {
+  if (n % 2 !== 0) throw new RangeError(`passes must be even, got ${n}`)
+  return n as EvenNumber
+}
+
 export function buildPingPongSequence(
   frames:    HTMLImageElement[],
   pingStart: number,
   pingEnd:   number,
-  passes:    OddNumber,
+  passes:    OddNumber | EvenNumber,
 ): HTMLImageElement[] {
   const intro = frames.slice(0, pingStart)
   const fwd   = frames.slice(pingStart, pingEnd)
@@ -123,7 +134,8 @@ export const DEFAULT_ANIMATIONS: Record<AnimationName, AnimationDef> = {
   music1:              { dir: 'music1',         count: 185, fps: 24, loop: true  },
   music2:              { dir: 'music2',         count: 185, fps: 24, loop: false,
                          buildSequence: f => buildPingPongSequence(f,  81, 104, odd(31)) },
-  music3:              { dir: 'music3',         count: 330, fps: 18, loop: true  },
+  music3:              { dir: 'music3',         count: 139, fps: 18, loop: false,
+                         buildSequence: f => buildPingPongSequence(f,  1, 139, even(2)) },
   music4:              { dir: 'music4',         count: 185, fps: 24, loop: false,
                          buildSequence: f => buildPingPongSequence(f, 105, 161, odd(13)) },
 }

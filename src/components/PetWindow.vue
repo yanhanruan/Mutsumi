@@ -50,14 +50,15 @@ usePetStatus(setIdleVariant)
 // through to whatever is behind the window.
 useHitTest(getCurrentImage)
 
+// TODO re-enable click animation — see onMouseUp:
 // Animations that must not be interrupted by a click (bubble still shows).
 // pat_head: mid-animation abort would look jarring.
 // Music chain: interrupting headphones/music breaks the hardwired sequence.
-const NO_CLICK_INTERRUPT = new Set([
-  'pat_head',
-  'headphones_on', 'headphones_off',
-  'music1', 'music2', 'music3', 'music4',
-])
+// const NO_CLICK_INTERRUPT = new Set([
+//   'pat_head',
+//   'headphones_on', 'headphones_off',
+//   'music1', 'music2', 'music3', 'music4',
+// ])
 
 const { t, locale } = useI18n()
 const { config } = useAppConfig()
@@ -103,7 +104,7 @@ let savedPos: Awaited<ReturnType<ReturnType<typeof getCurrentWindow>['outerPosit
 // so the window lands at its final bounds in a single step. Two separate ops
 // (setSize then center) produced a visible grow-then-recenter jump and could
 // re-enter tao's paint flush and panic. Bounds are physical pixels.
-async function setBounds(win: ReturnType<typeof getCurrentWindow>, x: number, y: number, pw: number, ph: number) {
+async function setBounds(x: number, y: number, pw: number, ph: number) {
   await invoke('set_window_bounds', { x: Math.round(x), y: Math.round(y), width: Math.round(pw), height: Math.round(ph) })
 }
 
@@ -138,7 +139,7 @@ async function openTarot() {
     x = mon.position.x + (mon.size.width  - pw) / 2
     y = mon.position.y + (mon.size.height - ph) / 2
   }
-  await setBounds(win, x, y, pw, ph)
+  await setBounds(x, y, pw, ph)
 }
 
 async function closeTarot() {
@@ -152,7 +153,7 @@ async function closeTarot() {
   await nextTick()
   await nextPaint()
   // The window is now empty/transparent; shrink + move it back invisibly.
-  await setBounds(win, savedPos?.x ?? 0, savedPos?.y ?? 0, lw * sf, lh * sf)
+  await setBounds(savedPos?.x ?? 0, savedPos?.y ?? 0, lw * sf, lh * sf)
   // Reveal the pet at the restored small position.
   tarotActive.value = false
 }
@@ -194,11 +195,12 @@ function onMouseUp(e: MouseEvent) {
   if (e.button !== 0 || tarotActive.value) return
   if (pressed && !didDrag) {
     // True click — no movement.
+    // TODO re-enable click animation:
     // Suppress the click animation while in music mode so it doesn't
     // interrupt headphones/music playback. The bubble still shows.
-    if (!NO_CLICK_INTERRUPT.has(currentName.value)) {
-      setAnim('click')   // immediate switch — no pending-anim delay
-    }
+    // if (!NO_CLICK_INTERRUPT.has(currentName.value)) {
+    //   setAnim('click')   // immediate switch — no pending-anim delay
+    // }
     void invoke('pet_click')
     const quote = MUTSUMI_ALL_QUOTES[Math.floor(Math.random() * MUTSUMI_ALL_QUOTES.length)]
     bubbleRef.value?.show(quote[locale.value])

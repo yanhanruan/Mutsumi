@@ -131,12 +131,13 @@ pub fn run() {
         cursor::spawn(app.handle().clone(), stop_flag);
       }
 
+      // TODO complete balloon implementation and re-enable this:
       // System idle monitor — emits `toggle-balloon-mode` events.
-      {
-        let stop_flag = Arc::new(AtomicBool::new(false));
-        let _ = &stop_flag;
-        idle::spawn(app.handle().clone(), stop_flag);
-      }
+      // {
+      //   let stop_flag = Arc::new(AtomicBool::new(false));
+      //   let _ = &stop_flag;
+      //   idle::spawn(app.handle().clone(), stop_flag);
+      // }
 
       // Pet state + pomodoro ticker (also drives late-night reminder).
       app_state::spawn_ticker(app.handle().clone(), shared.clone());
