@@ -2,13 +2,20 @@ mod app_state;
 #[cfg(windows)]
 mod audio;
 mod card_export;
+mod chat;
 mod cursor;
+// Data layer (SQLite memory store). The full public API lands ahead of its
+// consumers in Phases 1–4 (LLM service, RAG chat, extraction, reflection), so
+// allow dead_code across the module until those pipelines wire it up.
+#[allow(dead_code)]
+mod db;
 mod http;
 mod idle;
 mod late_night;
 #[cfg(windows)]
 mod media;
 mod persistence;
+mod persona;
 mod pomodoro;
 mod services;
 mod state;
@@ -41,6 +48,8 @@ pub fn run() {
   let media_state   = media::MediaState::new();
   let fish_audio_state = services::FishAudioState::new(services::fish_audio::config_from_env())
     .expect("failed to build Fish Audio TTS service");
+  let qwen_state    = services::QwenState::new(services::qwen::config_from_env())
+    .expect("failed to build Qwen LLM client");
 
   tauri::Builder::default()
     // ── Single-instance guard ─────────────────────────────────────────────
@@ -62,6 +71,7 @@ pub fn run() {
     .manage(audio_state)
     .manage(media_state)
     .manage(fish_audio_state)
+    .manage(qwen_state)
     .invoke_handler(tauri::generate_handler![
       app_state::get_state,
       app_state::pet_click,
@@ -92,6 +102,7 @@ pub fn run() {
       card_export::reveal_in_folder,
       services::tts_synthesize,
       services::tts_set_recaptcha,
+      chat::chat_send,
       hide_pet,
     ])
     .setup(move |app| {
@@ -101,6 +112,17 @@ pub fn run() {
             .level(log::LevelFilter::Info)
             .build(),
         )?;
+      }
+
+      use tauri::Manager;
+
+      // Open the SQLite memory database (dynamic user data). Registered as
+      // managed state; async commands access it via spawn_blocking.
+      match db::Db::open(app.handle()) {
+        Ok(database) => {
+          app.manage(database);
+        }
+        Err(e) => log::error!("failed to open memory database: {e}"),
       }
 
       // Load persisted state (energy/affection + pomodoro durations) if any.

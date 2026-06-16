@@ -18,8 +18,13 @@
 //! ```
 
 pub mod fish_audio;
+// Qwen LLM client. Consumed by the chat/memory pipelines (Phases 2–5); the
+// service API lands ahead of those callers, so allow dead_code until wired.
+#[allow(dead_code)]
+pub mod qwen;
 
 pub use fish_audio::{FishAudioTtsService, TtsConfig};
+pub use qwen::{QwenClient, QwenConfig};
 
 use crate::http::ApiError;
 
@@ -33,6 +38,17 @@ impl FishAudioState {
     /// Construct from static config. Built once in `setup()` and `.manage()`d.
     pub fn new(config: TtsConfig) -> Result<Self, ApiError> {
         Ok(Self(FishAudioTtsService::new(config)?))
+    }
+}
+
+/// Tauri-managed handle to the Qwen LLM client.
+#[allow(dead_code)]
+pub struct QwenState(pub QwenClient);
+
+impl QwenState {
+    /// Construct from static config. Built once at startup and `.manage()`d.
+    pub fn new(config: QwenConfig) -> Result<Self, ApiError> {
+        Ok(Self(QwenClient::new(config)?))
     }
 }
 
