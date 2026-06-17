@@ -23,7 +23,7 @@ use crate::services::QwenState;
 const TOOL_NAME: &str = "extract_memory";
 
 /// Background system prompt instructing the model to mine user facts.
-const EXTRACTION_SYSTEM: &str = r#"你是一个在后台运行的"记忆提取器"。下面会给你一段【用户】与角色「睦」的对话。你的任务：从中找出关于【用户】的、值得长期记住的事实，并为每一条调用一次 extract_memory 工具。
+pub(crate) const EXTRACTION_SYSTEM: &str = r#"你是一个在后台运行的"记忆提取器"。下面会给你一段【用户】与角色「睦」的对话。你的任务：从中找出关于【用户】的、值得长期记住的事实，并为每一条调用一次 extract_memory 工具。
 
 规则：
 - 只提取关于"用户"的、稳定且长期有效的信息（偏好、习惯、状态、个人信息、重要的人际关系等）。

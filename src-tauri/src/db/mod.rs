@@ -33,18 +33,21 @@ impl Db {
             .app_data_dir()
             .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
         std::fs::create_dir_all(&dir).ok();
-        let path = dir.join("mutsumi.db");
-
-        let conn = Connection::open(path)?;
-        // WAL for concurrent reads during background writes; a busy timeout so a
-        // brief lock contends rather than erroring immediately.
-        conn.pragma_update(None, "journal_mode", "WAL")?;
-        conn.pragma_update(None, "foreign_keys", "ON")?;
-        conn.busy_timeout(std::time::Duration::from_secs(5))?;
-
-        schema::migrate(&conn)?;
-        Ok(Db(Mutex::new(conn)))
+        Ok(Db(Mutex::new(open_conn(&dir.join("mutsumi.db"))?)))
     }
+}
+
+/// Open a connection at `path` with the app's pragmas + migrations applied.
+/// Shared by [`Db::open`] and the benchmark harness.
+pub(crate) fn open_conn(path: &std::path::Path) -> rusqlite::Result<Connection> {
+    let conn = Connection::open(path)?;
+    // WAL for concurrent reads during background writes; a busy timeout so a
+    // brief lock contends rather than erroring immediately.
+    conn.pragma_update(None, "journal_mode", "WAL")?;
+    conn.pragma_update(None, "foreign_keys", "ON")?;
+    conn.busy_timeout(std::time::Duration::from_secs(5))?;
+    schema::migrate(&conn)?;
+    Ok(conn)
 }
 
 /// Current unix timestamp (seconds) — the single time source for db writes.

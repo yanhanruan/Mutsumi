@@ -12,7 +12,7 @@
 //! Silent memory extraction (Pipeline B) and reflection (Pipeline C) build on
 //! this same retrieval/assembly machinery in later phases.
 
-mod extraction;
+pub(crate) mod extraction;
 mod prompt;
 pub mod reflection;
 

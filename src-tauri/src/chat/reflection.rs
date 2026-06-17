@@ -29,7 +29,7 @@ pub const REFLECTION_STARTUP_MIN: usize = 5;
 /// Cap on observations fed into a single reflection pass.
 const MAX_BATCH: usize = 50;
 
-const REFLECTION_SYSTEM: &str = r#"你是角色「睦」的内在反思。下面会给你最近积累的、关于【用户】的一些零散观察记录。请你综合这些观察，提炼出 1 到 2 条更高层次、更概括的洞察——关于用户的性格、行为模式、深层需求或当前状态，从睦的视角去理解这个人。
+pub(crate) const REFLECTION_SYSTEM: &str = r#"你是角色「睦」的内在反思。下面会给你最近积累的、关于【用户】的一些零散观察记录。请你综合这些观察，提炼出 1 到 2 条更高层次、更概括的洞察——关于用户的性格、行为模式、深层需求或当前状态，从睦的视角去理解这个人。
 
 规则：
 - 不要简单复述或罗列原始观察，要给出综合、归纳之后的理解。

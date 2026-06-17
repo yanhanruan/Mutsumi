@@ -35,6 +35,8 @@ const HTTP_TIMEOUT: Duration = Duration::from_secs(60);
 
 const CHAT_PATH: &str = "/chat/completions";
 const EMBED_PATH: &str = "/embeddings";
+/// Max inputs per embeddings request (DashScope `text-embedding-v3` limit).
+const EMBED_BATCH_LIMIT: usize = 10;
 
 // Env vars (loaded from src-tauri/.env at startup; see .env.example).
 const ENV_API_KEY: &str = "DASHSCOPE_API_KEY";
@@ -184,12 +186,22 @@ struct ChatRequest<'a> {
 #[derive(Debug, Deserialize)]
 struct ChatResponse {
     choices: Vec<Choice>,
+    #[serde(default)]
+    usage: Option<Usage>,
 }
 
 #[derive(Debug, Deserialize)]
 struct Choice {
     message: ChatMessage,
     finish_reason: Option<String>,
+}
+
+/// Token accounting returned by the API (OpenAI-compatible `usage`).
+#[derive(Debug, Clone, Deserialize)]
+pub struct Usage {
+    pub prompt_tokens: u32,
+    pub completion_tokens: u32,
+    pub total_tokens: u32,
 }
 
 /// Per-call chat tuning. `Default` leaves everything provider-default.
@@ -204,6 +216,8 @@ pub struct ChatOptions {
 pub struct ChatCompletion {
     pub message: ChatMessage,
     pub finish_reason: Option<String>,
+    /// Token usage, when the API reports it (non-streaming responses).
+    pub usage: Option<Usage>,
 }
 
 // ── Chat: streaming (SSE) chunk shapes ──────────────────────────────
@@ -310,8 +324,8 @@ impl QwenClient {
         };
 
         let resp: ChatResponse = self.http.post_json(CHAT_PATH, &request).await?;
-        let choice = resp
-            .choices
+        let ChatResponse { choices, usage } = resp;
+        let choice = choices
             .into_iter()
             .next()
             .ok_or_else(|| ApiError::Decode("chat response had no choices".into()))?;
@@ -319,6 +333,7 @@ impl QwenClient {
         Ok(ChatCompletion {
             message: choice.message,
             finish_reason: choice.finish_reason,
+            usage,
         })
     }
 
@@ -385,6 +400,7 @@ impl QwenClient {
         Ok(ChatCompletion {
             message: ChatMessage::assistant(full),
             finish_reason,
+            usage: None, // streaming responses don't carry usage in this path
         })
     }
 
@@ -396,23 +412,26 @@ impl QwenClient {
     }
 
     /// Embed a batch of strings, returning vectors in input order.
+    ///
+    /// Transparently chunks into requests of at most [`EMBED_BATCH_LIMIT`]
+    /// inputs (the `text-embedding-v3` per-request cap), so callers may pass any
+    /// number of texts.
     pub async fn embed_batch(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, ApiError> {
-        if texts.is_empty() {
-            return Ok(Vec::new());
+        let mut out = Vec::with_capacity(texts.len());
+        for chunk in texts.chunks(EMBED_BATCH_LIMIT) {
+            let request = EmbeddingRequest {
+                model: &self.embed_model,
+                input: chunk,
+                dimensions: Some(self.embed_dimensions),
+            };
+            let resp: EmbeddingResponse = self.http.post_json(EMBED_PATH, &request).await?;
+            // Sort by `index` (chunk-relative) so order matches the chunk's input
+            // order; appending chunk-by-chunk preserves overall input order.
+            let mut data = resp.data;
+            data.sort_by_key(|d| d.index);
+            out.extend(data.into_iter().map(|d| d.embedding));
         }
-        let request = EmbeddingRequest {
-            model: &self.embed_model,
-            input: texts,
-            dimensions: Some(self.embed_dimensions),
-        };
-
-        let resp: EmbeddingResponse = self.http.post_json(EMBED_PATH, &request).await?;
-
-        // Sort by `index` so output order matches input order regardless of
-        // how the API returns them.
-        let mut data = resp.data;
-        data.sort_by_key(|d| d.index);
-        Ok(data.into_iter().map(|d| d.embedding).collect())
+        Ok(out)
     }
 }
 

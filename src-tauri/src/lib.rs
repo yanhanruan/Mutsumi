@@ -1,6 +1,8 @@
 mod app_state;
 #[cfg(windows)]
 mod audio;
+#[cfg(test)]
+mod benchmarks;
 mod card_export;
 mod chat;
 mod cursor;
