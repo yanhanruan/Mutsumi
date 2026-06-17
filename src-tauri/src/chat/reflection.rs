@@ -29,12 +29,14 @@ pub const REFLECTION_STARTUP_MIN: usize = 5;
 /// Cap on observations fed into a single reflection pass.
 const MAX_BATCH: usize = 50;
 
-pub(crate) const REFLECTION_SYSTEM: &str = r#"你是角色「睦」的内在反思。下面会给你最近积累的、关于【用户】的一些零散观察记录。请你综合这些观察，提炼出 1 到 2 条更高层次、更概括的洞察——关于用户的性格、行为模式、深层需求或当前状态，从睦的视角去理解这个人。
+pub(crate) const REFLECTION_SYSTEM: &str = r#"你在帮角色「睦」整理对【用户】的理解。下面是最近积累的、关于用户的一些零散观察。请综合这些观察，提炼出 1 到 2 条更概括、但**有事实支撑**的理解（关于用户稳定的偏好、习惯或处境），帮助睦更好地理解和陪伴这个人。
 
-规则：
-- 不要简单复述或罗列原始观察，要给出综合、归纳之后的理解。
-- 每条洞察调用一次 record_insight；最多 2 条，宁缺毋滥。
-- content 用简洁的第三人称陈述。
+铁律——只归纳，不臆测：
+- 洞察必须直接建立在上面列出的观察之上，是对它们的归纳概括，绝不能引入观察里没有的新信息。
+- 绝不做心理诊断或精神分析，绝不臆测用户的隐藏动机、情绪障碍或"深层心理"。例如绝不要写"用户可能存在认知失调／焦虑／靠工作填补孤独"这类无依据的判断。
+- 证据不足，或观察只是零散噪音（一次性的天气、心情、闲聊）时，宁可不提炼，也不要硬凑。
+- 措辞要克制、留余地（"看起来""最近倾向于"），不要把推断写成铁板钉钉的事实。
+- 每条洞察调用一次 record_insight；最多 2 条，宁缺毋滥。content 用简洁的第三人称陈述。
 - 不要输出任何对话文字，只通过工具调用记录。"#;
 
 /// A synthesized insight reported by one `record_insight` tool call.
@@ -166,7 +168,9 @@ async fn run(app: &AppHandle, min_count: usize) -> Result<(), ApiError> {
     let conn = db.0.lock().map_err(|e| ApiError::Build(e.to_string()))?;
     let ts = now();
     for (insight, embedding) in insights.iter().zip(embeddings) {
-        let _ = memory::insert(
+        // Consolidate, don't append: a new insight close to an existing one
+        // refreshes it instead of stacking another near-duplicate reflection.
+        let _ = memory::store_observation(
             &conn,
             &NewMemory {
                 kind: MemoryKind::Reflection,

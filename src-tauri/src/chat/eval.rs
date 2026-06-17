@@ -273,7 +273,7 @@ impl Sim {
     fn dump_memories(&self) {
         let mut stmt = self
             .conn
-            .prepare("SELECT id, subject, kind, category, content, importance, created_at, reflected FROM memories ORDER BY id")
+            .prepare("SELECT id, subject, kind, category, content, importance, created_at, reflected, superseded FROM memories ORDER BY id")
             .unwrap();
         let rows = stmt
             .query_map([], |r| {
@@ -286,15 +286,17 @@ impl Sim {
                     r.get::<_, f32>(5)?,
                     r.get::<_, i64>(6)?,
                     r.get::<_, i64>(7)?,
+                    r.get::<_, i64>(8)?,
                 ))
             })
             .unwrap();
         println!("\x1b[33m── 记忆库快照 ──\x1b[0m");
         for row in rows {
-            let (id, subject, kind, cat, content, imp, created, reflected) = row.unwrap();
+            let (id, subject, kind, cat, content, imp, created, reflected, superseded) = row.unwrap();
             let age = (self.now() - created) / 86400;
+            let retired = if superseded != 0 { " RETIRED" } else { "" };
             println!(
-                "  #{id} <{subject}> [{kind}/{}] imp{imp:.2} age{age}d reflected={reflected} — {content}",
+                "  #{id} <{subject}> [{kind}/{}] imp{imp:.2} age{age}d reflected={reflected}{retired} — {content}",
                 cat.as_deref().unwrap_or("-")
             );
         }
@@ -401,6 +403,227 @@ async fn eval_self_memory_grounded() {
     }
     assert!(saw_self, "expected at least one self-memory (the promise to help tune)");
     println!("\x1b[32m✓ 睦的承诺被记为 self 记忆，且锚定在她自己的回复里\x1b[0m");
+}
+
+/// Contradiction → supersede: a later statement that contradicts an earlier one is
+/// classified UPDATE and (when similar enough) retires the stale row at write time.
+//   cargo test --release --lib chat::eval::eval_contradiction_supersede -- --ignored --nocapture
+#[tokio::test]
+#[ignore = "live DashScope API; needs DASHSCOPE_API_KEY"]
+async fn eval_contradiction_supersede() {
+    let s = Sim::new("contradict", 3600);
+    println!("\n========== TEST — CONTRADICTION SUPERSEDE ==========\n");
+
+    // Seed the original observation.
+    let old = "用户后天有一场演出。";
+    let old_emb = s.qwen.embed(old).await.expect("embed old");
+    let old_id = memory::insert(
+        &s.conn,
+        &NewMemory {
+            kind: MemoryKind::Observation,
+            category: Some("state".into()),
+            content: old.into(),
+            importance: 0.7,
+            embedding: Some(old_emb),
+            subject: MemorySubject::User,
+        },
+        s.now(),
+    )
+    .unwrap();
+
+    // A directly contradicting fact arrives later.
+    let new = "用户后天的演出取消了，不演了。";
+    let new_emb = s.qwen.embed(new).await.expect("embed new");
+
+    let (cand, sim) = memory::best_active_match(&s.conn, MemorySubject::User, Some("state"), &new_emb)
+        .unwrap()
+        .expect("a candidate");
+    assert_eq!(cand.id, old_id);
+    println!("similarity(old,new) = {sim:.3}");
+
+    // The classifier must rule this an UPDATE (newer supersedes).
+    let verdict = extraction::reconcile(&s.qwen, old, new).await;
+    println!("reconcile verdict = {verdict:?}");
+    assert_eq!(verdict, extraction::Verdict::Update, "a cancellation should be UPDATE");
+
+    // Apply the production banding (dedup ≥ DEDUP_SIMILARITY; reconcile ≥ RECONCILE_MIN).
+    let new_mem = NewMemory {
+        kind: MemoryKind::Observation,
+        category: Some("state".into()),
+        content: new.into(),
+        importance: 0.7,
+        embedding: Some(new_emb.clone()),
+        subject: MemorySubject::User,
+    };
+    let in_band = if sim >= memory::DEDUP_SIMILARITY {
+        memory::refresh(&s.conn, old_id, new, 0.7, Some(&new_emb), s.now()).unwrap();
+        println!("(band: refresh — old row's content replaced by the cancellation)");
+        true
+    } else if sim >= extraction::RECONCILE_MIN {
+        memory::supersede(&s.conn, old_id, s.now()).unwrap();
+        memory::insert(&s.conn, &new_mem, s.now()).unwrap();
+        true
+    } else {
+        memory::insert(&s.conn, &new_mem, s.now()).unwrap();
+        println!("(band: below reconcile threshold — both kept; read-time recency resolves)");
+        false
+    };
+
+    s.dump_memories();
+
+    // The cancellation is always represented in an active row.
+    let active_cancel: i64 = s.conn
+        .query_row(
+            "SELECT COUNT(*) FROM memories WHERE superseded = 0 AND content LIKE '%取消%'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(active_cancel >= 1, "the cancellation must be active");
+
+    if in_band {
+        // The stale standalone "有演出" must no longer be an active row.
+        let stale_active: i64 = s.conn
+            .query_row(
+                "SELECT COUNT(*) FROM memories WHERE superseded = 0 AND content LIKE '%有一场演出%'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(stale_active, 0, "the contradicted row should be retired");
+        println!("\x1b[32m✓ 矛盾的旧记忆已被退役，只剩最新的有效\x1b[0m");
+    }
+}
+
+/// Complete deduplication: a near-verbatim restatement of the same fact lands in
+/// the dedup band (cosine ≥ DEDUP_SIMILARITY) and is **merged** into the existing
+/// row by `store_observation` — no second near-duplicate row is created.
+//   cargo test --release --lib chat::eval::eval_dedup_complete -- --ignored --nocapture
+#[tokio::test]
+#[ignore = "live DashScope API; needs DASHSCOPE_API_KEY"]
+async fn eval_dedup_complete() {
+    let s = Sim::new("dedup", 3600);
+    println!("\n========== TEST — COMPLETE DEDUPLICATION ==========\n");
+
+    let mk = |content: &str, emb: Vec<f32>| NewMemory {
+        kind: MemoryKind::Observation,
+        category: Some("fact".into()),
+        content: content.into(),
+        importance: 0.6,
+        embedding: Some(emb),
+        subject: MemorySubject::User,
+    };
+
+    // Same fact, reworded.
+    let old = "用户在一家游戏公司当后端工程师。";
+    let new = "用户的工作是游戏公司的后端工程师。";
+
+    let old_emb = s.qwen.embed(old).await.expect("embed old");
+    let old_id = memory::store_observation(&s.conn, &mk(old, old_emb), s.now()).unwrap();
+
+    let new_emb = s.qwen.embed(new).await.expect("embed new");
+    let (cand, sim) = memory::best_active_match(&s.conn, MemorySubject::User, Some("fact"), &new_emb)
+        .unwrap()
+        .expect("a candidate");
+    assert_eq!(cand.id, old_id);
+    println!("similarity(old,new) = {sim:.3}");
+    assert!(
+        sim >= memory::DEDUP_SIMILARITY,
+        "expected the dedup band (>= {}), got {sim:.3}",
+        memory::DEDUP_SIMILARITY
+    );
+
+    // store_observation must refresh the existing row, not insert a duplicate.
+    let merged_id = memory::store_observation(&s.conn, &mk(new, new_emb), s.now()).unwrap();
+    assert_eq!(merged_id, old_id, "a near-duplicate must merge into the same row");
+
+    let active: i64 = s.conn
+        .query_row("SELECT COUNT(*) FROM memories WHERE superseded = 0", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(active, 1, "exactly one active row after dedup");
+    assert_eq!(memory::get(&s.conn, old_id).unwrap().unwrap().content, new, "merged row adopts newer phrasing");
+
+    s.dump_memories();
+    println!("\x1b[32m✓ 近义重复被合并为一行，没有产生重复条目\x1b[0m");
+}
+
+/// Subtle evolution: a follow-up that *adds detail* to an earlier statement (the
+/// interview tool → "front-end React, runs on Tauri") must NOT be treated as a
+/// duplicate, or the dedup-refresh would overwrite the original and the new stack
+/// detail could be lost. It should land in the reconcile band and be judged
+/// `Update` or `Distinct` — either way the React + Tauri detail survives.
+//   cargo test --release --lib chat::eval::eval_subtle_evolution -- --ignored --nocapture
+#[tokio::test]
+#[ignore = "live DashScope API; needs DASHSCOPE_API_KEY"]
+async fn eval_subtle_evolution() {
+    let s = Sim::new("evolution", 3600);
+    println!("\n========== TEST — SUBTLE EVOLUTION ==========\n");
+
+    let mk = |content: &str, emb: Vec<f32>| NewMemory {
+        kind: MemoryKind::Observation,
+        category: Some("fact".into()),
+        content: content.into(),
+        importance: 0.6,
+        embedding: Some(emb),
+        subject: MemorySubject::User,
+    };
+
+    let old = "我打算自己做个辅助面试的桌面端小工具。";
+    let new = "那个面试工具，我决定前端用 React，底层用 Tauri 来跑。";
+
+    let old_emb = s.qwen.embed(old).await.expect("embed old");
+    let old_id = memory::insert(&s.conn, &mk(old, old_emb), s.now()).unwrap();
+
+    let new_emb = s.qwen.embed(new).await.expect("embed new");
+    let (cand, sim) = memory::best_active_match(&s.conn, MemorySubject::User, Some("fact"), &new_emb)
+        .unwrap()
+        .expect("a candidate");
+    assert_eq!(cand.id, old_id);
+    println!("similarity(old,new) = {sim:.3}");
+    // The key safety invariant: an evolution that *adds* detail must NOT fall in the
+    // dedup band, or store_observation would silently overwrite the original.
+    // (Measured ~0.72 here — comfortably below; it also sits below RECONCILE_MIN,
+    // so production keeps both without even needing the model.)
+    assert!(
+        sim < memory::DEDUP_SIMILARITY,
+        "an evolution must not auto-dedup-merge (sim {sim:.3} ≥ {})",
+        memory::DEDUP_SIMILARITY
+    );
+
+    // Regardless of the band gate, the classifier itself must recognise these are
+    // NOT the same fact — Update or Distinct, never Duplicate (a Duplicate→refresh
+    // would lose the new React/Tauri stack detail).
+    let verdict = extraction::reconcile(&s.qwen, old, new).await;
+    println!("reconcile verdict = {verdict:?}");
+    assert_ne!(
+        verdict,
+        extraction::Verdict::Duplicate,
+        "an evolution that adds detail must not be judged a duplicate"
+    );
+
+    // Apply the real production banding and confirm the stack detail survives.
+    if sim >= memory::DEDUP_SIMILARITY {
+        unreachable!("guarded above");
+    } else if sim >= extraction::RECONCILE_MIN && verdict == extraction::Verdict::Update {
+        memory::supersede(&s.conn, old_id, s.now()).unwrap();
+        memory::insert(&s.conn, &mk(new, new_emb), s.now()).unwrap();
+        println!("(band: reconcile → Update → old retired, new inserted)");
+    } else {
+        // Below the reconcile floor, or Distinct → keep both.
+        memory::insert(&s.conn, &mk(new, new_emb), s.now()).unwrap();
+        println!("(band: kept both — the plan and the stack decision coexist)");
+    }
+
+    s.dump_memories();
+    let stack_alive: i64 = s.conn
+        .query_row(
+            "SELECT COUNT(*) FROM memories WHERE superseded = 0 AND content LIKE '%React%' AND content LIKE '%Tauri%'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(stack_alive >= 1, "the React + Tauri stack detail must survive in an active row");
+    println!("\x1b[32m✓ 技术栈细节（React + Tauri）被保留，未被当成重复合并掉\x1b[0m");
 }
 
 /// Test 1.1 — Update / Override (memory conflict resolution).

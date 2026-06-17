@@ -12,7 +12,7 @@
 //! Keeping (1) separate from (2) means the large persona block stays byte-stable
 //! across turns, so the provider can cache it.
 
-use crate::db::memory::ScoredMemory;
+use crate::db::memory::{MemoryKind, ScoredMemory};
 use crate::db::state::RelationshipState;
 use crate::services::qwen::ChatMessage;
 
@@ -71,14 +71,31 @@ fn dynamic_context(ctx: &PromptContext) -> String {
         }
     }
 
-    if ctx.memories.is_empty() {
+    // Split stated facts (observations) from inferred insights (reflections) so
+    // speculation is never read as a hard fact.
+    let (facts, insights): (Vec<&ScoredMemory>, Vec<&ScoredMemory>) = ctx
+        .memories
+        .iter()
+        .partition(|m| m.memory.kind != MemoryKind::Reflection);
+
+    if facts.is_empty() {
         s.push_str("- 关于用户的记忆：暂无。\n");
     } else {
         s.push_str(
             "- 关于用户的记忆（按相关度排序，方括号内为类别与记下的时间。\
              注意：列表顺序不代表新旧；若两条记忆相互矛盾，一律以最近记下的那条为准）：\n",
         );
-        for m in ctx.memories {
+        for m in facts {
+            s.push_str(&memory_line(m, ctx.now));
+        }
+    }
+
+    if !insights.is_empty() {
+        s.push_str(
+            "- 你对用户的推测理解（仅为推断、可能不准确，不要当成既定事实；\
+             与用户明说的事实冲突时，一律以事实为准）：\n",
+        );
+        for m in insights {
             s.push_str(&memory_line(m, ctx.now));
         }
     }
@@ -266,6 +283,25 @@ mod tests {
         let rel = RelationshipState::default();
         let msgs = assemble(&ctx_with(&rel, &[], &[]));
         assert!(msgs[1].content.as_deref().unwrap().contains("关于用户的记忆：暂无"));
+    }
+
+    #[test]
+    fn insights_render_in_a_separate_hedged_block() {
+        let rel = RelationshipState::default();
+        let mut insight = scored("用户看起来工作繁忙", "insight");
+        insight.memory.kind = MemoryKind::Reflection;
+        let mems = [scored("用户喜欢猫", "preference"), insight];
+        let dynamic = assemble(&ctx_with(&rel, &mems, &[]))[1].content.clone().unwrap();
+
+        // Fact stays in the facts block; insight goes under the hedged label.
+        assert!(dynamic.contains("关于用户的记忆"));
+        assert!(dynamic.contains("用户喜欢猫"));
+        assert!(dynamic.contains("推测理解")); // hedged insight block label
+        assert!(dynamic.contains("用户看起来工作繁忙"));
+        // The hedged label must appear before the insight content (own block).
+        let label_at = dynamic.find("推测理解").unwrap();
+        let insight_at = dynamic.find("用户看起来工作繁忙").unwrap();
+        assert!(label_at < insight_at);
     }
 
     #[test]

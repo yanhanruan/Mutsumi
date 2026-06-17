@@ -133,6 +133,10 @@ pub struct RetrievalWeights {
     pub importance: f32,
     /// Half-life (seconds) for recency decay — recency = 0.5^(age / half_life).
     pub recency_half_life_secs: f32,
+    /// Score multiplier (<1) applied to `Reflection` rows so a stated **fact**
+    /// outranks a same-relevance **insight** — speculation shouldn't compete with
+    /// what the user actually said.
+    pub reflection_factor: f32,
 }
 
 impl Default for RetrievalWeights {
@@ -148,6 +152,7 @@ impl Default for RetrievalWeights {
             recency: 0.1,
             importance: 0.2,
             recency_half_life_secs: 30.0 * 24.0 * 3600.0, // one month
+            reflection_factor: 0.8,
         }
     }
 }
@@ -187,35 +192,34 @@ pub fn insert(conn: &Connection, m: &NewMemory, now: i64) -> rusqlite::Result<i6
 /// (newer phrasing, max importance, bumped `updated_at`).
 pub fn store_observation(conn: &Connection, m: &NewMemory, now: i64) -> rusqlite::Result<i64> {
     if let Some(emb) = m.embedding.as_deref() {
-        if let Some(existing) =
-            nearest_active_match(conn, m.subject, m.category.as_deref(), emb, DEDUP_SIMILARITY)?
-        {
-            refresh(
-                conn,
-                existing.id,
-                &m.content,
-                m.importance.max(existing.importance),
-                Some(emb),
-                now,
-            )?;
-            return Ok(existing.id);
+        if let Some((existing, sim)) = best_active_match(conn, m.subject, m.category.as_deref(), emb)? {
+            if sim >= DEDUP_SIMILARITY {
+                refresh(
+                    conn,
+                    existing.id,
+                    &m.content,
+                    m.importance.max(existing.importance),
+                    Some(emb),
+                    now,
+                )?;
+                return Ok(existing.id);
+            }
         }
     }
     insert(conn, m, now)
 }
 
-/// Most-similar *active* memory of the same **subject** and category whose cosine
-/// similarity to `embedding` is ≥ `min_similarity`, if any. Brute-force over active
-/// embedded rows (same scan `search` uses); subject + category are matched in Rust
-/// so a self-memory never merges into a user-fact (and the nullable-category case
-/// is handled cleanly).
-fn nearest_active_match(
+/// The single best-matching *active* memory of the same **subject** + category for
+/// `embedding`, paired with its raw cosine similarity (no threshold — the caller
+/// decides what to do per band). Brute-force over active embedded rows (same scan
+/// `search` uses); subject + category are matched in Rust so a self-memory never
+/// matches a user-fact (and the nullable-category case is handled cleanly).
+pub fn best_active_match(
     conn: &Connection,
     subject: MemorySubject,
     category: Option<&str>,
     embedding: &[f32],
-    min_similarity: f32,
-) -> rusqlite::Result<Option<Memory>> {
+) -> rusqlite::Result<Option<(Memory, f32)>> {
     let mut stmt =
         conn.prepare("SELECT * FROM memories WHERE superseded = 0 AND embedding IS NOT NULL")?;
     let rows = stmt.query_map([], Memory::from_row)?;
@@ -227,11 +231,21 @@ fn nearest_active_match(
         }
         let Some(e) = &mem.embedding else { continue };
         let sim = cosine_similarity(embedding, e);
-        if sim >= min_similarity && best.as_ref().map_or(true, |(b, _)| sim > *b) {
+        if best.as_ref().map_or(true, |(b, _)| sim > *b) {
             best = Some((sim, mem));
         }
     }
-    Ok(best.map(|(_, m)| m))
+    Ok(best.map(|(sim, m)| (m, sim)))
+}
+
+/// Retire a memory: exclude it from retrieval (set `superseded = 1`) while keeping
+/// the row for history. Used when a newer memory contradicts/updates it.
+pub fn supersede(conn: &Connection, id: i64, now: i64) -> rusqlite::Result<()> {
+    conn.execute(
+        "UPDATE memories SET superseded = 1, updated_at = ?1 WHERE id = ?2",
+        params![now, id],
+    )?;
+    Ok(())
 }
 
 /// Overwrite an existing memory's content/importance/embedding and bump its
@@ -316,9 +330,14 @@ fn search_inner(
         };
         let age = (now - mem.created_at).max(0) as f32;
         let recency = 0.5_f32.powf(age / weights.recency_half_life_secs);
-        let score = relevance * weights.relevance
+        let mut score = relevance * weights.relevance
             + recency * weights.recency
             + mem.importance.clamp(0.0, 1.0) * weights.importance;
+        // Insights (reflections) are down-weighted so a stated fact of equal
+        // relevance always ranks above a speculative insight.
+        if mem.kind == MemoryKind::Reflection {
+            score *= weights.reflection_factor;
+        }
         scored.push(ScoredMemory {
             memory: mem,
             score,
@@ -415,6 +434,17 @@ mod tests {
             importance: 0.6,
             embedding: Some(emb),
             subject: MemorySubject::Mutsumi,
+        }
+    }
+
+    fn new_insight(content: &str, importance: f32, emb: Vec<f32>) -> NewMemory {
+        NewMemory {
+            kind: MemoryKind::Reflection,
+            category: Some("insight".into()),
+            content: content.into(),
+            importance,
+            embedding: Some(emb),
+            subject: MemorySubject::User,
         }
     }
 
@@ -561,6 +591,44 @@ mod tests {
         conn.execute("UPDATE memories SET superseded = 1 WHERE id = ?1", params![id]).unwrap();
         let hits = search(&conn, &[1.0, 0.0], 10, RetrievalWeights::default(), 100).unwrap();
         assert!(hits.is_empty(), "superseded rows must not be retrieved");
+    }
+
+    #[test]
+    fn best_active_match_returns_top_with_similarity() {
+        let conn = mem_db();
+        insert(&conn, &new_obs("用户喜欢猫", 0.5, vec![1.0, 0.0]), 100).unwrap();
+        // Same subject+category, near-identical embedding → high similarity.
+        let m = best_active_match(&conn, MemorySubject::User, Some("preference"), &[0.98, 0.02])
+            .unwrap()
+            .expect("a match");
+        assert_eq!(m.0.content, "用户喜欢猫");
+        assert!(m.1 > 0.95, "expected high cosine, got {}", m.1);
+        // Different category → no match.
+        assert!(best_active_match(&conn, MemorySubject::User, Some("habit"), &[1.0, 0.0]).unwrap().is_none());
+    }
+
+    #[test]
+    fn supersede_excludes_from_retrieval() {
+        let conn = mem_db();
+        let id = insert(&conn, &new_obs("旧的事实", 0.5, vec![1.0, 0.0]), 100).unwrap();
+        supersede(&conn, id, 200).unwrap();
+        assert!(get(&conn, id).unwrap().unwrap().superseded);
+        let hits = search(&conn, &[1.0, 0.0], 10, RetrievalWeights::default(), 300).unwrap();
+        assert!(hits.is_empty(), "superseded row must not be retrieved");
+    }
+
+    #[test]
+    fn reflection_is_down_weighted_below_a_same_relevance_fact() {
+        let conn = mem_db();
+        // A fact and an insight with identical embedding + importance.
+        insert(&conn, &new_obs("用户喜欢猫", 0.85, vec![1.0, 0.0]), 100).unwrap();
+        insert(&conn, &new_insight("用户可能孤独", 0.85, vec![1.0, 0.0]), 100).unwrap();
+        let hits = search(&conn, &[1.0, 0.0], 10, RetrievalWeights::default(), 100).unwrap();
+        assert_eq!(hits.len(), 2);
+        // The fact outranks the same-relevance insight thanks to reflection_factor.
+        assert_eq!(hits[0].memory.kind, MemoryKind::Observation);
+        assert_eq!(hits[1].memory.kind, MemoryKind::Reflection);
+        assert!(hits[0].score > hits[1].score);
     }
 
     #[test]

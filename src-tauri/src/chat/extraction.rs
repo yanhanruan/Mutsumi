@@ -260,40 +260,150 @@ async fn run(app: &AppHandle, exchanges: &[Exchange]) -> Result<(), ApiError> {
     let contents: Vec<String> = facts.iter().map(|f| f.content.clone()).collect();
     let embeddings = qwen.embed_batch(&contents).await?;
 
-    // Store in a scoped block so the DB state + lock are both released before
-    // the reflection await below (keeps this future `Send` for spawning).
-    {
-        let Some(db) = app.try_state::<Db>() else {
-            return Ok(());
-        };
-        let ts = now();
-        let conn = db.0.lock().map_err(|e| ApiError::Build(e.to_string()))?;
-        for (fact, embedding) in facts.iter().zip(embeddings) {
-            // Dedup-merge: a restatement refreshes its near-duplicate (within the
-            // same subject + category) instead of piling up an overlapping row.
-            let stored = memory::store_observation(
-                &conn,
-                &NewMemory {
-                    kind: MemoryKind::Observation,
-                    category: Some(fact.category.clone()),
-                    content: fact.content.clone(),
-                    importance: fact.importance.clamp(0.0, 1.0),
-                    embedding: Some(embedding),
-                    subject: fact.subject(),
-                },
-                ts,
-            );
-            if let Err(e) = stored {
-                log::warn!("failed to store extracted memory: {e}");
-            }
+    let ts = now();
+    for (fact, embedding) in facts.iter().zip(embeddings) {
+        if let Err(e) = reconcile_and_store(app, &qwen, fact, embedding, ts).await {
+            log::warn!("failed to store extracted memory: {e}");
         }
-        log::info!("silently extracted {} mem(ies) from {} turn(s)", facts.len(), exchanges.len());
     }
+    log::info!("silently extracted {} mem(ies) from {} turn(s)", facts.len(), exchanges.len());
 
     // Pipeline C: once enough raw *user* observations have piled up, synthesize
     // higher-level insights. Cheap when below threshold (just a COUNT).
     super::reflection::maybe_reflect(app, super::reflection::REFLECTION_BATCH).await;
     Ok(())
+}
+
+/// Lower bound of the "reconcile" band: below this, a new fact is unrelated enough
+/// to just insert; in `[RECONCILE_MIN, DEDUP_SIMILARITY)` it's similar enough that
+/// it might update/contradict an existing memory, so we ask the model. Tuned to
+/// 0.75 because real contradictions about the same topic land lower than expected
+/// (e.g. "后天有演出" vs "演出取消了" measured ~0.80); unrelated same-category pairs
+/// stay well under this, and the rare false trigger just returns DISTINCT.
+pub(crate) const RECONCILE_MIN: f32 = 0.75;
+
+/// Store one extracted fact with contradiction handling, by similarity band against
+/// the best active same-subject+category memory:
+///   * `≥ DEDUP_SIMILARITY` → refresh in place (a restatement);
+///   * `[RECONCILE_MIN, DEDUP_SIMILARITY)` → ask [`reconcile`]: duplicate→refresh,
+///     update/contradiction→supersede the old + insert, distinct→insert;
+///   * below → insert.
+/// DB locks are short and never held across the (possible) reconcile `await`.
+async fn reconcile_and_store(
+    app: &AppHandle,
+    qwen: &QwenClient,
+    fact: &ExtractedFact,
+    embedding: Vec<f32>,
+    ts: i64,
+) -> Result<(), ApiError> {
+    let subject = fact.subject();
+    let category = Some(fact.category.clone());
+
+    // Phase 1 (short lock): find the best active candidate.
+    let candidate = {
+        let Some(db) = app.try_state::<Db>() else { return Ok(()) };
+        let conn = db.0.lock().map_err(|e| ApiError::Build(e.to_string()))?;
+        memory::best_active_match(&conn, subject, category.as_deref(), &embedding).map_err(map_db)?
+    };
+
+    // Phase 2 (no lock): decide, possibly via one cheap reconcile call.
+    enum Act {
+        Refresh { id: i64, importance: f32 },
+        SupersedeThenInsert(i64),
+        Insert,
+    }
+
+    let act = match candidate {
+        Some((old, sim)) if sim >= memory::DEDUP_SIMILARITY => {
+            Act::Refresh { id: old.id, importance: old.importance }
+        }
+        Some((old, sim)) if sim >= RECONCILE_MIN => match reconcile(qwen, &old.content, &fact.content).await {
+            Verdict::Duplicate => Act::Refresh { id: old.id, importance: old.importance },
+            Verdict::Update => Act::SupersedeThenInsert(old.id),
+            Verdict::Distinct => Act::Insert,
+        },
+        _ => Act::Insert,
+    };
+
+    // Phase 3 (short lock): apply.
+    let Some(db) = app.try_state::<Db>() else { return Ok(()) };
+    let conn = db.0.lock().map_err(|e| ApiError::Build(e.to_string()))?;
+    let new = NewMemory {
+        kind: MemoryKind::Observation,
+        category,
+        content: fact.content.clone(),
+        importance: fact.importance.clamp(0.0, 1.0),
+        embedding: Some(embedding),
+        subject,
+    };
+    match act {
+        Act::Refresh { id, importance } => memory::refresh(
+            &conn,
+            id,
+            &new.content,
+            new.importance.max(importance),
+            new.embedding.as_deref(),
+            ts,
+        )
+        .map_err(map_db)?,
+        Act::SupersedeThenInsert(old_id) => {
+            memory::supersede(&conn, old_id, ts).map_err(map_db)?;
+            memory::insert(&conn, &new, ts).map_err(map_db)?;
+        }
+        Act::Insert => {
+            memory::insert(&conn, &new, ts).map_err(map_db)?;
+        }
+    }
+    Ok(())
+}
+
+/// How a newly-extracted memory relates to an existing similar one.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Verdict {
+    Duplicate,
+    Update,
+    Distinct,
+}
+
+fn parse_verdict(s: &str) -> Verdict {
+    let up = s.to_uppercase();
+    // Check UPDATE before DUPLICATE so a reply containing both leans to the safer
+    // "supersede"; default to Distinct (keep both) when unclear.
+    if up.contains("UPDATE") {
+        Verdict::Update
+    } else if up.contains("DUPLICATE") {
+        Verdict::Duplicate
+    } else {
+        Verdict::Distinct
+    }
+}
+
+/// One cheap, tool-less classification of how `new` relates to `old`. On any error
+/// returns [`Verdict::Distinct`] so a flaky call never wrongly retires a memory.
+pub(crate) async fn reconcile(qwen: &QwenClient, old: &str, new: &str) -> Verdict {
+    let prompt = format!(
+        "旧记忆：{old}\n新记忆：{new}\n\n这两条关于用户的记忆是什么关系？只回答一个词：\n\
+         DUPLICATE = 说的是同一件事；\n\
+         UPDATE = 新的是对旧的更新，或与旧的相矛盾，应以新的为准；\n\
+         DISTINCT = 是两件不同的事，应同时保留。"
+    );
+    let messages = [
+        ChatMessage::system(
+            "你是记忆去重/更新判别器。只输出 DUPLICATE、UPDATE 或 DISTINCT 中的一个词，不要任何其他内容。",
+        ),
+        ChatMessage::user(prompt),
+    ];
+    match qwen.chat(&messages, None, ChatOptions::default()).await {
+        Ok(c) => parse_verdict(&c.message.content.unwrap_or_default()),
+        Err(e) => {
+            log::warn!("reconcile failed, keeping both: {e}");
+            Verdict::Distinct
+        }
+    }
+}
+
+fn map_db(e: impl std::fmt::Display) -> ApiError {
+    ApiError::Build(e.to_string())
 }
 
 #[cfg(test)]
@@ -393,6 +503,19 @@ mod tests {
         )];
         let facts = parse_facts(&calls);
         assert_eq!(facts[0].source_quote, "我是程序员");
+    }
+
+    #[test]
+    fn parse_verdict_keywords_and_default() {
+        assert_eq!(parse_verdict("UPDATE"), Verdict::Update);
+        assert_eq!(parse_verdict("update。"), Verdict::Update);
+        assert_eq!(parse_verdict("DUPLICATE"), Verdict::Duplicate);
+        assert_eq!(parse_verdict("DISTINCT"), Verdict::Distinct);
+        // UPDATE wins if both appear (safer = supersede).
+        assert_eq!(parse_verdict("DUPLICATE or UPDATE?"), Verdict::Update);
+        // Unrecognized → keep both.
+        assert_eq!(parse_verdict("不确定"), Verdict::Distinct);
+        assert_eq!(parse_verdict(""), Verdict::Distinct);
     }
 
     #[test]
