@@ -27,7 +27,12 @@ use engines::RawResult;
 /// Desktop Chrome UA — Bing/Google return a degraded layout without a real one.
 const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
     (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(8);
+/// SERP fetch timeout. Bing CN responds in ~4–5s from some networks, so this
+/// must stay above that or the primary engine always times out into fallback.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(6);
+/// Tighter per-page timeout for deep body scraping — heavy result pages
+/// (weather portals etc.) must not stall the turn; we fall back to the snippet.
+const BODY_TIMEOUT: Duration = Duration::from_secs(3);
 /// Max SERP results carried forward.
 const MAX_RESULTS: usize = 3;
 /// How many top results to deep-scrape for body text (concurrently).
@@ -36,14 +41,19 @@ const PAGES_TO_SCRAPE: usize = 2;
 const MAX_BODY_CHARS: usize = 700;
 
 /// The user-selectable primary search engine.
+///
+/// Default is **DuckDuckGo**: its HTML endpoint is fast (~0.3–1.5s) and
+/// scrape-friendly, whereas Bing CN measured ~6s + flaky empty results from a
+/// mainland network, dominating chat latency. Bing CN and the rest remain
+/// selectable (Phase 5b settings picker).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum SearchEngine {
-    #[default]
     BingCn,
     Bing,
     Google,
     Baidu,
+    #[default]
     DuckDuckGo,
 }
 
@@ -51,11 +61,12 @@ impl SearchEngine {
     #[allow(dead_code)] // used by the settings UI (Phase 5b) to parse a saved choice
     pub fn from_str(s: &str) -> SearchEngine {
         match s.to_lowercase().replace(['_', ' '], "-").as_str() {
+            "bing-cn" => SearchEngine::BingCn,
             "bing" => SearchEngine::Bing,
             "google" => SearchEngine::Google,
             "baidu" => SearchEngine::Baidu,
             "duckduckgo" | "ddg" => SearchEngine::DuckDuckGo,
-            _ => SearchEngine::BingCn,
+            _ => SearchEngine::default(),
         }
     }
 }
@@ -220,7 +231,16 @@ async fn fetch_body(http: reqwest::Client, url: String) -> Option<String> {
     if !url.starts_with("http") {
         return None;
     }
-    let html = http.get(&url).send().await.ok()?.text().await.ok()?;
+    // Tight per-request timeout so a heavy/slow page degrades to "snippet only".
+    let html = http
+        .get(&url)
+        .timeout(BODY_TIMEOUT)
+        .send()
+        .await
+        .ok()?
+        .text()
+        .await
+        .ok()?;
     let body = extract_body(&html);
     (!body.is_empty()).then_some(body)
 }
@@ -279,11 +299,14 @@ mod tests {
 
     #[test]
     fn engine_from_str() {
+        assert_eq!(SearchEngine::from_str("bing-cn"), SearchEngine::BingCn);
+        assert_eq!(SearchEngine::from_str("bing_cn"), SearchEngine::BingCn);
         assert_eq!(SearchEngine::from_str("google"), SearchEngine::Google);
         assert_eq!(SearchEngine::from_str("DuckDuckGo"), SearchEngine::DuckDuckGo);
         assert_eq!(SearchEngine::from_str("ddg"), SearchEngine::DuckDuckGo);
-        assert_eq!(SearchEngine::from_str("anything"), SearchEngine::BingCn);
-        assert_eq!(SearchEngine::default(), SearchEngine::BingCn);
+        // Unknown → the app default (DuckDuckGo).
+        assert_eq!(SearchEngine::from_str("anything"), SearchEngine::DuckDuckGo);
+        assert_eq!(SearchEngine::default(), SearchEngine::DuckDuckGo);
     }
 
     #[test]
@@ -329,5 +352,24 @@ mod tests {
             }
         }
         assert!(!results.is_empty(), "expected at least one search result");
+    }
+
+    //   cargo test --lib time_search_phases -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore = "network timing probe"]
+    async fn time_search_phases() {
+        use std::time::Instant;
+        let client = SearchClient::new().unwrap();
+        let q = "今天东京天气";
+
+        for engine in [SearchEngine::BingCn, SearchEngine::DuckDuckGo] {
+            let t = Instant::now();
+            let serp = client.fetch_serp(engine, q).await.unwrap_or_default();
+            println!("[{engine:?}] SERP: {:.2}s, {} results", t.elapsed().as_secs_f32(), serp.len());
+
+            let t = Instant::now();
+            let results = search(&client, engine, q).await;
+            println!("[{engine:?}] FULL search(): {:.2}s, {} results", t.elapsed().as_secs_f32(), results.len());
+        }
     }
 }

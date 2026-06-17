@@ -16,6 +16,8 @@ mod extraction;
 mod prompt;
 pub mod reflection;
 
+use std::time::Duration;
+
 use serde::Serialize;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, State};
@@ -30,6 +32,10 @@ use crate::services::QwenState;
 
 /// How many memories to inject into the prompt per turn.
 const MEMORY_TOP_K: usize = 6;
+
+/// Hard ceiling on the whole search step. If exceeded, the turn proceeds with
+/// no web context rather than making the user wait.
+const SEARCH_BUDGET: Duration = Duration::from_secs(9);
 
 /// Errors surfaced from the chat pipeline. Serializes as its message so it lands
 /// in the rejected-promise path of the frontend `invoke`.
@@ -77,17 +83,27 @@ async fn build_messages(
     locale: &str,
     history: &[ChatMessage],
 ) -> Result<Vec<ChatMessage>, ChatError> {
-    // Search-enhanced awareness: if the message looks time-sensitive, fetch
-    // live web context synchronously and inject it. Best-effort — empty on any
-    // failure, never blocking the turn.
-    let search_context = if trigger::needs_search(message) {
-        let results = search::search(&search.client, search.engine(), message).await;
-        (!results.is_empty()).then(|| search::format_context(message, &results))
-    } else {
-        None
+    // Search-enhanced awareness + embedding run concurrently (they are
+    // independent), so search latency overlaps the embed call instead of
+    // stacking. Search is best-effort and capped by SEARCH_BUDGET so a slow or
+    // flaky engine can never stall the turn — on timeout we just proceed
+    // without web context.
+    let search_fut = async {
+        if trigger::needs_search(message) {
+            let results = tokio::time::timeout(
+                SEARCH_BUDGET,
+                search::search(&search.client, search.engine(), message),
+            )
+            .await
+            .unwrap_or_default();
+            (!results.is_empty()).then(|| search::format_context(message, &results))
+        } else {
+            None
+        }
     };
 
-    let query_embedding = qwen.embed(message).await?;
+    let (search_context, embed_result) = tokio::join!(search_fut, qwen.embed(message));
+    let query_embedding = embed_result?;
 
     let (memories, relationship, profile) = {
         let conn = db.0.lock().map_err(db_err)?;

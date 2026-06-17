@@ -32,6 +32,7 @@ dotenvy = "0.15"
 rusqlite = { version = "0.32", features = ["bundled"] }
 scraper = "0.20"   # HTML parsing for search-result + page-body scraping
 regex = "1"        # date / keyword detection for search triggering
+tokio = { version = "1", features = ["time", "macros"] }  # search budget + concurrent embed/search (join!)
 
 # Test-only async runtime for the (ignored) live API smoke tests.
 [dev-dependencies]
