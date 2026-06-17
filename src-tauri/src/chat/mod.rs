@@ -14,6 +14,7 @@
 
 mod extraction;
 mod prompt;
+pub mod reflection;
 
 use serde::Serialize;
 use tauri::ipc::Channel;

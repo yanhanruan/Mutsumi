@@ -122,6 +122,13 @@ pub fn run() {
       match db::Db::open(app.handle()) {
         Ok(database) => {
           app.manage(database);
+
+          // Pipeline C: on startup, reflect on any observations that piled up
+          // in previous sessions (runs in the background; no-op if too few).
+          let handle = app.handle().clone();
+          tauri::async_runtime::spawn(async move {
+            chat::reflection::maybe_reflect(&handle, chat::reflection::REFLECTION_STARTUP_MIN).await;
+          });
         }
         Err(e) => log::error!("failed to open memory database: {e}"),
       }

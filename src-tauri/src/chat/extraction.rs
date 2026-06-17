@@ -137,29 +137,36 @@ async fn run(app: &AppHandle, user_message: &str, reply: &str) -> Result<(), Api
     let contents: Vec<String> = facts.iter().map(|f| f.content.clone()).collect();
     let embeddings = qwen.embed_batch(&contents).await?;
 
-    // No more awaits past here — safe to take the DB lock.
-    let Some(db) = app.try_state::<Db>() else {
-        return Ok(());
-    };
-    let ts = now();
-    let conn = db.0.lock().map_err(|e| ApiError::Build(e.to_string()))?;
-    for (fact, embedding) in facts.iter().zip(embeddings) {
-        let inserted = memory::insert(
-            &conn,
-            &NewMemory {
-                kind: MemoryKind::Observation,
-                category: Some(fact.category.clone()),
-                content: fact.content.clone(),
-                importance: fact.importance.clamp(0.0, 1.0),
-                embedding: Some(embedding),
-            },
-            ts,
-        );
-        if let Err(e) = inserted {
-            log::warn!("failed to store extracted memory: {e}");
+    // Store in a scoped block so the DB state + lock are both released before
+    // the reflection await below (keeps this future `Send` for spawning).
+    {
+        let Some(db) = app.try_state::<Db>() else {
+            return Ok(());
+        };
+        let ts = now();
+        let conn = db.0.lock().map_err(|e| ApiError::Build(e.to_string()))?;
+        for (fact, embedding) in facts.iter().zip(embeddings) {
+            let inserted = memory::insert(
+                &conn,
+                &NewMemory {
+                    kind: MemoryKind::Observation,
+                    category: Some(fact.category.clone()),
+                    content: fact.content.clone(),
+                    importance: fact.importance.clamp(0.0, 1.0),
+                    embedding: Some(embedding),
+                },
+                ts,
+            );
+            if let Err(e) = inserted {
+                log::warn!("failed to store extracted memory: {e}");
+            }
         }
+        log::info!("silently extracted {} mem(ies)", facts.len());
     }
-    log::info!("silently extracted {} mem(ies)", facts.len());
+
+    // Pipeline C: once enough raw observations have piled up, synthesize
+    // higher-level insights. Cheap when below threshold (just a COUNT).
+    super::reflection::maybe_reflect(app, super::reflection::REFLECTION_BATCH).await;
     Ok(())
 }
 
