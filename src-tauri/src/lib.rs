@@ -108,6 +108,7 @@ pub fn run() {
       services::tts_set_recaptcha,
       chat::chat_send,
       chat::chat_stream,
+      search::set_search_engine,
       hide_pet,
     ])
     .setup(move |app| {

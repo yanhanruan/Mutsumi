@@ -55,6 +55,16 @@ export const zh: Translations = {
   // ── Music controller visibility ───────────────────────────────────
   showMusic: '显示音乐控制器',
 
+  // ── Search engine ─────────────────────────────────────────────────
+  searchEngine: '搜索引擎',
+  searchEngines: {
+    duckduckgo: 'DuckDuckGo',
+    bingCn:     'Bing 国内',
+    bing:       'Bing 国际',
+    google:     'Google',
+    baidu:      '百度',
+  },
+
   // ── Pomodoro badge ────────────────────────────────────────────────
   pomFocus: '专注',
   pomBreak: '休息',

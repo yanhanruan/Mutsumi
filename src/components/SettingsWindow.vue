@@ -13,7 +13,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { enable, disable, isEnabled } from '@tauri-apps/plugin-autostart'
 import { useI18n, setLocale, type Locale } from '../i18n'
-import { useAppConfig, type CharacterSize } from '../composables/useAppConfig'
+import { useAppConfig, type CharacterSize, type SearchEngineKey } from '../composables/useAppConfig'
 import { useWeatherAvailable } from '../composables/useWeatherAvailable'
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -101,6 +101,26 @@ watch(() => config.value.showMusic, v => { localShowMusic.value = v })
 
 async function toggleMusic() {
   await updateConfig({ showMusic: localShowMusic.value })
+}
+
+// ── Search engine (chat search-enhancement) ───────────────────────
+type EngineLabelKey = 'duckduckgo' | 'bingCn' | 'bing' | 'google' | 'baidu'
+const ENGINE_OPTIONS: { key: SearchEngineKey; labelKey: EngineLabelKey }[] = [
+  { key: 'duckduckgo', labelKey: 'duckduckgo' },
+  { key: 'bing-cn',    labelKey: 'bingCn'     },
+  { key: 'bing',       labelKey: 'bing'       },
+  { key: 'google',     labelKey: 'google'     },
+  { key: 'baidu',      labelKey: 'baidu'      },
+]
+
+const localEngine = ref<SearchEngineKey>(config.value.searchEngine)
+watch(() => config.value.searchEngine, v => { localEngine.value = v })
+
+async function setSearchEngine(e: SearchEngineKey) {
+  localEngine.value = e
+  await updateConfig({ searchEngine: e })          // persist + broadcast
+  try { await invoke('set_search_engine', { engine: e }) }  // apply to backend now
+  catch { /* best-effort; synced again on next startup */ }
 }
 
 // ── Window controls ────────────────────────────────────────────────
@@ -290,6 +310,18 @@ onMounted(async () => {
             {{ t[opt.labelKey] }}
           </button>
         </div>
+      </section>
+
+      <!-- Search engine -->
+      <section class="card">
+        <h2 class="card-title">
+          <span class="card-icon">🔍</span>{{ t.searchEngine }}
+        </h2>
+        <select class="select" v-model="localEngine" @change="setSearchEngine(localEngine)">
+          <option v-for="opt in ENGINE_OPTIONS" :key="opt.key" :value="opt.key">
+            {{ t.searchEngines[opt.labelKey] }}
+          </option>
+        </select>
       </section>
 
       <!-- System -->
@@ -725,5 +757,24 @@ onMounted(async () => {
   background: linear-gradient(135deg, #779977, #5a8060);
   border-color: transparent;
   color: white;
+}
+
+/* ── Select dropdown (search engine) ─────────────────────── */
+.select {
+  width: 100%;
+  padding: 7px 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #2c4e2c;
+  border: 1.5px solid rgba(119, 153, 119, 0.40);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.72);
+  outline: none;
+  cursor: pointer;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+.select:focus {
+  border-color: #779977;
+  box-shadow: 0 0 0 3px rgba(119, 153, 119, 0.18);
 }
 </style>

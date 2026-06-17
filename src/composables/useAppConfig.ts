@@ -18,6 +18,9 @@ import type { Locale } from '../i18n'
 
 export type CharacterSize = 'small' | 'medium' | 'large'
 
+/** Search engine key — kebab-case, matches the Rust `SearchEngine::from_str`. */
+export type SearchEngineKey = 'duckduckgo' | 'bing-cn' | 'bing' | 'google' | 'baidu'
+
 export interface AppConfig {
   characterSize: CharacterSize
   showWeather:   boolean
@@ -29,6 +32,8 @@ export interface AppConfig {
    * here overrides detection and persists across restarts.
    */
   language:      Locale | null
+  /** Primary web-search engine for chat search-enhancement. */
+  searchEngine:  SearchEngineKey
 }
 
 // ── Size dimensions ──────────────────────────────────────────────────
@@ -52,7 +57,8 @@ const DEFAULT_CONFIG: AppConfig = {
   characterSize: 'medium',
   showWeather:   true,
   showMusic:     true,
-  language:      null,   // null → follow system locale
+  language:      null,          // null → follow system locale
+  searchEngine:  'duckduckgo',  // fast + scrape-friendly default (matches Rust)
 }
 
 function loadConfig(): AppConfig {

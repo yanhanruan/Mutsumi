@@ -55,6 +55,16 @@ export const en: Translations = {
   // ── Music controller visibility ───────────────────────────────────
   showMusic: 'Show Music Controller',
 
+  // ── Search engine ─────────────────────────────────────────────────
+  searchEngine: 'Search Engine',
+  searchEngines: {
+    duckduckgo: 'DuckDuckGo',
+    bingCn:     'Bing (China)',
+    bing:       'Bing',
+    google:     'Google',
+    baidu:      'Baidu',
+  },
+
   // ── Pomodoro badge ────────────────────────────────────────────────
   pomFocus: 'Focus',
   pomBreak: 'Break',

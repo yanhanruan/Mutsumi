@@ -55,6 +55,16 @@ export const ja: Translations = {
   // ── Music controller visibility ───────────────────────────────────
   showMusic: '音楽コントローラーを表示',
 
+  // ── Search engine ─────────────────────────────────────────────────
+  searchEngine: '検索エンジン',
+  searchEngines: {
+    duckduckgo: 'DuckDuckGo',
+    bingCn:     'Bing（中国）',
+    bing:       'Bing',
+    google:     'Google',
+    baidu:      'Baidu',
+  },
+
   // ── Pomodoro badge ────────────────────────────────────────────────
   pomFocus: '集中',
   pomBreak: '休憩',

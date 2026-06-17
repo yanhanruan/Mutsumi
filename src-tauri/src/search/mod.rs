@@ -58,7 +58,7 @@ pub enum SearchEngine {
 }
 
 impl SearchEngine {
-    #[allow(dead_code)] // used by the settings UI (Phase 5b) to parse a saved choice
+    /// Parse a persisted setting value (kebab-case) into an engine.
     pub fn from_str(s: &str) -> SearchEngine {
         match s.to_lowercase().replace(['_', ' '], "-").as_str() {
             "bing-cn" => SearchEngine::BingCn,
@@ -134,10 +134,16 @@ impl SearchState {
         *self.engine.lock().expect("search engine mutex")
     }
 
-    #[allow(dead_code)] // used by the settings UI (Phase 5b)
     pub fn set_engine(&self, engine: SearchEngine) {
         *self.engine.lock().expect("search engine mutex") = engine;
     }
+}
+
+/// Tauri command: switch the active search engine at runtime (settings UI).
+/// `engine` is the kebab-case key from the frontend config.
+#[tauri::command]
+pub fn set_search_engine(engine: String, search: tauri::State<'_, SearchState>) {
+    search.set_engine(SearchEngine::from_str(&engine));
 }
 
 /// Run a search and return up to [`MAX_RESULTS`] hits, deep-scraping the top

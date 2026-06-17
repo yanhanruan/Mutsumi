@@ -60,6 +60,16 @@ export interface Translations {
   // ── Music controller visibility ─────────────────────────────────
   showMusic: string
 
+  // ── Search engine (chat search-enhancement) ─────────────────────
+  searchEngine: string
+  searchEngines: {
+    duckduckgo: string
+    bingCn:     string
+    bing:       string
+    google:     string
+    baidu:      string
+  }
+
   // ── Pomodoro badge ──────────────────────────────────────────────
   pomFocus:  string
   pomBreak:  string
