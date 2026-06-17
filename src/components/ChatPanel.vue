@@ -54,6 +54,9 @@ function open() {
 }
 
 function dismiss() {
+  // Flush any buffered turns through silent extraction so a short conversation's
+  // memories aren't stranded below the batch threshold (best-effort).
+  void invoke('chat_flush_memory').catch(() => {})
   skipLeave.value = true        // vanish immediately — no fade at the new window pos
   visible.value = false
   void nextTick(() => { skipLeave.value = false })

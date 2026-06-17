@@ -65,6 +65,13 @@ export const zh: Translations = {
     baidu:      '百度',
   },
 
+  // ── 聊天记忆重置 ──────────────────────────────────────────────────
+  chatMemory:         '聊天记忆',
+  chatMemoryHint:     '忘记睦记住的关于你的一切，从头开始。',
+  clearMemory:        '清空记忆',
+  clearMemoryConfirm: '再点一次确认',
+  clearMemoryDoneMsg: '记忆已清空。',
+
   // ── Pomodoro badge ────────────────────────────────────────────────
   pomFocus: '专注',
   pomBreak: '休息',

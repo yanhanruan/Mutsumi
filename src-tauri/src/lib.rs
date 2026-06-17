@@ -78,6 +78,7 @@ pub fn run() {
     .manage(fish_audio_state)
     .manage(qwen_state)
     .manage(search_state)
+    .manage(chat::ChatBuffer::new())
     .invoke_handler(tauri::generate_handler![
       app_state::get_state,
       app_state::pet_click,
@@ -110,6 +111,8 @@ pub fn run() {
       services::tts_set_recaptcha,
       chat::chat_send,
       chat::chat_stream,
+      chat::chat_clear_memory,
+      chat::chat_flush_memory,
       search::set_search_engine,
       hide_pet,
     ])

@@ -88,6 +88,16 @@ pub fn get_relationship(conn: &Connection) -> rusqlite::Result<RelationshipState
     }
 }
 
+/// Wipe all dynamic user state (profile + relationship). Backs the user-facing
+/// "clear memory" reset alongside [`crate::db::memory::clear_all`]. The
+/// relationship row is deleted so it is recreated at its neutral default on the
+/// next [`get_relationship`].
+pub fn reset(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute("DELETE FROM user_profile", [])?;
+    conn.execute("DELETE FROM relationship_state", [])?;
+    Ok(())
+}
+
 /// Overwrite the relationship state singleton.
 pub fn update_relationship(conn: &Connection, s: &RelationshipState) -> rusqlite::Result<()> {
     conn.execute(
@@ -143,5 +153,24 @@ mod tests {
         let s = get_relationship(&conn).unwrap();
         assert_eq!(s.affection, 12.0);
         assert_eq!(s.mood, "amused");
+    }
+
+    #[test]
+    fn reset_clears_profile_and_relationship() {
+        let conn = mem_db();
+        set_profile(&conn, "name", "Ren", 1).unwrap();
+        update_relationship(
+            &conn,
+            &RelationshipState { affection: 50.0, trust: 40.0, mood: "warm".into(), updated_at: 9 },
+        )
+        .unwrap();
+
+        reset(&conn).unwrap();
+
+        assert!(all_profile(&conn).unwrap().is_empty());
+        // Relationship row removed → recreated at neutral default on next read.
+        let s = get_relationship(&conn).unwrap();
+        assert_eq!(s.affection, 0.0);
+        assert_eq!(s.mood, "neutral");
     }
 }

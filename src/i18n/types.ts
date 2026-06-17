@@ -70,6 +70,13 @@ export interface Translations {
     baidu:      string
   }
 
+  // ── Chat memory reset ───────────────────────────────────────────
+  chatMemory:           string
+  chatMemoryHint:       string
+  clearMemory:          string
+  clearMemoryConfirm:   string
+  clearMemoryDoneMsg:   string
+
   // ── Pomodoro badge ──────────────────────────────────────────────
   pomFocus:  string
   pomBreak:  string

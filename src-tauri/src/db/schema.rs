@@ -8,7 +8,7 @@
 use rusqlite::Connection;
 
 /// The schema version this build expects. Equals the number of migration steps.
-pub const SCHEMA_VERSION: i32 = 1;
+pub const SCHEMA_VERSION: i32 = 3;
 
 /// V1 — the initial three-table design from the blueprint.
 const V1: &str = r#"
@@ -46,6 +46,31 @@ CREATE INDEX IF NOT EXISTS idx_memories_kind     ON memories(kind);
 CREATE INDEX IF NOT EXISTS idx_memories_reflected ON memories(reflected);
 "#;
 
+/// V2 — memory lifecycle columns:
+///   * `updated_at`  — when the row's content was last written/refreshed (an
+///     "as-of" timestamp used for conflict resolution + the prompt recency hint).
+///     Distinct from `last_access` (bumped on *retrieval*). Backfilled to
+///     `created_at` for existing rows.
+///   * `superseded`  — 0/1 active flag. Retrieval only returns active rows; a
+///     contradicting/merged memory can be retired without deleting history.
+const V2: &str = r#"
+ALTER TABLE memories ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;
+UPDATE memories SET updated_at = created_at;
+ALTER TABLE memories ADD COLUMN superseded INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS idx_memories_superseded ON memories(superseded);
+"#;
+
+/// V3 — `subject`: whose memory this row is.
+///   * `'user'` — a fact about the user (the only kind before this migration, so
+///     existing rows correctly default to it).
+///   * `'self'` — Mutsumi's own memory: her feelings toward the user and the
+///     promises / shared moments she expressed. Kept distinct in retrieval and the
+///     prompt so the two are never confused.
+const V3: &str = r#"
+ALTER TABLE memories ADD COLUMN subject TEXT NOT NULL DEFAULT 'user';
+CREATE INDEX IF NOT EXISTS idx_memories_subject ON memories(subject);
+"#;
+
 /// Apply all migrations newer than the connection's stored `user_version`.
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     let current: i32 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
@@ -53,11 +78,93 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     if current < 1 {
         conn.execute_batch(V1)?;
     }
-
-    // Future: `if current < 2 { conn.execute_batch(V2)?; }` …
+    if current < 2 {
+        conn.execute_batch(V2)?;
+    }
+    if current < 3 {
+        conn.execute_batch(V3)?;
+    }
 
     if current < SCHEMA_VERSION {
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn columns(conn: &Connection, table: &str) -> Vec<String> {
+        let mut stmt = conn
+            .prepare(&format!("PRAGMA table_info({table})"))
+            .unwrap();
+        let rows = stmt
+            .query_map([], |r| r.get::<_, String>(1))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        rows
+    }
+
+    #[test]
+    fn fresh_migrate_has_all_columns_and_version() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        let cols = columns(&conn, "memories");
+        assert!(cols.iter().any(|c| c == "updated_at"));
+        assert!(cols.iter().any(|c| c == "superseded"));
+        assert!(cols.iter().any(|c| c == "subject")); // V3
+        let v: i32 = conn
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(v, SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn v1_to_v3_upgrade_backfills_subject_to_user() {
+        // A V1 DB with a pre-existing row → after migrate, subject defaults 'user'.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(V1).unwrap();
+        conn.pragma_update(None, "user_version", 1).unwrap();
+        conn.execute(
+            "INSERT INTO memories (kind, content, importance, created_at, last_access, reflected)
+             VALUES ('observation', 'x', 0.5, 1, 1, 0)",
+            [],
+        )
+        .unwrap();
+
+        migrate(&conn).unwrap();
+
+        let subject: String = conn
+            .query_row("SELECT subject FROM memories", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(subject, "user");
+    }
+
+    #[test]
+    fn v1_to_v2_upgrade_backfills_updated_at() {
+        // Simulate a V1 database, then migrate forward.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(V1).unwrap();
+        conn.pragma_update(None, "user_version", 1).unwrap();
+        conn.execute(
+            "INSERT INTO memories (kind, content, importance, created_at, last_access, reflected)
+             VALUES ('observation', 'x', 0.5, 1234, 1234, 0)",
+            [],
+        )
+        .unwrap();
+
+        migrate(&conn).unwrap();
+
+        // New columns exist and updated_at was backfilled from created_at.
+        let updated_at: i64 = conn
+            .query_row("SELECT updated_at FROM memories", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(updated_at, 1234);
+        let superseded: i64 = conn
+            .query_row("SELECT superseded FROM memories", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(superseded, 0);
+    }
 }

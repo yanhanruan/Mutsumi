@@ -24,11 +24,18 @@ pub struct PromptContext<'a> {
     pub locale: &'a str,
     pub profile: &'a [(String, String)],
     pub relationship: &'a RelationshipState,
+    /// Retrieved facts about the **user**.
     pub memories: &'a [ScoredMemory],
+    /// Retrieved memories of **Mutsumi's own** (her feelings toward / promises to
+    /// the user). Kept in a separate, labeled block so the two never blur.
+    pub self_memories: &'a [ScoredMemory],
     /// Optional real-time web-search context (labeled block) for this turn.
     pub search_context: Option<&'a str>,
     pub history: &'a [ChatMessage],
     pub user_input: &'a str,
+    /// Current unix timestamp (seconds), used to label how long ago each memory
+    /// was recorded so the model can prefer recent facts when they conflict.
+    pub now: i64,
 }
 
 /// Assemble the full ordered message list for a chat turn.
@@ -65,16 +72,56 @@ fn dynamic_context(ctx: &PromptContext) -> String {
     }
 
     if ctx.memories.is_empty() {
-        s.push_str("- 暂无相关记忆。\n");
+        s.push_str("- 关于用户的记忆：暂无。\n");
     } else {
-        s.push_str("- 相关记忆（按相关度由高到低）：\n");
+        s.push_str(
+            "- 关于用户的记忆（按相关度排序，方括号内为类别与记下的时间。\
+             注意：列表顺序不代表新旧；若两条记忆相互矛盾，一律以最近记下的那条为准）：\n",
+        );
         for m in ctx.memories {
-            let category = m.memory.category.as_deref().unwrap_or("记忆");
-            s.push_str(&format!("  - [{}] {}\n", category, m.memory.content));
+            s.push_str(&memory_line(m, ctx.now));
+        }
+    }
+
+    // Mutsumi's own memory — clearly separated so it is never read as a user fact.
+    if !ctx.self_memories.is_empty() {
+        s.push_str(
+            "- 你（睦）自己的记忆——你对这位用户的情感，以及你与对方之间的约定/相处片段（这些是你自己的，不是用户的事实）：\n",
+        );
+        for m in ctx.self_memories {
+            s.push_str(&memory_line(m, ctx.now));
         }
     }
 
     s
+}
+
+/// Render one memory as a `  - [category·when] content` line. Age is from
+/// `updated_at` (last written/refreshed), not `created_at`, so a re-stated/merged
+/// memory reads as recent and wins the conflict directive.
+fn memory_line(m: &ScoredMemory, now: i64) -> String {
+    let category = m.memory.category.as_deref().unwrap_or("记忆");
+    let when = recency_label(now - m.memory.updated_at);
+    format!("  - [{}·{}] {}\n", category, when, m.memory.content)
+}
+
+/// A coarse, human-readable "recorded N ago" label for a memory's age (seconds).
+/// Deliberately fuzzy — the goal is only to let the model order conflicting
+/// memories by recency, not to give exact timestamps.
+fn recency_label(age_secs: i64) -> String {
+    let secs = age_secs.max(0);
+    let mins = secs / 60;
+    let hours = secs / 3600;
+    let days = secs / 86400;
+    if days >= 1 {
+        format!("{days}天前")
+    } else if hours >= 1 {
+        format!("{hours}小时前")
+    } else if mins >= 1 {
+        format!("{mins}分钟前")
+    } else {
+        "刚刚".to_string()
+    }
 }
 
 /// Map a locale code to the Chinese name used in the language directive.
@@ -89,9 +136,13 @@ fn lang_name(locale: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::memory::{Memory, MemoryKind, ScoredMemory};
+    use crate::db::memory::{Memory, MemoryKind, MemorySubject, ScoredMemory};
 
     fn scored(content: &str, category: &str) -> ScoredMemory {
+        scored_subj(content, category, MemorySubject::User)
+    }
+
+    fn scored_subj(content: &str, category: &str, subject: MemorySubject) -> ScoredMemory {
         ScoredMemory {
             memory: Memory {
                 id: 1,
@@ -102,7 +153,10 @@ mod tests {
                 embedding: None,
                 created_at: 0,
                 last_access: 0,
+                updated_at: 0,
+                superseded: false,
                 reflected: false,
+                subject,
             },
             score: 0.9,
             relevance: 0.8,
@@ -120,9 +174,11 @@ mod tests {
             profile: &[],
             relationship: rel,
             memories: mems,
+            self_memories: &[],
             search_context: None,
             history: hist,
             user_input: "在吗",
+            now: 0,
         }
     }
 
@@ -160,6 +216,32 @@ mod tests {
     }
 
     #[test]
+    fn recency_label_buckets() {
+        assert_eq!(recency_label(-5), "刚刚");
+        assert_eq!(recency_label(0), "刚刚");
+        assert_eq!(recency_label(30), "刚刚");
+        assert_eq!(recency_label(120), "2分钟前");
+        assert_eq!(recency_label(3 * 3600), "3小时前");
+        assert_eq!(recency_label(5 * 86400), "5天前");
+    }
+
+    #[test]
+    fn memories_get_recency_label_and_conflict_directive() {
+        let rel = RelationshipState::default();
+        // A memory last written 5 days before "now" (label reads `updated_at`).
+        let mut m = scored("用户只吃苦瓜", "preference");
+        m.memory.updated_at = 0;
+        let mems = [m];
+        let mut ctx = ctx_with(&rel, &mems, &[]);
+        ctx.now = 5 * 86400; // 5 days later
+        let dynamic = assemble(&ctx)[1].content.clone().unwrap();
+
+        assert!(dynamic.contains("[preference·5天前] 用户只吃苦瓜"));
+        // The conflict-resolution directive must be present.
+        assert!(dynamic.contains("以最近记下的那条为准"));
+    }
+
+    #[test]
     fn search_context_injected_as_system_message() {
         let rel = RelationshipState::default();
         let mut ctx = ctx_with(&rel, &[], &[]);
@@ -183,7 +265,22 @@ mod tests {
     fn empty_memories_noted() {
         let rel = RelationshipState::default();
         let msgs = assemble(&ctx_with(&rel, &[], &[]));
-        assert!(msgs[1].content.as_deref().unwrap().contains("暂无相关记忆"));
+        assert!(msgs[1].content.as_deref().unwrap().contains("关于用户的记忆：暂无"));
+    }
+
+    #[test]
+    fn self_memories_render_in_a_separate_labeled_block() {
+        let rel = RelationshipState::default();
+        let user_mems = [scored("用户喜欢猫", "preference")];
+        let self_mems = [scored_subj("睦答应陪用户调音", "promise", MemorySubject::Mutsumi)];
+        let mut ctx = ctx_with(&rel, &user_mems, &[]);
+        ctx.self_memories = &self_mems;
+        let dynamic = assemble(&ctx)[1].content.clone().unwrap();
+
+        assert!(dynamic.contains("关于用户的记忆")); // user block
+        assert!(dynamic.contains("用户喜欢猫"));
+        assert!(dynamic.contains("你（睦）自己的记忆")); // self block, distinct
+        assert!(dynamic.contains("睦答应陪用户调音"));
     }
 
     #[test]

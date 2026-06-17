@@ -123,6 +123,28 @@ async function setSearchEngine(e: SearchEngineKey) {
   catch { /* best-effort; synced again on next startup */ }
 }
 
+// ── Chat memory reset ──────────────────────────────────────────────
+// Destructive, so a two-step confirm: first tap arms, second tap (within a few
+// seconds) actually wipes. Avoids depending on a native confirm dialog.
+const confirmingClear = ref(false)
+let clearTimer: ReturnType<typeof setTimeout> | undefined
+
+async function clearMemory() {
+  if (!confirmingClear.value) {
+    confirmingClear.value = true
+    clearTimer = setTimeout(() => { confirmingClear.value = false }, 3000)
+    return
+  }
+  clearTimeout(clearTimer)
+  confirmingClear.value = false
+  try {
+    await invoke('chat_clear_memory')
+    showStatus(t.value.clearMemoryDoneMsg)
+  } catch (e) {
+    console.error('clear memory failed', e)
+  }
+}
+
 // ── Window controls ────────────────────────────────────────────────
 
 const win = getCurrentWindow()
@@ -322,6 +344,21 @@ onMounted(async () => {
             {{ t.searchEngines[opt.labelKey] }}
           </option>
         </select>
+      </section>
+
+      <!-- Chat memory -->
+      <section class="card">
+        <h2 class="card-title">
+          <span class="card-icon">🧠</span>{{ t.chatMemory }}
+        </h2>
+        <p class="card-hint">{{ t.chatMemoryHint }}</p>
+        <button
+          class="btn btn-danger"
+          :class="{ confirming: confirmingClear }"
+          @click="clearMemory"
+        >
+          {{ confirmingClear ? t.clearMemoryConfirm : t.clearMemory }}
+        </button>
       </section>
 
       <!-- System -->
@@ -715,6 +752,30 @@ onMounted(async () => {
   color: rgba(55, 88, 55, 0.56);
 }
 .btn-subtle:hover { background: rgba(255, 255, 255, 0.30); }
+
+/* Destructive button (clear memory) — neutral until armed, red once confirming */
+.btn-danger {
+  background: rgba(255, 255, 255, 0.45);
+  border: 1.5px solid rgba(200, 90, 90, 0.45);
+  color: #a23a3a;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+.btn-danger:hover { background: rgba(220, 120, 120, 0.16); }
+.btn-danger.confirming {
+  background: linear-gradient(135deg, #c85454, #a23a3a);
+  border-color: transparent;
+  color: white;
+  box-shadow: 0 2px 10px rgba(160, 60, 60, 0.34);
+}
+
+/* ── Card hint (small muted description under a card title) ───────── */
+.card-hint {
+  margin: 0 0 9px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: rgba(45, 85, 45, 0.62);
+}
 
 /* ── Status toast ────────────────────────────────────────── */
 .toast {

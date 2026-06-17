@@ -65,6 +65,13 @@ export const en: Translations = {
     baidu:      'Baidu',
   },
 
+  // ── Chat memory reset ─────────────────────────────────────────────
+  chatMemory:         'Chat Memory',
+  chatMemoryHint:     'Forget everything Mutsumi has learned about you and start fresh.',
+  clearMemory:        'Clear memory',
+  clearMemoryConfirm: 'Tap again to confirm',
+  clearMemoryDoneMsg: 'Memory cleared.',
+
   // ── Pomodoro badge ────────────────────────────────────────────────
   pomFocus: 'Focus',
   pomBreak: 'Break',

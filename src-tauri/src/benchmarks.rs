@@ -25,7 +25,7 @@ use rusqlite::Connection;
 
 use crate::chat::extraction::{self, extract_memory_tool, EXTRACTION_SYSTEM};
 use crate::chat::reflection::{self, record_insight_tool, REFLECTION_SYSTEM};
-use crate::db::memory::{self, MemoryKind, NewMemory, RetrievalWeights};
+use crate::db::memory::{self, MemoryKind, MemorySubject, NewMemory, RetrievalWeights};
 use crate::db::{now, open_conn};
 use crate::services::qwen::{config_from_env, ChatMessage, ChatOptions, QwenClient};
 
@@ -91,6 +91,7 @@ fn seed_random(conn: &Connection, n: usize) {
                 content: format!("用户的第 {i} 条记忆，关于一些日常偏好与习惯。"),
                 importance: 0.5,
                 embedding: Some(random_embedding(i as u64 + 1)),
+                subject: MemorySubject::User,
             },
             ts,
         )
@@ -236,6 +237,7 @@ async fn bench_retrieval_accuracy() {
                 content: facts[i].clone(),
                 importance: 0.5,
                 embedding: Some(emb.clone()),
+                subject: MemorySubject::User,
             },
             now(),
         )
@@ -397,6 +399,7 @@ async fn bench_long_term_consistency() {
                 content: facts[i].clone(),
                 importance: 0.5,
                 embedding: Some(fact_emb[i].clone()),
+                subject: MemorySubject::User,
             },
             now() - 30 * DAY,
         )
@@ -411,6 +414,7 @@ async fn bench_long_term_consistency() {
                     content: facts[d].clone(),
                     importance: 0.5,
                     embedding: Some(fact_emb[d].clone()),
+                    subject: MemorySubject::User,
                 },
                 now(),
             )

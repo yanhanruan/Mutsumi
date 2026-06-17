@@ -12,17 +12,20 @@
 //! Silent memory extraction (Pipeline B) and reflection (Pipeline C) build on
 //! this same retrieval/assembly machinery in later phases.
 
+#[cfg(test)]
+mod eval;
 pub(crate) mod extraction;
 mod prompt;
 pub mod reflection;
 
+use std::sync::Mutex;
 use std::time::Duration;
 
 use serde::Serialize;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, State};
 
-use crate::db::memory::{self, RetrievalWeights};
+use crate::db::memory::{self, MemorySubject, RetrievalWeights};
 use crate::db::{now, state, Db};
 use crate::http::ApiError;
 use crate::persona;
@@ -30,8 +33,43 @@ use crate::search::{self, trigger, SearchState};
 use crate::services::qwen::{ChatMessage, ChatOptions, QwenClient};
 use crate::services::QwenState;
 
-/// How many memories to inject into the prompt per turn.
-const MEMORY_TOP_K: usize = 6;
+use extraction::Exchange;
+
+/// How many user-facts to inject into the prompt per turn.
+const MEMORY_TOP_K: usize = 5;
+/// How many of Mutsumi's own memories to inject per turn (kept smaller).
+const SELF_MEMORY_TOP_K: usize = 3;
+
+/// Buffer this many turns before running one batched extraction pass. Trades a
+/// little memory freshness for ~Nx fewer extraction LLM calls. The remainder is
+/// flushed when the chat panel closes (`chat_flush_memory`).
+const EXTRACT_BATCH_TURNS: usize = 6;
+
+/// Managed state: exchanges accumulated since the last extraction pass.
+pub struct ChatBuffer(Mutex<Vec<Exchange>>);
+
+impl ChatBuffer {
+    pub fn new() -> Self {
+        ChatBuffer(Mutex::new(Vec::new()))
+    }
+}
+
+impl Default for ChatBuffer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Chat options for the user-facing turn. Enables DashScope's built-in web search
+/// so in-world factual questions (band rosters, dates, real events) are grounded
+/// rather than hallucinated. It is model-gated — Qwen only actually searches when
+/// it judges it needs to — so casual/emotional turns pay no extra latency.
+fn turn_options() -> ChatOptions {
+    ChatOptions {
+        enable_search: true,
+        ..Default::default()
+    }
+}
 
 /// Hard ceiling on the whole search step. If exceeded, the turn proceeds with
 /// no web context rather than making the user wait.
@@ -105,19 +143,28 @@ async fn build_messages(
     let (search_context, embed_result) = tokio::join!(search_fut, qwen.embed(message));
     let query_embedding = embed_result?;
 
-    let (memories, relationship, profile) = {
+    // One timestamp for both retrieval scoring and the prompt's recency labels.
+    let ts = now();
+    let weights = RetrievalWeights::default();
+    let (memories, self_memories, relationship, profile) = {
         let conn = db.0.lock().map_err(db_err)?;
-        let memories = memory::search(
+        // User-facts and Mutsumi's own memories are retrieved separately so both
+        // surface (a turn about the user's job won't crowd out her promises).
+        let memories =
+            memory::search_subject(&conn, &query_embedding, MemorySubject::User, MEMORY_TOP_K, weights, ts)
+                .map_err(db_err)?;
+        let self_memories = memory::search_subject(
             &conn,
             &query_embedding,
-            MEMORY_TOP_K,
-            RetrievalWeights::default(),
-            now(),
+            MemorySubject::Mutsumi,
+            SELF_MEMORY_TOP_K,
+            weights,
+            ts,
         )
         .map_err(db_err)?;
         let relationship = state::get_relationship(&conn).map_err(db_err)?;
         let profile = state::all_profile(&conn).map_err(db_err)?;
-        (memories, relationship, profile)
+        (memories, self_memories, relationship, profile)
     };
 
     let base = persona::base_system_prompt();
@@ -127,9 +174,11 @@ async fn build_messages(
         profile: &profile,
         relationship: &relationship,
         memories: &memories,
+        self_memories: &self_memories,
         search_context: search_context.as_deref(),
         history,
         user_input: message,
+        now: ts,
     }))
 }
 
@@ -151,8 +200,19 @@ pub async fn chat_send(
     let history = history.unwrap_or_default();
 
     let messages = build_messages(&qwen.0, &db, &search, &message, &locale, &history).await?;
-    let completion = qwen.0.chat(&messages, None, ChatOptions::default()).await?;
+    let completion = qwen.0.chat(&messages, None, turn_options()).await?;
     Ok(completion.message.content.unwrap_or_default())
+}
+
+/// Tauri command: wipe all learned memory + dynamic user state (the "clear
+/// memory" reset). Returns how many memory rows were removed.
+#[tauri::command]
+pub async fn chat_clear_memory(db: State<'_, Db>) -> Result<usize, ChatError> {
+    let conn = db.0.lock().map_err(db_err)?;
+    let removed = memory::clear_all(&conn).map_err(db_err)?;
+    state::reset(&conn).map_err(db_err)?;
+    log::info!("chat memory cleared: {removed} memorie(s) removed + state reset");
+    Ok(removed)
 }
 
 /// Send a chat message and stream Mutsumi's reply token-by-token over `on_event`.
@@ -166,6 +226,7 @@ pub async fn chat_stream(
     qwen: State<'_, QwenState>,
     db: State<'_, Db>,
     search: State<'_, SearchState>,
+    buffer: State<'_, ChatBuffer>,
     message: String,
     locale: Option<String>,
     history: Option<Vec<ChatMessage>>,
@@ -178,7 +239,7 @@ pub async fn chat_stream(
 
     let completion = qwen
         .0
-        .chat_stream(&messages, None, ChatOptions::default(), |delta| {
+        .chat_stream(&messages, None, turn_options(), |delta| {
             // Send failures mean the frontend dropped the channel — ignore and
             // let the stream finish (or the connection will simply be unused).
             let _ = on_event.send(ChatEvent::Delta {
@@ -192,8 +253,62 @@ pub async fn chat_stream(
         content: reply.clone(),
     });
 
-    // Pipeline B: silent memory extraction, fire-and-forget so it never delays
-    // or alters the reply the user just received.
-    tauri::async_runtime::spawn(extraction::extract_and_store(app, message, reply));
+    // Pipeline B: buffer the exchange; run one batched extraction per
+    // EXTRACT_BATCH_TURNS (the rest is flushed on chat close). The lock is
+    // released before any await — we only spawn the (fire-and-forget) extraction.
+    let ready = {
+        let mut buf = buffer.0.lock().map_err(db_err)?;
+        buffer_push(&mut buf, Exchange { user: message, reply }, EXTRACT_BATCH_TURNS)
+    };
+    if let Some(batch) = ready {
+        tauri::async_runtime::spawn(extraction::extract_and_store_batch(app, batch));
+    }
     Ok(())
+}
+
+/// Push `ex` onto the buffer; return a full batch to extract once the buffer
+/// reaches `batch_size`, else `None`. Pure, so the batching trigger is unit-tested.
+fn buffer_push(buf: &mut Vec<Exchange>, ex: Exchange, batch_size: usize) -> Option<Vec<Exchange>> {
+    buf.push(ex);
+    (buf.len() >= batch_size).then(|| buf.drain(..).collect())
+}
+
+/// Tauri command: flush any buffered exchanges through extraction now. Called by
+/// the frontend when the chat panel closes so a short conversation's memories
+/// aren't stranded below the batch threshold.
+#[tauri::command]
+pub async fn chat_flush_memory(
+    app: AppHandle,
+    buffer: State<'_, ChatBuffer>,
+) -> Result<(), ChatError> {
+    let batch: Vec<Exchange> = {
+        let mut buf = buffer.0.lock().map_err(db_err)?;
+        buf.drain(..).collect()
+    };
+    if !batch.is_empty() {
+        tauri::async_runtime::spawn(extraction::extract_and_store_batch(app, batch));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ex(u: &str) -> Exchange {
+        Exchange { user: u.into(), reply: "……".into() }
+    }
+
+    #[test]
+    fn buffer_push_drains_only_at_batch_size() {
+        let mut buf = Vec::new();
+        assert!(buffer_push(&mut buf, ex("1"), 3).is_none());
+        assert!(buffer_push(&mut buf, ex("2"), 3).is_none());
+        let batch = buffer_push(&mut buf, ex("3"), 3).expect("batch ready at size 3");
+        assert_eq!(batch.len(), 3);
+        assert!(buf.is_empty(), "buffer drained after a batch");
+        // Next cycle starts fresh.
+        assert!(buffer_push(&mut buf, ex("4"), 3).is_none());
+        assert_eq!(buf.len(), 1);
+    }
 }

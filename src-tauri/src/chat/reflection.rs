@@ -13,7 +13,7 @@
 use serde::Deserialize;
 use tauri::{AppHandle, Manager};
 
-use crate::db::memory::{self, MemoryKind, NewMemory};
+use crate::db::memory::{self, MemoryKind, MemorySubject, NewMemory};
 use crate::db::{now, Db};
 use crate::http::ApiError;
 use crate::services::qwen::{ChatMessage, ChatOptions, QwenClient, Tool, ToolCall};
@@ -174,6 +174,7 @@ async fn run(app: &AppHandle, min_count: usize) -> Result<(), ApiError> {
                 content: insight.content.clone(),
                 importance: insight.importance.clamp(0.0, 1.0),
                 embedding: Some(embedding),
+                subject: MemorySubject::User, // insights are about the user
             },
             ts,
         );

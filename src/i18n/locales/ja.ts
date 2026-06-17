@@ -65,6 +65,13 @@ export const ja: Translations = {
     baidu:      'Baidu',
   },
 
+  // ── チャットの記憶リセット ────────────────────────────────────────
+  chatMemory:         'チャットの記憶',
+  chatMemoryHint:     '睦が覚えたあなたのことをすべて忘れ、最初からやり直します。',
+  clearMemory:        '記憶を消去',
+  clearMemoryConfirm: 'もう一度押して確定',
+  clearMemoryDoneMsg: '記憶を消去しました。',
+
   // ── Pomodoro badge ────────────────────────────────────────────────
   pomFocus: '集中',
   pomBreak: '休憩',
