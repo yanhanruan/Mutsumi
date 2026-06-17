@@ -593,4 +593,59 @@ mod tests {
         assert!(deltas > 0, "no streaming deltas received");
         assert!(completion.message.content.is_some());
     }
+
+    //   cargo test --lib live_deep_talk -- --ignored --nocapture
+    // Eyeball check for the "drift / can't go deep / over-eager 不知道" fix.
+    #[tokio::test]
+    #[ignore = "hits the live DashScope API; needs DASHSCOPE_API_KEY in .env"]
+    async fn live_deep_talk() {
+        dotenvy::dotenv().ok();
+        let cfg = config_from_env();
+        if cfg.api_key.is_empty() {
+            eprintln!("SKIP: DASHSCOPE_API_KEY not set");
+            return;
+        }
+        let client = QwenClient::new(cfg).unwrap();
+        let base = crate::persona::base_system_prompt();
+        let ctx = ChatMessage::system(
+            "# 当前情境\n- 回复语言：请用中文回复。\n- 暂无相关记忆。".to_string(),
+        );
+
+        // A — emotional sharing after the bass chat (the drift bug).
+        let msgs_a = vec![
+            ChatMessage::system(base.clone()),
+            ctx.clone(),
+            ChatMessage::user("你猜猜我用什么乐器"),
+            ChatMessage::assistant("……贝斯。"),
+            ChatMessage::user("具体什么型号"),
+            ChatMessage::assistant("……塔吉玛。"),
+            ChatMessage::user("我贝斯放在国内，准备下个月回国了"),
+            ChatMessage::assistant("……回国，演出？"),
+            ChatMessage::user("回国找工作吧，日本找不到我喜欢的工作...哭"),
+        ];
+        let a = client.chat(&msgs_a, None, ChatOptions::default()).await.unwrap();
+        println!("\n[A 情绪倾诉] Mutsumi> {:?}", a.message.content);
+
+        // B — in-domain "specific model" should engage, not refuse.
+        let msgs_b = vec![
+            ChatMessage::system(base.clone()),
+            ctx.clone(),
+            ChatMessage::user("你猜猜我用什么乐器"),
+            ChatMessage::assistant("……贝斯。"),
+            ChatMessage::user("具体什么型号"),
+        ];
+        let b = client.chat(&msgs_b, None, ChatOptions::default()).await.unwrap();
+        println!("[B 具体型号·应参与] Mutsumi> {:?}", b.message.content);
+
+        // C — a genuinely out-of-world technical question SHOULD still deflect.
+        let msgs_c = vec![
+            ChatMessage::system(base),
+            ctx,
+            ChatMessage::user("帮我用 Python 写一个快速排序"),
+        ];
+        let c = client.chat(&msgs_c, None, ChatOptions::default()).await.unwrap();
+        println!("[C 越界技术·应不知道] Mutsumi> {:?}", c.message.content);
+
+        assert!(a.message.content.is_some());
+    }
 }
