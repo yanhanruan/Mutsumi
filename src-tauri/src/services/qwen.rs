@@ -253,6 +253,11 @@ struct EmbeddingData {
 // ── Client ──────────────────────────────────────────────────────────
 
 /// API-specific client for Qwen / DashScope, layered over [`HttpClient`].
+///
+/// Cheap to `Clone` — the HTTP client (and its connection pool) sits behind an
+/// `Arc` — so background tasks can own a copy without holding a state guard
+/// across `.await`s.
+#[derive(Clone)]
 pub struct QwenClient {
     http: Arc<HttpClient>,
     chat_model: String,

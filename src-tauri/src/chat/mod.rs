@@ -12,11 +12,12 @@
 //! Silent memory extraction (Pipeline B) and reflection (Pipeline C) build on
 //! this same retrieval/assembly machinery in later phases.
 
+mod extraction;
 mod prompt;
 
 use serde::Serialize;
 use tauri::ipc::Channel;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use crate::db::memory::{self, RetrievalWeights};
 use crate::db::{now, state, Db};
@@ -130,6 +131,7 @@ pub async fn chat_send(
 /// the rejected-promise path of the frontend `invoke`.
 #[tauri::command]
 pub async fn chat_stream(
+    app: AppHandle,
     qwen: State<'_, QwenState>,
     db: State<'_, Db>,
     message: String,
@@ -153,8 +155,13 @@ pub async fn chat_stream(
         })
         .await?;
 
+    let reply = completion.message.content.unwrap_or_default();
     let _ = on_event.send(ChatEvent::Done {
-        content: completion.message.content.unwrap_or_default(),
+        content: reply.clone(),
     });
+
+    // Pipeline B: silent memory extraction, fire-and-forget so it never delays
+    // or alters the reply the user just received.
+    tauri::async_runtime::spawn(extraction::extract_and_store(app, message, reply));
     Ok(())
 }
