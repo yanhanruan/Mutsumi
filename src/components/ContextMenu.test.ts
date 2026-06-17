@@ -98,11 +98,11 @@ describe('ContextMenu (vertical glass bubble panel)', () => {
 
   // ── Bubble count & structure ─────────────────────────────────────────
 
-  it('renders exactly 6 bubbles', async () => {
+  it('renders exactly 7 bubbles', async () => {
     const w = mountMenu()
     await w.vm.open()
-    expect(w.findAll('.bubble-wrap')).toHaveLength(6)
-    expect(w.findAll('.bubble')).toHaveLength(6)
+    expect(w.findAll('.bubble-wrap')).toHaveLength(7)
+    expect(w.findAll('.bubble')).toHaveLength(7)
     w.unmount()
   })
 
@@ -110,7 +110,7 @@ describe('ContextMenu (vertical glass bubble panel)', () => {
     const w = mountMenu()
     await w.vm.open()
     const icons = w.findAll('.bubble-icon').map(el => el.text().trim())
-    expect(icons).toHaveLength(6)
+    expect(icons).toHaveLength(7)
     icons.forEach(icon => expect(icon.length).toBeGreaterThan(0))
     w.unmount()
   })
@@ -146,6 +146,7 @@ describe('ContextMenu (vertical glass bubble panel)', () => {
       'Sleep',
       'Fast Learning',
       'Tarot Reading',
+      'Chat',
       'Hide App',
     ]
     const wraps = w.findAll('.bubble-wrap')
@@ -171,7 +172,7 @@ describe('ContextMenu (vertical glass bubble panel)', () => {
   })
 
   it('emits the correct action for each bubble', async () => {
-    const expected: MenuAction[] = ['pat_head', 'feed', 'sleep', 'fast_learning', 'tarot', 'hide']
+    const expected: MenuAction[] = ['pat_head', 'feed', 'sleep', 'fast_learning', 'tarot', 'chat', 'hide']
     for (let i = 0; i < expected.length; i++) {
       const w = mountMenu()
       await w.vm.open()
@@ -230,7 +231,7 @@ describe('ContextMenu (vertical glass bubble panel)', () => {
     const w = mountMenu()
     await w.vm.open()
     const wraps = w.findAll('.bubble-wrap')
-    expect(wraps).toHaveLength(6)
+    expect(wraps).toHaveLength(7)
     wraps.forEach(wrap => {
       expect(wrap.classes()).toContain('pet-ui-overlay')
     })
@@ -308,10 +309,10 @@ describe('ContextMenu (vertical glass bubble panel)', () => {
 
   // ── Style modifiers ──────────────────────────────────────────────────
 
-  it('hide bubble (index 5) carries the .bubble--hide class', async () => {
+  it('hide bubble (index 6) carries the .bubble--hide class', async () => {
     const w = mountMenu()
     await w.vm.open()
-    const hideBubble = w.findAll('.bubble').at(5)
+    const hideBubble = w.findAll('.bubble').at(6)
     expect(hideBubble?.classes()).toContain('bubble--hide')
     w.unmount()
   })
@@ -320,7 +321,7 @@ describe('ContextMenu (vertical glass bubble panel)', () => {
     const w = mountMenu()
     await w.vm.open()
     const bubbles = w.findAll('.bubble')
-    bubbles.slice(0, 5).forEach(b => {
+    bubbles.slice(0, 6).forEach(b => {
       expect(b.classes()).not.toContain('bubble--hide')
     })
     w.unmount()

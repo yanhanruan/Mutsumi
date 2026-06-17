@@ -66,6 +66,7 @@ export const zh: Translations = {
     sleep:         '睡觉',
     fast_learning: '快速学习',
     tarot:         '塔罗占卜',
+    chat:          '聊天',
     hide:          '隐藏应用',
   },
 
@@ -112,5 +113,16 @@ export const zh: Translations = {
     today:        '今日卡牌',
     history:      '最近',
     empty:        '还没有占卜记录。',
+  },
+
+  // ── Chat overlay UI chrome ────────────────────────────────────────
+  chat: {
+    title:       '和睦聊天',
+    placeholder: '说点什么……',
+    send:        '发送',
+    thinking:    '……',
+    empty:       '她在听着。',
+    close:       '关闭',
+    error:       '出了点问题。',
   },
 }

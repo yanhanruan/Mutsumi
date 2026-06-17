@@ -66,6 +66,7 @@ export const en: Translations = {
     sleep:         'Sleep',
     fast_learning: 'Fast Learning',
     tarot:         'Tarot Reading',
+    chat:          'Chat',
     hide:          'Hide App',
   },
 
@@ -112,5 +113,16 @@ export const en: Translations = {
     today:        "Today's Card",
     history:      'Recent',
     empty:        'No readings yet.',
+  },
+
+  // ── Chat overlay UI chrome ────────────────────────────────────────
+  chat: {
+    title:       'Chat with Mutsumi',
+    placeholder: 'Say something…',
+    send:        'Send',
+    thinking:    '…',
+    empty:       'She is listening.',
+    close:       'Close',
+    error:       'Something went wrong.',
   },
 }

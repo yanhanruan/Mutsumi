@@ -206,6 +206,29 @@ pub struct ChatCompletion {
     pub finish_reason: Option<String>,
 }
 
+// ── Chat: streaming (SSE) chunk shapes ──────────────────────────────
+//
+// In streaming mode the endpoint emits `data: {json}\n` lines (OpenAI SSE),
+// each carrying an incremental `delta`, terminated by `data: [DONE]`.
+
+#[derive(Debug, Deserialize)]
+struct ChatStreamChunk {
+    choices: Vec<StreamChoice>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StreamChoice {
+    #[serde(default)]
+    delta: Delta,
+    finish_reason: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct Delta {
+    #[serde(default)]
+    content: Option<String>,
+}
+
 // ── Embeddings: request / response ──────────────────────────────────
 
 #[derive(Debug, Serialize)]
@@ -291,6 +314,72 @@ impl QwenClient {
         Ok(ChatCompletion {
             message: choice.message,
             finish_reason: choice.finish_reason,
+        })
+    }
+
+    /// Streaming chat completion.
+    ///
+    /// Calls `on_delta` with each incremental content token as it arrives, then
+    /// returns the fully-assembled completion once the stream ends. SSE framing
+    /// (`data:` lines split across network chunks) is reassembled here via a
+    /// pending-line buffer.
+    pub async fn chat_stream<F>(
+        &self,
+        messages: &[ChatMessage],
+        tools: Option<&[Tool]>,
+        options: ChatOptions,
+        mut on_delta: F,
+    ) -> Result<ChatCompletion, ApiError>
+    where
+        F: FnMut(&str),
+    {
+        let request = ChatRequest {
+            model: &self.chat_model,
+            messages,
+            stream: true,
+            tools,
+            temperature: options.temperature,
+            enable_search: options.enable_search.then_some(true),
+        };
+
+        let mut resp = self.http.post_json_streaming(CHAT_PATH, &request).await?;
+        let mut pending = String::new(); // buffer for a not-yet-complete trailing line
+        let mut full = String::new();
+        let mut finish_reason = None;
+
+        while let Some(chunk) = resp.chunk().await? {
+            pending.push_str(&String::from_utf8_lossy(&chunk));
+            // Drain every complete line; leave any partial tail buffered.
+            while let Some(nl) = pending.find('\n') {
+                let line: String = pending.drain(..=nl).collect();
+                let line = line.trim();
+                let Some(payload) = line.strip_prefix("data:") else {
+                    continue;
+                };
+                let payload = payload.trim();
+                if payload.is_empty() || payload == "[DONE]" {
+                    continue;
+                }
+                // A malformed chunk shouldn't abort the stream — skip it.
+                if let Ok(parsed) = serde_json::from_str::<ChatStreamChunk>(payload) {
+                    if let Some(choice) = parsed.choices.into_iter().next() {
+                        if let Some(content) = choice.delta.content {
+                            if !content.is_empty() {
+                                full.push_str(&content);
+                                on_delta(&content);
+                            }
+                        }
+                        if choice.finish_reason.is_some() {
+                            finish_reason = choice.finish_reason;
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(ChatCompletion {
+            message: ChatMessage::assistant(full),
+            finish_reason,
         })
     }
 
@@ -406,5 +495,78 @@ mod tests {
         data.sort_by_key(|d| d.index);
         assert_eq!(data[0].embedding, vec![0.9, 0.8]);
         assert_eq!(data[1].embedding, vec![0.1, 0.2]);
+    }
+
+    // ── Live smoke test (Phase 2 verification) ──────────────────────
+    //
+    // Hits the real DashScope API, so it is `#[ignore]`d and must be run
+    // explicitly. It exercises the actual persona prompt + embeddings + chat —
+    // i.e. the real Pipeline A path minus Tauri/db wiring (empty memory set).
+    //
+    //   cargo test --lib live_embed_and_chat -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore = "hits the live DashScope API; needs DASHSCOPE_API_KEY in .env"]
+    async fn live_embed_and_chat() {
+        dotenvy::dotenv().ok();
+        let cfg = config_from_env();
+        assert!(!cfg.api_key.is_empty(), "DASHSCOPE_API_KEY not set in .env");
+        let client = QwenClient::new(cfg).unwrap();
+
+        // 1. Embedding — confirm dimension matches what the memory store expects.
+        let emb = client.embed("你好").await.expect("embed failed");
+        println!("embed dim = {}", emb.len());
+        assert_eq!(emb.len(), DEFAULT_EMBED_DIMENSIONS as usize);
+
+        // 2. Chat with the real persona prompt (empty-memory dynamic block).
+        let base = crate::persona::base_system_prompt();
+        let messages = vec![
+            ChatMessage::system(base),
+            ChatMessage::system(
+                "# 当前情境\n- 回复语言：请用中文回复。\n- 暂无相关记忆。".to_string(),
+            ),
+            ChatMessage::user("你今天在园艺部种了什么？".to_string()),
+        ];
+        let completion = client
+            .chat(&messages, None, ChatOptions::default())
+            .await
+            .expect("chat failed");
+        println!("Mutsumi> {:?}", completion.message.content);
+        println!("finish_reason = {:?}", completion.finish_reason);
+        assert!(completion.message.content.is_some());
+    }
+
+    //   cargo test --lib live_chat_stream -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore = "hits the live DashScope API; needs DASHSCOPE_API_KEY in .env"]
+    async fn live_chat_stream() {
+        use std::io::Write;
+        dotenvy::dotenv().ok();
+        let cfg = config_from_env();
+        assert!(!cfg.api_key.is_empty(), "DASHSCOPE_API_KEY not set in .env");
+        let client = QwenClient::new(cfg).unwrap();
+
+        let base = crate::persona::base_system_prompt();
+        let messages = vec![
+            ChatMessage::system(base),
+            ChatMessage::system(
+                "# 当前情境\n- 回复语言：请用中文回复。\n- 暂无相关记忆。".to_string(),
+            ),
+            ChatMessage::user("最近怎么样？".to_string()),
+        ];
+
+        let mut deltas = 0usize;
+        print!("Mutsumi(stream)> ");
+        let _ = std::io::stdout().flush();
+        let completion = client
+            .chat_stream(&messages, None, ChatOptions::default(), |delta| {
+                deltas += 1;
+                print!("{delta}");
+                let _ = std::io::stdout().flush();
+            })
+            .await
+            .expect("chat_stream failed");
+        println!("\n[{} deltas] finish_reason = {:?}", deltas, completion.finish_reason);
+        assert!(deltas > 0, "no streaming deltas received");
+        assert!(completion.message.content.is_some());
     }
 }

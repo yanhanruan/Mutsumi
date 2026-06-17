@@ -25,11 +25,15 @@ tauri = { version = "2.11.2", features = ["tray-icon", "image-png"] }
 tauri-plugin-log = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-single-instance = "2"
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "native-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "native-tls", "stream"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 thiserror = "2"
 dotenvy = "0.15"
 rusqlite = { version = "0.32", features = ["bundled"] }
+
+# Test-only async runtime for the (ignored) live API smoke tests.
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 # ── Release size optimizations ─────────────────────────────────────
 [profile.release]

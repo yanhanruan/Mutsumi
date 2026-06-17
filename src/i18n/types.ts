@@ -72,6 +72,8 @@ export interface Translations {
     fast_learning: string
     /** Opens the in-pet tarot overlay (frontend-only). */
     tarot:         string
+    /** Opens the in-pet chat overlay (frontend-only). */
+    chat:          string
     /** Task 5: hide the main window to tray. */
     hide:          string
   }
@@ -99,6 +101,17 @@ export interface Translations {
     today:        string   // "card of the day" badge
     history:      string   // history toggle / panel heading
     empty:        string   // empty-history placeholder
+  }
+
+  // ── Chat overlay UI chrome ──────────────────────────────────────
+  chat: {
+    title:       string   // panel header
+    placeholder: string   // text-input placeholder
+    send:        string   // send-button title
+    thinking:    string   // status shown while awaiting the first token
+    empty:       string   // empty-conversation hint
+    close:       string   // close-button title
+    error:       string   // generic failure line
   }
 
   // ── Mini music controller ───────────────────────────────────────

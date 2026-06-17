@@ -66,6 +66,7 @@ export const ja: Translations = {
     sleep:         'おやすみ',
     fast_learning: '速習モード',
     tarot:         'タロット占い',
+    chat:          'おしゃべり',
     hide:          'アプリを隠す',
   },
 
@@ -112,5 +113,16 @@ export const ja: Translations = {
     today:        '今日のカード',
     history:      '最近',
     empty:        'まだ占いの記録がありません。',
+  },
+
+  // ── Chat overlay UI chrome ────────────────────────────────────────
+  chat: {
+    title:       '睦とおしゃべり',
+    placeholder: '話しかけてみて…',
+    send:        '送信',
+    thinking:    '……',
+    empty:       '聞いているよ。',
+    close:       '閉じる',
+    error:       '問題が発生しました。',
   },
 }

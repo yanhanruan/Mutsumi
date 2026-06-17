@@ -104,6 +104,25 @@ impl HttpClient {
         Ok(bytes.to_vec())
     }
 
+    /// POST a JSON body and return the intercepted streaming response for the
+    /// caller to consume incrementally (e.g. via `Response::chunk`).
+    ///
+    /// Status interception runs *before* returning, so a non-2xx is surfaced as
+    /// [`ApiError::Api`] up front. Provider-specific framing (Server-Sent Events,
+    /// chunked JSON, …) is the caller's concern — e.g. Qwen's SSE parsing lives
+    /// in the service layer.
+    pub async fn post_json_streaming<Req>(
+        &self,
+        path: &str,
+        body: &Req,
+    ) -> Result<reqwest::Response, ApiError>
+    where
+        Req: Serialize + ?Sized,
+    {
+        let resp = self.inner.post(self.url(path)).json(body).send().await?;
+        Self::intercept(resp).await
+    }
+
     /// Unified response interceptor: pass 2xx through untouched, convert
     /// everything else into [`ApiError::Api`] with the body attached for context.
     /// Centralizing this means individual service calls never repeat status checks.
