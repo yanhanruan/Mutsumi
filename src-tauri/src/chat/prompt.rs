@@ -25,15 +25,21 @@ pub struct PromptContext<'a> {
     pub profile: &'a [(String, String)],
     pub relationship: &'a RelationshipState,
     pub memories: &'a [ScoredMemory],
+    /// Optional real-time web-search context (labeled block) for this turn.
+    pub search_context: Option<&'a str>,
     pub history: &'a [ChatMessage],
     pub user_input: &'a str,
 }
 
 /// Assemble the full ordered message list for a chat turn.
 pub fn assemble(ctx: &PromptContext) -> Vec<ChatMessage> {
-    let mut messages = Vec::with_capacity(ctx.history.len() + 3);
+    let mut messages = Vec::with_capacity(ctx.history.len() + 4);
     messages.push(ChatMessage::system(ctx.base_persona.to_string()));
     messages.push(ChatMessage::system(dynamic_context(ctx)));
+    // Real-time search results, if any, as their own labeled context message.
+    if let Some(search) = ctx.search_context {
+        messages.push(ChatMessage::system(search.to_string()));
+    }
     messages.extend(ctx.history.iter().cloned());
     messages.push(ChatMessage::user(ctx.user_input.to_string()));
     messages
@@ -114,6 +120,7 @@ mod tests {
             profile: &[],
             relationship: rel,
             memories: mems,
+            search_context: None,
             history: hist,
             user_input: "在吗",
         }
@@ -150,6 +157,26 @@ mod tests {
         assert!(dynamic.contains("preference"));
         assert!(dynamic.contains("好感度 30"));
         assert!(dynamic.contains("平静"));
+    }
+
+    #[test]
+    fn search_context_injected_as_system_message() {
+        let rel = RelationshipState::default();
+        let mut ctx = ctx_with(&rel, &[], &[]);
+        ctx.search_context = Some("以下是检索到的实时数据……\n【搜索：天气】东京 晴 20C");
+        let msgs = assemble(&ctx);
+        // persona, dynamic, search, user
+        assert_eq!(msgs.len(), 4);
+        assert_eq!(msgs[2].role, "system");
+        assert!(msgs[2].content.as_deref().unwrap().contains("东京 晴"));
+        assert_eq!(msgs[3].role, "user");
+    }
+
+    #[test]
+    fn no_search_context_means_no_extra_message() {
+        let rel = RelationshipState::default();
+        let msgs = assemble(&ctx_with(&rel, &[], &[]));
+        assert_eq!(msgs.len(), 3); // persona, dynamic, user — no search block
     }
 
     #[test]

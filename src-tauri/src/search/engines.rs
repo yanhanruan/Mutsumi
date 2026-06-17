@@ -1,0 +1,238 @@
+//! Per-engine search-result-page (SERP) scraping.
+//!
+//! Each engine maps to a GET endpoint + query-param name and a CSS-selector
+//! based parser that turns the result HTML into `RawResult`s. Parsing is pure +
+//! synchronous (no `await`), so the non-`Send` `scraper::Html` never crosses an
+//! await point. Missing selectors fail gracefully (empty vec), never panic.
+//!
+//! Selectors target the current desktop layouts; engines change markup over
+//! time, so callers must tolerate an empty result and fall back.
+
+use scraper::{Html, Selector};
+
+use super::SearchEngine;
+
+/// A single parsed search hit (pre body-extraction).
+#[derive(Debug, Clone, PartialEq)]
+pub struct RawResult {
+    pub title: String,
+    pub url: String,
+    pub snippet: String,
+}
+
+/// GET endpoint + query-parameter name for an engine.
+pub fn endpoint(engine: SearchEngine) -> (&'static str, &'static str) {
+    match engine {
+        SearchEngine::BingCn => ("https://cn.bing.com/search", "q"),
+        SearchEngine::Bing => ("https://www.bing.com/search", "q"),
+        SearchEngine::Google => ("https://www.google.com/search", "q"),
+        SearchEngine::Baidu => ("https://www.baidu.com/s", "wd"),
+        SearchEngine::DuckDuckGo => ("https://html.duckduckgo.com/html/", "q"),
+    }
+}
+
+/// Parse a SERP HTML document into results for the given engine.
+pub fn parse_serp(engine: SearchEngine, html: &str) -> Vec<RawResult> {
+    let doc = Html::parse_document(html);
+    match engine {
+        SearchEngine::BingCn | SearchEngine::Bing => parse_bing(&doc),
+        SearchEngine::Google => parse_google(&doc),
+        SearchEngine::Baidu => parse_baidu(&doc),
+        SearchEngine::DuckDuckGo => parse_ddg(&doc),
+    }
+}
+
+/// Compile a selector, treating an invalid one as "matches nothing".
+fn sel(s: &str) -> Selector {
+    Selector::parse(s).unwrap_or_else(|_| Selector::parse("nonexistent-xyz").unwrap())
+}
+
+fn text_of(el: &scraper::ElementRef) -> String {
+    collapse_ws(&el.text().collect::<String>())
+}
+
+fn collapse_ws(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+// ── Bing (CN + international share the `b_algo` layout) ──────────────
+fn parse_bing(doc: &Html) -> Vec<RawResult> {
+    let item = sel("li.b_algo");
+    let title_a = sel("h2 a");
+    let caption = sel(".b_caption p, p");
+    let mut out = Vec::new();
+    for el in doc.select(&item) {
+        let Some(a) = el.select(&title_a).next() else { continue };
+        let url = a.value().attr("href").unwrap_or_default().to_string();
+        if url.is_empty() {
+            continue;
+        }
+        out.push(RawResult {
+            title: text_of(&a),
+            url,
+            snippet: el.select(&caption).next().map(|p| text_of(&p)).unwrap_or_default(),
+        });
+    }
+    out
+}
+
+// ── Google ──────────────────────────────────────────────────────────
+fn parse_google(doc: &Html) -> Vec<RawResult> {
+    let item = sel("div.g, div.tF2Cxc");
+    let title_h = sel("h3");
+    let link = sel("a");
+    let snippet = sel(".VwiC3b, .IsZvec, div[data-sncf] span");
+    let mut out = Vec::new();
+    for el in doc.select(&item) {
+        let Some(h) = el.select(&title_h).next() else { continue };
+        let Some(a) = el.select(&link).next() else { continue };
+        let url = a.value().attr("href").unwrap_or_default().to_string();
+        if !url.starts_with("http") {
+            continue;
+        }
+        out.push(RawResult {
+            title: text_of(&h),
+            url,
+            snippet: el.select(&snippet).next().map(|s| text_of(&s)).unwrap_or_default(),
+        });
+    }
+    out
+}
+
+// ── Baidu ───────────────────────────────────────────────────────────
+fn parse_baidu(doc: &Html) -> Vec<RawResult> {
+    let item = sel("div.result, div.c-container");
+    let title_a = sel("h3 a");
+    let snippet = sel(".c-abstract, [class*=content-right], .c-span-last");
+    let mut out = Vec::new();
+    for el in doc.select(&item) {
+        let Some(a) = el.select(&title_a).next() else { continue };
+        let url = a.value().attr("href").unwrap_or_default().to_string();
+        if url.is_empty() {
+            continue;
+        }
+        out.push(RawResult {
+            title: text_of(&a),
+            // Baidu links are redirectors (baidu.com/link?url=…); kept as-is —
+            // body extraction follows the redirect, and the URL is still shown.
+            url,
+            snippet: el.select(&snippet).next().map(|s| text_of(&s)).unwrap_or_default(),
+        });
+    }
+    out
+}
+
+// ── DuckDuckGo (html.duckduckgo.com) ────────────────────────────────
+fn parse_ddg(doc: &Html) -> Vec<RawResult> {
+    let item = sel("div.result, div.web-result");
+    let title_a = sel("a.result__a");
+    let snippet = sel(".result__snippet");
+    let mut out = Vec::new();
+    for el in doc.select(&item) {
+        let Some(a) = el.select(&title_a).next() else { continue };
+        let raw = a.value().attr("href").unwrap_or_default();
+        let url = ddg_real_url(raw);
+        if url.is_empty() {
+            continue;
+        }
+        out.push(RawResult {
+            title: text_of(&a),
+            url,
+            snippet: el.select(&snippet).next().map(|s| text_of(&s)).unwrap_or_default(),
+        });
+    }
+    out
+}
+
+/// DDG result hrefs are redirectors like `//duckduckgo.com/l/?uddg=<encoded>`.
+/// Pull the real target out of the `uddg` parameter (percent-decoded).
+fn ddg_real_url(href: &str) -> String {
+    if let Some(idx) = href.find("uddg=") {
+        let rest = &href[idx + 5..];
+        let enc = rest.split('&').next().unwrap_or("");
+        return percent_decode(enc);
+    }
+    if href.starts_with("http") {
+        href.to_string()
+    } else if href.starts_with("//") {
+        format!("https:{href}")
+    } else {
+        String::new()
+    }
+}
+
+/// Minimal percent-decoder (`%XX` + `+`), enough for URL query values.
+fn percent_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'%' if i + 2 < bytes.len() => match u8::from_str_radix(&s[i + 1..i + 3], 16) {
+                Ok(b) => {
+                    out.push(b);
+                    i += 3;
+                }
+                Err(_) => {
+                    out.push(bytes[i]);
+                    i += 1;
+                }
+            },
+            b'+' => {
+                out.push(b' ');
+                i += 1;
+            }
+            c => {
+                out.push(c);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_bing_layout() {
+        let html = r#"
+            <ol>
+              <li class="b_algo"><h2><a href="https://example.com/a">Title A</a></h2>
+                <div class="b_caption"><p>Snippet A here.</p></div></li>
+              <li class="b_algo"><h2><a href="https://example.com/b">Title B</a></h2>
+                <div class="b_caption"><p>Snippet B here.</p></div></li>
+            </ol>"#;
+        let r = parse_serp(SearchEngine::BingCn, html);
+        assert_eq!(r.len(), 2);
+        assert_eq!(r[0].title, "Title A");
+        assert_eq!(r[0].url, "https://example.com/a");
+        assert_eq!(r[0].snippet, "Snippet A here.");
+    }
+
+    #[test]
+    fn parses_ddg_and_decodes_redirect() {
+        let html = r#"
+            <div class="result">
+              <a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.org%2Fpage&rut=x">
+                Example Page</a>
+              <div class="result__snippet">A snippet.</div>
+            </div>"#;
+        let r = parse_serp(SearchEngine::DuckDuckGo, html);
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].url, "https://example.org/page");
+        assert_eq!(r[0].title, "Example Page");
+    }
+
+    #[test]
+    fn missing_selectors_yield_empty() {
+        assert!(parse_serp(SearchEngine::BingCn, "<html><body>nope</body></html>").is_empty());
+    }
+
+    #[test]
+    fn percent_decode_basics() {
+        assert_eq!(percent_decode("https%3A%2F%2Fa.com%2Fx"), "https://a.com/x");
+        assert_eq!(percent_decode("a+b"), "a b");
+    }
+}

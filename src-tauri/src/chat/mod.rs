@@ -24,6 +24,7 @@ use crate::db::memory::{self, RetrievalWeights};
 use crate::db::{now, state, Db};
 use crate::http::ApiError;
 use crate::persona;
+use crate::search::{self, trigger, SearchState};
 use crate::services::qwen::{ChatMessage, ChatOptions, QwenClient};
 use crate::services::QwenState;
 
@@ -71,10 +72,21 @@ pub enum ChatEvent {
 async fn build_messages(
     qwen: &QwenClient,
     db: &Db,
+    search: &SearchState,
     message: &str,
     locale: &str,
     history: &[ChatMessage],
 ) -> Result<Vec<ChatMessage>, ChatError> {
+    // Search-enhanced awareness: if the message looks time-sensitive, fetch
+    // live web context synchronously and inject it. Best-effort — empty on any
+    // failure, never blocking the turn.
+    let search_context = if trigger::needs_search(message) {
+        let results = search::search(&search.client, search.engine(), message).await;
+        (!results.is_empty()).then(|| search::format_context(message, &results))
+    } else {
+        None
+    };
+
     let query_embedding = qwen.embed(message).await?;
 
     let (memories, relationship, profile) = {
@@ -99,6 +111,7 @@ async fn build_messages(
         profile: &profile,
         relationship: &relationship,
         memories: &memories,
+        search_context: search_context.as_deref(),
         history,
         user_input: message,
     }))
@@ -113,6 +126,7 @@ async fn build_messages(
 pub async fn chat_send(
     qwen: State<'_, QwenState>,
     db: State<'_, Db>,
+    search: State<'_, SearchState>,
     message: String,
     locale: Option<String>,
     history: Option<Vec<ChatMessage>>,
@@ -120,7 +134,7 @@ pub async fn chat_send(
     let locale = locale.unwrap_or_else(|| "zh".into());
     let history = history.unwrap_or_default();
 
-    let messages = build_messages(&qwen.0, &db, &message, &locale, &history).await?;
+    let messages = build_messages(&qwen.0, &db, &search, &message, &locale, &history).await?;
     let completion = qwen.0.chat(&messages, None, ChatOptions::default()).await?;
     Ok(completion.message.content.unwrap_or_default())
 }
@@ -135,6 +149,7 @@ pub async fn chat_stream(
     app: AppHandle,
     qwen: State<'_, QwenState>,
     db: State<'_, Db>,
+    search: State<'_, SearchState>,
     message: String,
     locale: Option<String>,
     history: Option<Vec<ChatMessage>>,
@@ -143,7 +158,7 @@ pub async fn chat_stream(
     let locale = locale.unwrap_or_else(|| "zh".into());
     let history = history.unwrap_or_default();
 
-    let messages = build_messages(&qwen.0, &db, &message, &locale, &history).await?;
+    let messages = build_messages(&qwen.0, &db, &search, &message, &locale, &history).await?;
 
     let completion = qwen
         .0

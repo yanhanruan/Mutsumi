@@ -17,6 +17,7 @@ mod media;
 mod persistence;
 mod persona;
 mod pomodoro;
+mod search;
 mod services;
 mod state;
 mod tray;
@@ -50,6 +51,8 @@ pub fn run() {
     .expect("failed to build Fish Audio TTS service");
   let qwen_state    = services::QwenState::new(services::qwen::config_from_env())
     .expect("failed to build Qwen LLM client");
+  let search_state  = search::SearchState::new(search::SearchEngine::default())
+    .expect("failed to build search client");
 
   tauri::Builder::default()
     // ── Single-instance guard ─────────────────────────────────────────────
@@ -72,6 +75,7 @@ pub fn run() {
     .manage(media_state)
     .manage(fish_audio_state)
     .manage(qwen_state)
+    .manage(search_state)
     .invoke_handler(tauri::generate_handler![
       app_state::get_state,
       app_state::pet_click,
