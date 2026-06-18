@@ -153,5 +153,8 @@ export const ja: Translations = {
     dateTo:          '終了',
     searchNoResults: '一致するメッセージはありません。',
     searchHint:      'キーワード検索、または日付で絞り込み。',
+    emoji:           '絵文字',
+    emojiSearch:     '絵文字を検索…',
+    emojiNoResults:  '絵文字が見つかりません。',
   },
 }

@@ -153,5 +153,8 @@ export const zh: Translations = {
     dateTo:          '到',
     searchNoResults: '没有匹配的消息。',
     searchHint:      '按关键词搜索，或按日期筛选。',
+    emoji:           '表情',
+    emojiSearch:     '搜索表情…',
+    emojiNoResults:  '没有找到表情。',
   },
 }

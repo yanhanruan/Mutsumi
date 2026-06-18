@@ -22,6 +22,7 @@ import {
   CHAT_MAX_HISTORY, CHAT_HISTORY_PAGE, CHAT_TIME_GROUP_GAP, type StoredMessage,
 } from '../config/chat'
 import ChatHistory from './ChatHistory.vue'
+import EmojiPicker from './EmojiPicker.vue'
 
 interface Msg {
   id?: number          // present once loaded from / persisted to the transcript
@@ -105,6 +106,7 @@ function dismiss() {
   // memories aren't stranded below the batch threshold (best-effort).
   void invoke('chat_flush_memory').catch(() => {})
   recognition?.abort()          // tear down any live mic session
+  showEmoji.value = false       // close the emoji popover
   skipLeave.value = true        // vanish immediately — no fade at the new window pos
   visible.value = false
   void nextTick(() => { skipLeave.value = false })
@@ -381,6 +383,41 @@ function toggleVoice() {
   }
 }
 
+// ── Emoji picker ─────────────────────────────────────────────────────────────
+const showEmoji = ref(false)
+
+function toggleEmoji() {
+  showEmoji.value = !showEmoji.value
+}
+
+/** Insert the chosen emoji at the textarea caret (or append as a fallback). */
+function insertEmoji(char: string) {
+  const el = inputRef.value
+  const start = el?.selectionStart ?? input.value.length
+  const end = el?.selectionEnd ?? input.value.length
+  const next = input.value.slice(0, start) + char + input.value.slice(end)
+  if (next.length > 1000) return  // respect the textarea maxlength
+  input.value = next
+  showEmoji.value = false         // auto-close after picking one
+  nextTick(() => {
+    autoResize()
+    el?.focus()
+    const pos = start + char.length
+    el?.setSelectionRange(pos, pos)
+  })
+}
+
+// Close the popover on any pointer-down outside it (and outside the toggle).
+function onEmojiOutside(e: PointerEvent) {
+  const el = e.target as HTMLElement
+  if (el.closest('.emoji-pop') || el.closest('.emoji-toggle')) return
+  showEmoji.value = false
+}
+watch(showEmoji, v => {
+  if (v) document.addEventListener('pointerdown', onEmojiOutside, true)
+  else document.removeEventListener('pointerdown', onEmojiOutside, true)
+})
+
 // ── Textarea auto-resize ────────────────────────────────────────────────────
 const MAX_INPUT_HEIGHT = 88  // ~4 lines (12.5px × 1.4 × 4 + 14px padding)
 
@@ -467,12 +504,28 @@ watch(visible, v => {
           @input="autoResize"
         />
         <div class="chat-toolbar">
-          <!-- Attach file (incomplete) -->
-          <button class="chat-tool-btn" :title="t.chat.attachFile" disabled>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-              <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-            </svg>
-          </button>
+          <div class="toolbar-left">
+            <!-- Attach file (incomplete) -->
+            <button class="chat-tool-btn" :title="t.chat.attachFile" disabled>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+            </button>
+            <!-- Emoji picker toggle -->
+            <button
+              class="chat-tool-btn emoji-toggle"
+              :class="{ 'is-active': showEmoji }"
+              :title="t.chat.emoji"
+              @click="toggleEmoji"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/>
+                <circle cx="9" cy="10" r="1.3" fill="currentColor"/>
+                <circle cx="15" cy="10" r="1.3" fill="currentColor"/>
+                <path d="M8.5 14a4 4 0 007 0" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+            </button>
+          </div>
 
           <div class="toolbar-right">
             <!-- Model selector (display-only) -->
@@ -511,6 +564,16 @@ watch(visible, v => {
           </div>
         </div>
       </div>
+
+      <!-- Emoji picker popover — opens above the composer's emoji button -->
+      <Transition name="emoji-pop">
+        <EmojiPicker
+          v-if="showEmoji"
+          class="emoji-pop"
+          @select="insertEmoji"
+          @close="showEmoji = false"
+        />
+      </Transition>
 
       <!-- History search overlay (sits on top of the panel when open) -->
       <ChatHistory ref="historyRef" @jump="onHistoryJump" />
@@ -719,10 +782,35 @@ watch(visible, v => {
   padding: 4px 6px 6px;
   gap: 4px;
 }
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
 .toolbar-right {
   display: flex;
   align-items: center;
   gap: 5px;
+}
+
+/* ── Emoji picker ────────────────────────────────────────────────── */
+.emoji-toggle.is-active {
+  background: rgba(119, 153, 119, 0.18);
+  color: rgba(30, 60, 30, 0.85);
+}
+.emoji-pop {
+  position: absolute;
+  left: 12px;
+  bottom: 54px;        /* just above the toolbar (which stays put as input grows) */
+  z-index: 70;
+}
+.emoji-pop-enter-active, .emoji-pop-leave-active {
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+.emoji-pop-enter-from, .emoji-pop-leave-to {
+  opacity: 0;
+  transform: translateY(6px) scale(0.98);
+  transform-origin: bottom left;
 }
 
 /* ── Small tool buttons (+ and mic) ─────────────────────────────── */

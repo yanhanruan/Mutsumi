@@ -142,6 +142,10 @@ export interface Translations {
     dateTo:           string   // date-range "to" label
     searchNoResults:  string   // empty-results hint
     searchHint:       string   // initial hint before any query
+    // ── Emoji picker ──
+    emoji:            string   // emoji-button tooltip
+    emojiSearch:      string   // emoji search input placeholder
+    emojiNoResults:   string   // empty emoji-search hint
   }
 
   // ── Mini music controller ───────────────────────────────────────

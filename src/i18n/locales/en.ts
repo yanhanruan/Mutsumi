@@ -153,5 +153,8 @@ export const en: Translations = {
     dateTo:          'To',
     searchNoResults: 'No matching messages.',
     searchHint:      'Search by keyword, or filter by date.',
+    emoji:           'Emoji',
+    emojiSearch:     'Search emoji…',
+    emojiNoResults:  'No emoji found.',
   },
 }
