@@ -52,7 +52,8 @@ const historyRef = ref<InstanceType<typeof ChatHistory> | null>(null)
 // `oldestId` / `newestId` are keyset cursors for the loaded window.
 const oldestId    = ref<number | null>(null)
 const newestId    = ref<number | null>(null)
-const atPresent   = ref(true)        // false once we jump into a history slice
+const atPresent   = ref(true)        // true iff the loaded window includes the newest msg
+const atBottom    = ref(true)        // true iff scrolled to the bottom of the list
 const hasMoreOlder = ref(true)       // false once upward pagination is exhausted
 const loadingOlder = ref(false)
 const loadingNewer = ref(false)
@@ -92,7 +93,13 @@ function scrollToBottom() {
   nextTick(() => {
     const el = listRef.value
     if (el) el.scrollTop = el.scrollHeight
+    atBottom.value = true
   })
+}
+/** Recompute whether the list is scrolled to (near) the bottom. */
+function refreshAtBottom() {
+  const el = listRef.value
+  atBottom.value = !el || el.scrollHeight - el.scrollTop - el.clientHeight <= SCROLL_EDGE
 }
 // Follow the streaming reply to the bottom (we're always at present while sending).
 watch(streaming, v => { if (v !== null) scrollToBottom() })
@@ -159,6 +166,7 @@ async function loadNewer() {
 function onScroll() {
   const el = listRef.value
   if (!el) return
+  refreshAtBottom()
   if (el.scrollTop <= SCROLL_EDGE) void loadOlder()
   if (!atPresent.value && el.scrollHeight - el.scrollTop - el.clientHeight <= SCROLL_EDGE) {
     void loadNewer()
@@ -166,8 +174,10 @@ function onScroll() {
 }
 
 /** Snap back to the live tail (the "jump to latest" affordance). */
-function jumpToLatest() {
-  void loadPresent()
+async function jumpToLatest() {
+  // Reload the tail only if it isn't already in the window; otherwise just scroll.
+  if (!atPresent.value) await loadPresent()
+  else scrollToBottom()
 }
 
 // ── History panel navigation ──────────────────────────────────────────────────
@@ -175,19 +185,27 @@ function openHistory() {
   historyRef.value?.open()
 }
 
-/** Load a window ending at the chosen message, highlight it, leave browsing mode. */
+/**
+ * Load a window *around* the chosen message — older context (≤ id) plus newer
+ * context (> id) — so the full surrounding history is shown, not just the single
+ * match. `atPresent` is true only if fewer than a page of newer messages exist
+ * (i.e. the window already reaches the live tail).
+ */
 async function onHistoryJump(id: number) {
   historyRef.value?.close()
-  const page = await invoke<StoredMessage[]>('chat_recent_messages', {
-    before: id + 1,        // include `id` as the newest row of the window
-    limit: CHAT_HISTORY_PAGE,
-  }).catch(() => [] as StoredMessage[])
-  if (!page.length) return
-  messages.value = page.map(toMsg)
-  oldestId.value = page[0].id
-  newestId.value = page[page.length - 1].id
-  hasMoreOlder.value = page.length >= CHAT_HISTORY_PAGE
-  atPresent.value = false   // mid-timeline; scroll-down / jump-to-latest resolves it
+  const [older, newer] = await Promise.all([
+    invoke<StoredMessage[]>('chat_recent_messages', { before: id + 1, limit: CHAT_HISTORY_PAGE })
+      .catch(() => [] as StoredMessage[]),
+    invoke<StoredMessage[]>('chat_messages_after', { afterId: id, limit: CHAT_HISTORY_PAGE })
+      .catch(() => [] as StoredMessage[]),
+  ])
+  if (!older.length) return
+  const window = [...older, ...newer]
+  messages.value = window.map(toMsg)
+  oldestId.value = window[0].id
+  newestId.value = window[window.length - 1].id
+  hasMoreOlder.value = older.length >= CHAT_HISTORY_PAGE
+  atPresent.value = newer.length < CHAT_HISTORY_PAGE
   highlight(id)
   scrollToMessage(id)
 }
@@ -202,6 +220,7 @@ function scrollToMessage(id: number) {
   nextTick(() => {
     const el = listRef.value?.querySelector(`[data-mid="${id}"]`) as HTMLElement | null
     el?.scrollIntoView({ block: 'center' })
+    nextTick(refreshAtBottom)   // anchor may not be at the bottom → show jump-to-latest
   })
 }
 
@@ -393,9 +412,9 @@ watch(visible, v => {
         </div>
       </div>
 
-      <!-- Jump-to-latest (shown only while browsing a history slice) -->
+      <!-- Jump-to-latest (shown whenever not scrolled to the bottom) -->
       <button
-        v-if="!atPresent"
+        v-if="!atBottom"
         class="chat-jump-latest"
         :title="t.chat.jumpToLatest"
         @click="jumpToLatest"
@@ -585,7 +604,7 @@ watch(visible, v => {
 .chat-jump-latest {
   position: absolute;
   right: 16px;
-  bottom: 96px;          /* clears the composer card */
+  bottom: 112px;
   width: 30px;
   height: 30px;
   border-radius: 50%;
