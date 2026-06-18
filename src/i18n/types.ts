@@ -129,6 +129,8 @@ export interface Translations {
     empty:       string   // empty-conversation hint
     close:       string   // close-button title
     error:       string   // generic failure line
+    attachFile:  string   // attach-file button tooltip (incomplete feature)
+    voiceInput:  string   // voice-input button tooltip  (incomplete feature)
   }
 
   // ── Mini music controller ───────────────────────────────────────

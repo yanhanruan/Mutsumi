@@ -8,7 +8,7 @@
  *
  * Primary theme: #779977 (sage green).
  */
-import { onMounted, ref, watch } from 'vue'
+import { onMounted, onUnmounted, nextTick, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { enable, disable, isEnabled } from '@tauri-apps/plugin-autostart'
@@ -122,6 +122,21 @@ async function setSearchEngine(e: SearchEngineKey) {
   try { await invoke('set_search_engine', { engine: e }) }  // apply to backend now
   catch { /* best-effort; synced again on next startup */ }
 }
+
+// ── Search engine dropdown ────────────────────────────────────
+const engineDropOpen = ref(false)
+
+function onEngineOutside() {
+  engineDropOpen.value = false
+  document.removeEventListener('click', onEngineOutside)
+}
+
+watch(engineDropOpen, open => {
+  if (open) nextTick(() => document.addEventListener('click', onEngineOutside))
+  else      document.removeEventListener('click', onEngineOutside)
+})
+
+onUnmounted(() => document.removeEventListener('click', onEngineOutside))
 
 // ── Chat memory reset ──────────────────────────────────────────────
 // Destructive, so a two-step confirm: first tap arms, second tap (within a few
@@ -335,15 +350,29 @@ onMounted(async () => {
       </section>
 
       <!-- Search engine -->
-      <section class="card">
+      <section class="card" :style="{ zIndex: engineDropOpen ? 20 : 1, position: 'relative' }">
         <h2 class="card-title">
           <span class="card-icon">🔍</span>{{ t.searchEngine }}
         </h2>
-        <select class="select" v-model="localEngine" @change="setSearchEngine(localEngine)">
-          <option v-for="opt in ENGINE_OPTIONS" :key="opt.key" :value="opt.key">
-            {{ t.searchEngines[opt.labelKey] }}
-          </option>
-        </select>
+        <div class="dropdown">
+          <button class="engine-trigger" @click.stop="engineDropOpen = !engineDropOpen">
+            <span>{{ t.searchEngines[ENGINE_OPTIONS.find(o => o.key === localEngine)!.labelKey] }}</span>
+            <svg class="engine-chevron" :class="{ open: engineDropOpen }" width="10" height="6" viewBox="0 0 10 6" fill="none">
+              <path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+          <div v-if="engineDropOpen" class="engine-menu" @click.stop>
+            <button
+              v-for="opt in ENGINE_OPTIONS"
+              :key="opt.key"
+              class="engine-option"
+              :class="{ active: localEngine === opt.key }"
+              @click="setSearchEngine(opt.key); engineDropOpen = false"
+            >
+              {{ t.searchEngines[opt.labelKey] }}
+            </button>
+          </div>
+        </div>
       </section>
 
       <!-- Chat memory -->
@@ -820,8 +849,12 @@ onMounted(async () => {
   color: white;
 }
 
-/* ── Select dropdown (search engine) ─────────────────────── */
-.select {
+/* ── Search engine dropdown ───────────────────────────────── */
+.dropdown {
+  position: relative;
+}
+
+.engine-trigger {
   width: 100%;
   padding: 7px 10px;
   font-size: 12.5px;
@@ -830,12 +863,60 @@ onMounted(async () => {
   border: 1.5px solid rgba(119, 153, 119, 0.40);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.72);
-  outline: none;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  text-align: left;
   transition: border-color 140ms ease, box-shadow 140ms ease;
 }
-.select:focus {
+.engine-trigger:hover,
+.engine-trigger:focus-visible {
   border-color: #779977;
   box-shadow: 0 0 0 3px rgba(119, 153, 119, 0.18);
+  outline: none;
 }
+
+.engine-chevron {
+  flex-shrink: 0;
+  color: rgba(44, 78, 44, 0.45);
+  transition: transform 180ms ease;
+}
+.engine-chevron.open { transform: rotate(180deg); }
+
+/* Opens upward — avoids being clipped by the scroll container's bottom edge */
+.engine-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 10;
+  background: rgba(240, 248, 240, 0.97);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1.5px solid rgba(119, 153, 119, 0.35);
+  border-radius: 10px;
+  box-shadow:
+    0 -4px 20px rgba(40, 80, 40, 0.12),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.60);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.engine-option {
+  width: 100%;
+  padding: 7px 10px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: #2c4e2c;
+  background: transparent;
+  border: none;
+  border-radius: 7px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 100ms ease, color 100ms ease;
+}
+.engine-option:hover  { background: rgba(119, 153, 119, 0.14); color: #1a3a1a; }
+.engine-option.active { background: rgba(119, 153, 119, 0.22); color: #1a3a1a; font-weight: 700; }
 </style>

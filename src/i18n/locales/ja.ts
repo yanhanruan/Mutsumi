@@ -141,5 +141,7 @@ export const ja: Translations = {
     empty:       '聞いているよ。',
     close:       '閉じる',
     error:       '問題が発生しました。',
+    attachFile:  'ファイルを添付',
+    voiceInput:  '音声入力',
   },
 }

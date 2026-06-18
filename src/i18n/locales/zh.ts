@@ -141,5 +141,7 @@ export const zh: Translations = {
     empty:       '她在听着。',
     close:       '关闭',
     error:       '出了点问题。',
+    attachFile:  '添加文件',
+    voiceInput:  '语音输入',
   },
 }

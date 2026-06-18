@@ -49,6 +49,7 @@ function open() {
   visible.value = true
   nextTick(() => {
     inputRef.value?.focus()
+    autoResize()
     scrollToBottom()
   })
 }
@@ -85,6 +86,7 @@ async function send() {
 
   messages.value.push({ role: 'user', content: text })
   input.value = ''
+  nextTick(() => autoResize())
   busy.value = true
   streaming.value = ''
 
@@ -120,6 +122,16 @@ function onKeydown(e: KeyboardEvent) {
     e.preventDefault()
     void send()
   }
+}
+
+// ── Textarea auto-resize ────────────────────────────────────────────────────
+const MAX_INPUT_HEIGHT = 88  // ~4 lines (12.5px × 1.4 × 4 + 14px padding)
+
+function autoResize() {
+  const el = inputRef.value
+  if (!el) return
+  el.style.height = 'auto'
+  el.style.height = `${Math.min(el.scrollHeight, MAX_INPUT_HEIGHT)}px`
 }
 
 // Esc closes while open (document-level so it works regardless of focus).
@@ -161,21 +173,55 @@ watch(visible, v => {
         </div>
       </div>
 
-      <div class="chat-input-row">
+      <!-- Composer card: textarea above, toolbar below -->
+      <div class="chat-composer">
         <textarea
           ref="inputRef"
           v-model="input"
           class="chat-input"
-          rows="1"
           :placeholder="t.chat.placeholder"
+          maxlength="1000"
           @keydown="onKeydown"
+          @input="autoResize"
         />
-        <button
-          class="chat-send"
-          :title="t.chat.send"
-          :disabled="busy || !input.trim()"
-          @click="send"
-        >➤</button>
+        <div class="chat-toolbar">
+          <!-- Attach file (incomplete) -->
+          <button class="chat-tool-btn" :title="t.chat.attachFile" disabled>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+              <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+          </button>
+
+          <div class="toolbar-right">
+            <!-- Model selector (display-only) -->
+            <div class="chat-model-selector" aria-hidden="true">
+              <span class="model-name">qwen-plus</span>
+              <span class="model-badge">Extra</span>
+              <svg width="8" height="5" viewBox="0 0 8 5" fill="none">
+                <path d="M1 1l3 3 3-3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </div>
+            <!-- Voice input (incomplete) -->
+            <button class="chat-tool-btn" :title="t.chat.voiceInput" disabled>
+              <svg width="12" height="14" viewBox="0 0 24 28" fill="none">
+                <rect x="8" y="1" width="8" height="14" rx="4" fill="currentColor"/>
+                <path d="M4 14a8 8 0 0016 0" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                <line x1="12" y1="22" x2="12" y2="27" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+            </button>
+            <!-- Send -->
+            <button
+              class="chat-send"
+              :title="t.chat.send"
+              :disabled="busy || !input.trim()"
+              @click="send"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                <path d="M12 19V5M5 12l7-7 7 7" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   </Transition>
@@ -275,50 +321,126 @@ watch(visible, v => {
 }
 @keyframes pulse { 0%, 100% { opacity: 0.3 } 50% { opacity: 0.7 } }
 
-/* ── Input row ───────────────────────────────────────────────────── */
-.chat-input-row {
-  display: flex;
-  align-items: flex-end;
-  gap: 6px;
+/* ── Composer card (wraps textarea + toolbar) ────────────────────── */
+.chat-composer {
   flex-shrink: 0;
-}
-.chat-input {
-  flex: 1;
-  resize: none;
-  max-height: 72px;
-  padding: 7px 9px;
-  border-radius: 10px;
-  border: 1px solid rgba(148, 185, 148, 0.5);
-  background: rgba(255, 255, 255, 0.9);
-  color: #1a2e1a;
-  font-family: inherit;
-  font-size: 12.5px;
-  line-height: 1.35;
-  outline: none;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgba(148, 185, 148, 0.50);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.90);
+  overflow: hidden;
   transition: border-color 150ms ease, box-shadow 150ms ease;
 }
-.chat-input:focus {
+.chat-composer:focus-within {
   border-color: rgba(119, 153, 119, 0.85);
   box-shadow: 0 0 0 2px rgba(119, 153, 119, 0.18);
 }
-.chat-send {
-  flex-shrink: 0;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
+
+/* ── Textarea (no border — composer card provides it) ────────────── */
+.chat-input {
+  width: 100%;
+  resize: none;
+  min-height: 36px;
+  max-height: 88px;       /* ~4 lines; JS clamps to same value */
+  overflow-y: auto;
+  padding: 9px 11px 5px;
   border: none;
-  cursor: pointer;
-  background: rgba(119, 153, 119, 0.92);
-  color: #f3f8f3;
-  font-size: 13px;
+  background: transparent;
+  color: #1a2e1a;
+  font-family: inherit;
+  font-size: 12.5px;
+  line-height: 1.4;
+  outline: none;
+  box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(119, 153, 119, 0.30) transparent;
+}
+.chat-input::-webkit-scrollbar       { width: 4px; }
+.chat-input::-webkit-scrollbar-track { background: transparent; }
+.chat-input::-webkit-scrollbar-thumb { background: rgba(119, 153, 119, 0.30); border-radius: 2px; }
+
+/* ── Toolbar row (below the textarea) ───────────────────────────── */
+.chat-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 6px 6px;
+  gap: 4px;
+}
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* ── Small tool buttons (+ and mic) ─────────────────────────────── */
+.chat-tool-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  border: none;
+  background: transparent;
+  color: rgba(30, 60, 30, 0.45);
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: transform 150ms ease, background 150ms ease, opacity 150ms ease;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
 }
-.chat-send:hover:not(:disabled) { transform: scale(1.08); background: rgba(119, 153, 119, 1); }
+.chat-tool-btn:not(:disabled):hover {
+  background: rgba(119, 153, 119, 0.12);
+  color: rgba(30, 60, 30, 0.80);
+}
+.chat-tool-btn:disabled { opacity: 0.35; cursor: default; }
+
+/* ── Model selector (display-only) ──────────────────────────────── */
+.chat-model-selector {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 7px;
+  height: 28px;
+  border-radius: 7px;
+  color: rgba(30, 60, 30, 0.60);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: default;
+  user-select: none;
+  transition: background 120ms ease;
+}
+.chat-model-selector:hover { background: rgba(119, 153, 119, 0.10); }
+.model-name { font-weight: 600; color: rgba(30, 60, 30, 0.70); letter-spacing: -0.1px; }
+.model-badge {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(119, 153, 119, 0.14);
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(40, 80, 40, 0.65);
+}
+
+/* ── Send button ─────────────────────────────────────────────────── */
+.chat-send {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  background: linear-gradient(135deg, #779977, #5a8060);
+  color: #f3f8f3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(80, 120, 80, 0.30);
+  transition: transform 150ms ease, box-shadow 150ms ease, opacity 150ms ease;
+}
+.chat-send:hover:not(:disabled) {
+  transform: scale(1.06);
+  box-shadow: 0 3px 12px rgba(80, 120, 80, 0.40);
+}
 .chat-send:active:not(:disabled) { transform: scale(0.92); }
-.chat-send:disabled { opacity: 0.4; cursor: default; }
+.chat-send:disabled { opacity: 0.35; cursor: default; box-shadow: none; }
 
 /* ── Enter / leave ───────────────────────────────────────────────── */
 .chat-enter-active, .chat-leave-active { transition: opacity 200ms ease, transform 200ms ease; }

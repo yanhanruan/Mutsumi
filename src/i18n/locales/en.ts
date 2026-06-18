@@ -141,5 +141,7 @@ export const en: Translations = {
     empty:       'She is listening.',
     close:       'Close',
     error:       'Something went wrong.',
+    attachFile:  'Attach file',
+    voiceInput:  'Voice input',
   },
 }
