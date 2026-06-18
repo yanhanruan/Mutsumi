@@ -15,16 +15,19 @@
  * carries `pet-ui-overlay` so the per-pixel hit-test keeps the window
  * interactive while chat is open.
  */
-import { ref, nextTick, watch } from 'vue'
+import { ref, computed, nextTick, watch } from 'vue'
 import { invoke, Channel } from '@tauri-apps/api/core'
 import { useI18n } from '../i18n'
-import { CHAT_MAX_HISTORY, CHAT_HISTORY_PAGE, type StoredMessage } from '../config/chat'
+import {
+  CHAT_MAX_HISTORY, CHAT_HISTORY_PAGE, CHAT_TIME_GROUP_GAP, type StoredMessage,
+} from '../config/chat'
 import ChatHistory from './ChatHistory.vue'
 
 interface Msg {
-  id?: number        // present once loaded from / persisted to the transcript
+  id?: number          // present once loaded from / persisted to the transcript
   role: 'user' | 'assistant'
   content: string
+  created_at: number   // unix seconds (live turns use the client clock)
 }
 
 /** Streamed event shape from the Rust `chat_stream` command. */
@@ -63,7 +66,28 @@ let highlightTimer: ReturnType<typeof setTimeout> | undefined
 const SCROLL_EDGE = 60  // px from an edge that triggers a page load
 
 function toMsg(m: StoredMessage): Msg {
-  return { id: m.id, role: m.role, content: m.content }
+  return { id: m.id, role: m.role, content: m.content, created_at: m.created_at }
+}
+
+// ── Message time grouping ──────────────────────────────────────────────────
+// Show one `mm-dd hh:mm` separator per group rather than a time on every bubble.
+// A new group starts when the gap from the previous message exceeds the
+// threshold; the label is the group's first message's time.
+const timeLabels = computed<string[]>(() => {
+  const out: string[] = []
+  let prevTs: number | null = null
+  for (const m of messages.value) {
+    const newGroup = prevTs === null || m.created_at - prevTs > CHAT_TIME_GROUP_GAP
+    out.push(newGroup ? fmtGroupTime(m.created_at) : '')
+    prevTs = m.created_at
+  }
+  return out
+})
+
+function fmtGroupTime(sec: number): string {
+  const d = new Date(sec * 1000)
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
 // ── Public API (mirrors TarotCard open/dismiss) ───────────────────────────
@@ -239,7 +263,8 @@ async function send() {
     .slice(-CHAT_MAX_HISTORY * 2)
     .map(m => ({ role: m.role, content: m.content }))
 
-  messages.value.push({ role: 'user', content: text })
+  const nowSec = Math.floor(Date.now() / 1000)
+  messages.value.push({ role: 'user', content: text, created_at: nowSec })
   input.value = ''
   nextTick(() => autoResize())
   busy.value = true
@@ -262,9 +287,14 @@ async function send() {
     messages.value.push({
       role: 'assistant',
       content: finalContent || streaming.value || '',
+      created_at: Math.floor(Date.now() / 1000),
     })
   } catch {
-    messages.value.push({ role: 'assistant', content: t.value.chat.error })
+    messages.value.push({
+      role: 'assistant',
+      content: t.value.chat.error,
+      created_at: Math.floor(Date.now() / 1000),
+    })
   } finally {
     streaming.value = null
     busy.value = false
@@ -392,18 +422,19 @@ watch(visible, v => {
           {{ t.chat.empty }}
         </p>
 
-        <div
-          v-for="(m, i) in messages"
-          :key="m.id ?? `live-${i}`"
-          :data-mid="m.id"
-          class="msg"
-          :class="[
-            m.role === 'user' ? 'msg--user' : 'msg--mutsumi',
-            { 'msg--highlight': m.id != null && m.id === highlightId },
-          ]"
-        >
-          {{ m.content }}
-        </div>
+        <template v-for="(m, i) in messages" :key="m.id ?? `live-${i}`">
+          <div v-if="timeLabels[i]" class="chat-time-sep">{{ timeLabels[i] }}</div>
+          <div
+            :data-mid="m.id"
+            class="msg"
+            :class="[
+              m.role === 'user' ? 'msg--user' : 'msg--mutsumi',
+              { 'msg--highlight': m.id != null && m.id === highlightId },
+            ]"
+          >
+            {{ m.content }}
+          </div>
+        </template>
 
         <!-- Live streaming bubble -->
         <div v-if="streaming !== null" class="msg msg--mutsumi">
@@ -570,6 +601,15 @@ watch(visible, v => {
   margin: auto;
   font-size: 12px;
   color: rgba(40, 70, 40, 0.45);
+}
+
+/* Centered time separator shown above each message group. */
+.chat-time-sep {
+  align-self: center;
+  margin: 3px 0;
+  font-size: 10.5px;
+  color: rgba(40, 70, 40, 0.45);
+  user-select: none;
 }
 
 .msg {

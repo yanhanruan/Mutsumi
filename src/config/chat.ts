@@ -29,6 +29,13 @@ export const CHAT_MAX_HISTORY = 12
  */
 export const CHAT_HISTORY_PAGE = 30
 
+/**
+ * Time-grouping threshold (seconds) for the chat thread. A message starts a new
+ * group — and shows a `mm-dd hh:mm` time separator — when the gap from the
+ * previous message exceeds this. The group's label is its first message's time.
+ */
+export const CHAT_TIME_GROUP_GAP = 300  // 5 minutes
+
 /** A persisted transcript row, as returned by the `chat_*` history commands. */
 export interface StoredMessage {
   id: number
