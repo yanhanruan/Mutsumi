@@ -143,5 +143,7 @@ export const zh: Translations = {
     error:       '出了点问题。',
     attachFile:  '添加文件',
     voiceInput:  '语音输入',
+    voiceListening:  '正在聆听…点击停止',
+    voiceUnsupported: '当前环境不支持语音输入',
   },
 }

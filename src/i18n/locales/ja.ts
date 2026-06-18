@@ -143,5 +143,7 @@ export const ja: Translations = {
     error:       '問題が発生しました。',
     attachFile:  'ファイルを添付',
     voiceInput:  '音声入力',
+    voiceListening:  '聞き取り中…クリックで停止',
+    voiceUnsupported: 'この環境では音声入力に対応していません',
   },
 }

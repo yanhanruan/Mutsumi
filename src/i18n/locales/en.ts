@@ -143,5 +143,7 @@ export const en: Translations = {
     error:       'Something went wrong.',
     attachFile:  'Attach file',
     voiceInput:  'Voice input',
+    voiceListening:  'Listening… click to stop',
+    voiceUnsupported: 'Voice input is not supported in this environment',
   },
 }

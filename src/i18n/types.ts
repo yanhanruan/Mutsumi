@@ -130,7 +130,9 @@ export interface Translations {
     close:       string   // close-button title
     error:       string   // generic failure line
     attachFile:  string   // attach-file button tooltip (incomplete feature)
-    voiceInput:  string   // voice-input button tooltip  (incomplete feature)
+    voiceInput:  string   // voice-input button tooltip (idle)
+    voiceListening:  string   // voice-input button tooltip while recording
+    voiceUnsupported: string  // voice-input button tooltip when STT unavailable
   }
 
   // ── Mini music controller ───────────────────────────────────────

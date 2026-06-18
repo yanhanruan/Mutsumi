@@ -58,6 +58,7 @@ function dismiss() {
   // Flush any buffered turns through silent extraction so a short conversation's
   // memories aren't stranded below the batch threshold (best-effort).
   void invoke('chat_flush_memory').catch(() => {})
+  recognition?.abort()          // tear down any live mic session
   skipLeave.value = true        // vanish immediately — no fade at the new window pos
   visible.value = false
   void nextTick(() => { skipLeave.value = false })
@@ -121,6 +122,77 @@ function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault()
     void send()
+  }
+}
+
+// ── Speech-to-text (Web Speech API) ────────────────────────────────────────
+// Browser-native SpeechRecognition (Chromium ships it as `webkitSpeechRecognition`).
+// The mic button is disabled outright when the API is absent.
+interface SpeechRecognitionLike {
+  lang: string
+  continuous: boolean
+  interimResults: boolean
+  start(): void
+  stop(): void
+  abort(): void
+  onresult: ((e: SpeechRecognitionEventLike) => void) | null
+  onerror: (() => void) | null
+  onend: (() => void) | null
+}
+interface SpeechRecognitionEventLike {
+  results: ArrayLike<ArrayLike<{ transcript: string }>>
+}
+
+const SpeechRecognitionCtor = (
+  (window as unknown as Record<string, unknown>).SpeechRecognition ||
+  (window as unknown as Record<string, unknown>).webkitSpeechRecognition
+) as (new () => SpeechRecognitionLike) | undefined
+
+const sttSupported = !!SpeechRecognitionCtor
+const listening = ref(false)
+let recognition: SpeechRecognitionLike | null = null
+
+// Map the active UI locale to a BCP-47 tag the recognizer understands.
+const STT_LANG: Record<string, string> = { en: 'en-US', zh: 'zh-CN', ja: 'ja-JP' }
+
+function voiceTitle() {
+  if (!sttSupported) return t.value.chat.voiceUnsupported
+  return listening.value ? t.value.chat.voiceListening : t.value.chat.voiceInput
+}
+
+function toggleVoice() {
+  if (!sttSupported || busy.value) return
+  if (listening.value) { recognition?.stop(); return }
+
+  const rec = new SpeechRecognitionCtor!()
+  rec.lang = STT_LANG[locale.value] ?? 'en-US'
+  rec.continuous = false
+  rec.interimResults = true
+
+  // Append the (interim + final) transcript onto whatever was already typed.
+  const base = input.value.trim()
+  rec.onresult = ev => {
+    let transcript = ''
+    for (let i = 0; i < ev.results.length; i++) {
+      transcript += ev.results[i][0].transcript
+    }
+    input.value = base ? `${base} ${transcript}` : transcript
+    nextTick(() => autoResize())
+  }
+  rec.onerror = () => { listening.value = false }
+  rec.onend = () => {
+    listening.value = false
+    recognition = null
+    nextTick(() => inputRef.value?.focus())
+  }
+
+  recognition = rec
+  listening.value = true
+  try {
+    rec.start()
+  } catch {
+    listening.value = false
+    recognition = null
   }
 }
 
@@ -201,8 +273,14 @@ watch(visible, v => {
                 <path d="M1 1l3 3 3-3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
               </svg>
             </div>
-            <!-- Voice input (incomplete) -->
-            <button class="chat-tool-btn" :title="t.chat.voiceInput" disabled>
+            <!-- Voice input (Web Speech API) -->
+            <button
+              class="chat-tool-btn"
+              :class="{ 'is-listening': listening }"
+              :title="voiceTitle()"
+              :disabled="!sttSupported || busy"
+              @click="toggleVoice"
+            >
               <svg width="12" height="14" viewBox="0 0 24 28" fill="none">
                 <rect x="8" y="1" width="8" height="14" rx="4" fill="currentColor"/>
                 <path d="M4 14a8 8 0 0016 0" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
@@ -393,6 +471,15 @@ watch(visible, v => {
   color: rgba(30, 60, 30, 0.80);
 }
 .chat-tool-btn:disabled { opacity: 0.35; cursor: default; }
+.chat-tool-btn.is-listening {
+  background: rgba(200, 90, 90, 0.16);
+  color: rgba(180, 50, 50, 0.9);
+  animation: mic-pulse 1.2s ease-in-out infinite;
+}
+@keyframes mic-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(200, 90, 90, 0.0); }
+  50%      { box-shadow: 0 0 0 4px rgba(200, 90, 90, 0.18); }
+}
 
 /* ── Model selector (display-only) ──────────────────────────────── */
 .chat-model-selector {
