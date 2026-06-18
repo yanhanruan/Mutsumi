@@ -66,7 +66,7 @@ impl Default for ChatBuffer {
 /// it judges it needs to — so casual/emotional turns pay no extra latency.
 fn turn_options() -> ChatOptions {
     ChatOptions {
-        enable_search: true,
+        enable_search: false,
         ..Default::default()
     }
 }

@@ -10,6 +10,7 @@
 
 use scraper::{Html, Selector};
 
+use super::tracking;
 use super::SearchEngine;
 
 /// A single parsed search hit (pre body-extraction).
@@ -63,7 +64,7 @@ fn parse_bing(doc: &Html) -> Vec<RawResult> {
     let mut out = Vec::new();
     for el in doc.select(&item) {
         let Some(a) = el.select(&title_a).next() else { continue };
-        let url = a.value().attr("href").unwrap_or_default().to_string();
+        let url = tracking::clean_bing_url(a.value().attr("href").unwrap_or_default());
         if url.is_empty() {
             continue;
         }
@@ -86,8 +87,8 @@ fn parse_google(doc: &Html) -> Vec<RawResult> {
     for el in doc.select(&item) {
         let Some(h) = el.select(&title_h).next() else { continue };
         let Some(a) = el.select(&link).next() else { continue };
-        let url = a.value().attr("href").unwrap_or_default().to_string();
-        if !url.starts_with("http") {
+        let url = tracking::clean_google_url(a.value().attr("href").unwrap_or_default());
+        if url.is_empty() || tracking::is_google_internal(&url) {
             continue;
         }
         out.push(RawResult {
@@ -131,7 +132,7 @@ fn parse_ddg(doc: &Html) -> Vec<RawResult> {
     for el in doc.select(&item) {
         let Some(a) = el.select(&title_a).next() else { continue };
         let raw = a.value().attr("href").unwrap_or_default();
-        let url = ddg_real_url(raw);
+        let url = tracking::clean_ddg_url(raw);
         if url.is_empty() {
             continue;
         }
@@ -144,52 +145,6 @@ fn parse_ddg(doc: &Html) -> Vec<RawResult> {
     out
 }
 
-/// DDG result hrefs are redirectors like `//duckduckgo.com/l/?uddg=<encoded>`.
-/// Pull the real target out of the `uddg` parameter (percent-decoded).
-fn ddg_real_url(href: &str) -> String {
-    if let Some(idx) = href.find("uddg=") {
-        let rest = &href[idx + 5..];
-        let enc = rest.split('&').next().unwrap_or("");
-        return percent_decode(enc);
-    }
-    if href.starts_with("http") {
-        href.to_string()
-    } else if href.starts_with("//") {
-        format!("https:{href}")
-    } else {
-        String::new()
-    }
-}
-
-/// Minimal percent-decoder (`%XX` + `+`), enough for URL query values.
-fn percent_decode(s: &str) -> String {
-    let bytes = s.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'%' if i + 2 < bytes.len() => match u8::from_str_radix(&s[i + 1..i + 3], 16) {
-                Ok(b) => {
-                    out.push(b);
-                    i += 3;
-                }
-                Err(_) => {
-                    out.push(bytes[i]);
-                    i += 1;
-                }
-            },
-            b'+' => {
-                out.push(b' ');
-                i += 1;
-            }
-            c => {
-                out.push(c);
-                i += 1;
-            }
-        }
-    }
-    String::from_utf8_lossy(&out).into_owned()
-}
 
 #[cfg(test)]
 mod tests {
@@ -230,9 +185,5 @@ mod tests {
         assert!(parse_serp(SearchEngine::BingCn, "<html><body>nope</body></html>").is_empty());
     }
 
-    #[test]
-    fn percent_decode_basics() {
-        assert_eq!(percent_decode("https%3A%2F%2Fa.com%2Fx"), "https://a.com/x");
-        assert_eq!(percent_decode("a+b"), "a b");
-    }
+
 }

@@ -15,6 +15,8 @@
 pub mod trigger;
 
 mod engines;
+mod parsers;
+mod tracking;
 
 use std::sync::Mutex;
 use std::time::Duration;
@@ -102,17 +104,37 @@ impl SearchClient {
 
     async fn fetch_serp(&self, engine: SearchEngine, query: &str) -> Option<Vec<RawResult>> {
         let (url, param) = engines::endpoint(engine);
-        let html = self
+        let response = self
             .http
             .get(url)
             .query(&[(param, query)])
             .send()
             .await
-            .ok()?
-            .text()
-            .await
             .ok()?;
-        Some(engines::parse_serp(engine, &html))
+
+        // 插入 1：打印 HTTP 状态码（比如 200 或 403拦截）
+        println!("status={}", response.status());
+
+        // 再获取 HTML 文本
+        let html = response.text().await.ok()?;
+        
+        // 插入 2：打印 HTML 长度（长度过短通常意味着被反爬虫拦截了）
+        println!("html len={}", html.len());
+
+        // 解析并整合结果
+        let mut results = parsers::parse_serp_regex(engine, &html, MAX_RESULTS * 2);
+        if results.is_empty() {
+            results = engines::parse_serp(engine, &html);
+        }
+        
+        // 插入 3：打印最终解析出的结果数量
+        println!("results={}", results.len());
+
+        if !results.is_empty() {
+            Some(results)
+        } else {
+            None // 如果你希望即使是空数组也返回 Some，可以改成 Some(results)
+        }
     }
 }
 
