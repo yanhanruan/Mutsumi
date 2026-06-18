@@ -145,5 +145,13 @@ export const zh: Translations = {
     voiceInput:  '语音输入',
     voiceListening:  '正在聆听…点击停止',
     voiceUnsupported: '当前环境不支持语音输入',
+    jumpToLatest:    '回到最新',
+    history:         '历史记录',
+    historyClose:    '返回对话',
+    searchPlaceholder: '搜索聊天记录…',
+    dateFrom:        '从',
+    dateTo:          '到',
+    searchNoResults: '没有匹配的消息。',
+    searchHint:      '按关键词搜索，或按日期筛选。',
   },
 }

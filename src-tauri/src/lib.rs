@@ -113,6 +113,9 @@ pub fn run() {
       chat::chat_stream,
       chat::chat_clear_memory,
       chat::chat_flush_memory,
+      chat::chat_recent_messages,
+      chat::chat_messages_after,
+      chat::chat_search_history,
       search::set_search_engine,
       hide_pet,
     ])

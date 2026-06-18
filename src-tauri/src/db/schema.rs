@@ -8,7 +8,7 @@
 use rusqlite::Connection;
 
 /// The schema version this build expects. Equals the number of migration steps.
-pub const SCHEMA_VERSION: i32 = 3;
+pub const SCHEMA_VERSION: i32 = 4;
 
 /// V1 — the initial three-table design from the blueprint.
 const V1: &str = r#"
@@ -71,6 +71,22 @@ ALTER TABLE memories ADD COLUMN subject TEXT NOT NULL DEFAULT 'user';
 CREATE INDEX IF NOT EXISTS idx_memories_subject ON memories(subject);
 "#;
 
+/// V4 — verbatim chat transcript for the IM-style history view.
+///   A single, ever-growing message stream (no session/conversation boundaries):
+///   `id` (AUTOINCREMENT) is monotonic, so it doubles as the chronological sort
+///   key and the keyset-pagination cursor; `created_at` is indexed for date-range
+///   filtering. Distinct from `memories`, which holds *learned* facts/reflections;
+///   this is the raw conversation the user reads and searches.
+const V4: &str = r#"
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    role        TEXT NOT NULL,            -- 'user' | 'assistant'
+    content     TEXT NOT NULL,
+    created_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_created ON chat_messages(created_at);
+"#;
+
 /// Apply all migrations newer than the connection's stored `user_version`.
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     let current: i32 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
@@ -84,6 +100,9 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     if current < 3 {
         conn.execute_batch(V3)?;
     }
+    if current < 4 {
+        conn.execute_batch(V4)?;
+    }
 
     if current < SCHEMA_VERSION {
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -94,6 +113,7 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rusqlite::OptionalExtension;
 
     fn columns(conn: &Connection, table: &str) -> Vec<String> {
         let mut stmt = conn
@@ -107,6 +127,17 @@ mod tests {
         rows
     }
 
+    fn table_exists(conn: &Connection, table: &str) -> bool {
+        conn.query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",
+            [table],
+            |_| Ok(()),
+        )
+        .optional()
+        .unwrap()
+        .is_some()
+    }
+
     #[test]
     fn fresh_migrate_has_all_columns_and_version() {
         let conn = Connection::open_in_memory().unwrap();
@@ -115,6 +146,26 @@ mod tests {
         assert!(cols.iter().any(|c| c == "updated_at"));
         assert!(cols.iter().any(|c| c == "superseded"));
         assert!(cols.iter().any(|c| c == "subject")); // V3
+        assert!(table_exists(&conn, "chat_messages")); // V4
+        let v: i32 = conn
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(v, SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn v1_to_v4_upgrade_adds_chat_messages() {
+        // A pre-V4 database (simulated as V3) gains chat_messages after migrate.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(V1).unwrap();
+        conn.execute_batch(V2).unwrap();
+        conn.execute_batch(V3).unwrap();
+        conn.pragma_update(None, "user_version", 3).unwrap();
+        assert!(!table_exists(&conn, "chat_messages"));
+
+        migrate(&conn).unwrap();
+
+        assert!(table_exists(&conn, "chat_messages"));
         let v: i32 = conn
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();

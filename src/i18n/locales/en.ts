@@ -145,5 +145,13 @@ export const en: Translations = {
     voiceInput:  'Voice input',
     voiceListening:  'Listening… click to stop',
     voiceUnsupported: 'Voice input is not supported in this environment',
+    jumpToLatest:    'Jump to latest',
+    history:         'History',
+    historyClose:    'Back to chat',
+    searchPlaceholder: 'Search messages…',
+    dateFrom:        'From',
+    dateTo:          'To',
+    searchNoResults: 'No matching messages.',
+    searchHint:      'Search by keyword, or filter by date.',
   },
 }

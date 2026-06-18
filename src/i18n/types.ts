@@ -133,6 +133,15 @@ export interface Translations {
     voiceInput:  string   // voice-input button tooltip (idle)
     voiceListening:  string   // voice-input button tooltip while recording
     voiceUnsupported: string  // voice-input button tooltip when STT unavailable
+    jumpToLatest: string  // "back to present" button (shown when browsing history)
+    // ── History search panel ──
+    history:          string   // history button tooltip + panel title
+    historyClose:     string   // history panel close-button title
+    searchPlaceholder: string  // keyword search input placeholder
+    dateFrom:         string   // date-range "from" label
+    dateTo:           string   // date-range "to" label
+    searchNoResults:  string   // empty-results hint
+    searchHint:       string   // initial hint before any query
   }
 
   // ── Mini music controller ───────────────────────────────────────

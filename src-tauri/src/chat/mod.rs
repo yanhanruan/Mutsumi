@@ -25,6 +25,7 @@ use serde::Serialize;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, State};
 
+use crate::db::history::{self, StoredMessage};
 use crate::db::memory::{self, MemorySubject, RetrievalWeights};
 use crate::db::{now, state, Db};
 use crate::http::ApiError;
@@ -253,6 +254,16 @@ pub async fn chat_stream(
         content: reply.clone(),
     });
 
+    // Persist both turns to the durable transcript (the IM-style history). This
+    // is independent of the LLM `history` window above — it never changes what
+    // the model sees. Short synchronous lock, dropped before the spawn below.
+    {
+        let conn = db.0.lock().map_err(db_err)?;
+        let ts = now();
+        let _ = history::append_message(&conn, "user", &message, ts);
+        let _ = history::append_message(&conn, "assistant", &reply, ts);
+    }
+
     // Pipeline B: buffer the exchange; run one batched extraction per
     // EXTRACT_BATCH_TURNS (the rest is flushed on chat close). The lock is
     // released before any await — we only spawn the (fire-and-forget) extraction.
@@ -289,6 +300,49 @@ pub async fn chat_flush_memory(
         tauri::async_runtime::spawn(extraction::extract_and_store_batch(app, batch));
     }
     Ok(())
+}
+
+// ── Chat history (persistent transcript) ──────────────────────────────────
+
+/// Load a page of the transcript for the IM-style thread. `before` is a keyset
+/// cursor: pass `None` for the newest page (initial load), or an existing
+/// message id to fetch the page *older* than it (upward scroll). Returns
+/// ascending (oldest-first) for direct rendering.
+#[tauri::command]
+pub async fn chat_recent_messages(
+    db: State<'_, Db>,
+    before: Option<i64>,
+    limit: usize,
+) -> Result<Vec<StoredMessage>, ChatError> {
+    let conn = db.0.lock().map_err(db_err)?;
+    history::recent(&conn, before, limit).map_err(db_err)
+}
+
+/// Load the page of messages *newer* than `after_id`, ascending. Backs downward
+/// scroll after a History jump leaves the user mid-timeline; a short page means
+/// the present tail has been reached.
+#[tauri::command]
+pub async fn chat_messages_after(
+    db: State<'_, Db>,
+    after_id: i64,
+    limit: usize,
+) -> Result<Vec<StoredMessage>, ChatError> {
+    let conn = db.0.lock().map_err(db_err)?;
+    history::after(&conn, after_id, limit).map_err(db_err)
+}
+
+/// Search the transcript by keyword and/or date range (epoch seconds), newest
+/// first. Backs the History panel.
+#[tauri::command]
+pub async fn chat_search_history(
+    db: State<'_, Db>,
+    query: Option<String>,
+    start: Option<i64>,
+    end: Option<i64>,
+    limit: usize,
+) -> Result<Vec<StoredMessage>, ChatError> {
+    let conn = db.0.lock().map_err(db_err)?;
+    history::search(&conn, query.as_deref(), start, end, limit).map_err(db_err)
 }
 
 #[cfg(test)]

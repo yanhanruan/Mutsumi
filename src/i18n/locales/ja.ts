@@ -145,5 +145,13 @@ export const ja: Translations = {
     voiceInput:  '音声入力',
     voiceListening:  '聞き取り中…クリックで停止',
     voiceUnsupported: 'この環境では音声入力に対応していません',
+    jumpToLatest:    '最新へ移動',
+    history:         '履歴',
+    historyClose:    'チャットに戻る',
+    searchPlaceholder: 'メッセージを検索…',
+    dateFrom:        '開始',
+    dateTo:          '終了',
+    searchNoResults: '一致するメッセージはありません。',
+    searchHint:      'キーワード検索、または日付で絞り込み。',
   },
 }

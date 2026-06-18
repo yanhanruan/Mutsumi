@@ -20,3 +20,19 @@ export const CHAT_WINDOW_DIMS: Record<'small' | 'medium' | 'large', [number, num
 
 /** Cap on the conversation history (message pairs) kept in memory / sent back. */
 export const CHAT_MAX_HISTORY = 12
+
+/**
+ * How many transcript messages to load per page — for the initial open, for
+ * each upward (older) / downward (newer) scroll fetch, and for the window loaded
+ * when jumping to a History search result. A short page (< this) signals an edge
+ * of the timeline has been reached.
+ */
+export const CHAT_HISTORY_PAGE = 30
+
+/** A persisted transcript row, as returned by the `chat_*` history commands. */
+export interface StoredMessage {
+  id: number
+  role: 'user' | 'assistant'
+  content: string
+  created_at: number   // unix seconds
+}

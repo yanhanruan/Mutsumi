@@ -11,6 +11,7 @@
 //!
 //! Storage path: `<app_data_dir>/mutsumi.db` (mirrors `persistence::state_path`).
 
+pub mod history;
 pub mod memory;
 pub mod state;
 pub mod vector;
