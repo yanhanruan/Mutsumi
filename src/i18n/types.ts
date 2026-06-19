@@ -146,6 +146,13 @@ export interface Translations {
     emoji:            string   // emoji-button tooltip
     emojiSearch:      string   // emoji search input placeholder
     emojiNoResults:   string   // empty emoji-search hint
+    // ── Image input ──
+    attachImage:      string   // attach-image button tooltip
+    imageTooLarge:    string   // in-character alert: a file exceeds 5MB
+    imageBadType:     string   // in-character alert: not an accepted image type
+    imageTooMany:     string   // in-character alert: more than the image cap
+    imageAlt:         string   // <img> alt text for sent images
+    dropHint:         string   // dashed drop-overlay caption
   }
 
   // ── Mini music controller ───────────────────────────────────────

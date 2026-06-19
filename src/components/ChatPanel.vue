@@ -15,11 +15,15 @@
  * carries `pet-ui-overlay` so the per-pixel hit-test keeps the window
  * interactive while chat is open.
  */
-import { ref, computed, nextTick, watch } from 'vue'
-import { invoke, Channel } from '@tauri-apps/api/core'
+import { ref, computed, nextTick, watch, onMounted, onBeforeUnmount } from 'vue'
+import { invoke, Channel, convertFileSrc } from '@tauri-apps/api/core'
+import { getCurrentWebview } from '@tauri-apps/api/webview'
+import { open as openDialog } from '@tauri-apps/plugin-dialog'
+import type { UnlistenFn } from '@tauri-apps/api/event'
 import { useI18n } from '../i18n'
 import {
-  CHAT_MAX_HISTORY, CHAT_HISTORY_PAGE, CHAT_TIME_GROUP_GAP, type StoredMessage,
+  CHAT_MAX_HISTORY, CHAT_HISTORY_PAGE, CHAT_TIME_GROUP_GAP,
+  IMAGE_MAX_COUNT, IMAGE_EXT_WHITELIST, type StoredMessage,
 } from '../config/chat'
 import ChatHistory from './ChatHistory.vue'
 import EmojiPicker from './EmojiPicker.vue'
@@ -29,6 +33,8 @@ interface Msg {
   role: 'user' | 'assistant'
   content: string
   created_at: number   // unix seconds (live turns use the client clock)
+  kind?: 'text' | 'image'
+  imagePath?: string   // absolute path for image rows (fed to convertFileSrc)
 }
 
 /** Streamed event shape from the Rust `chat_stream` command. */
@@ -67,7 +73,19 @@ let highlightTimer: ReturnType<typeof setTimeout> | undefined
 const SCROLL_EDGE = 60  // px from an edge that triggers a page load
 
 function toMsg(m: StoredMessage): Msg {
-  return { id: m.id, role: m.role, content: m.content, created_at: m.created_at }
+  return {
+    id: m.id,
+    role: m.role,
+    content: m.content,
+    created_at: m.created_at,
+    kind: m.kind,
+    imagePath: m.image_path ?? undefined,
+  }
+}
+
+/** Render an image bubble's source through the asset protocol. */
+function imgSrc(path: string): string {
+  return convertFileSrc(path)
 }
 
 // ── Message time grouping ──────────────────────────────────────────────────
@@ -107,6 +125,9 @@ function dismiss() {
   void invoke('chat_flush_memory').catch(() => {})
   recognition?.abort()          // tear down any live mic session
   showEmoji.value = false       // close the emoji popover
+  imageTray.value = []          // drop any un-sent image picks
+  dragOver.value = false
+  alertMsg.value = null
   skipLeave.value = true        // vanish immediately — no fade at the new window pos
   visible.value = false
   void nextTick(() => { skipLeave.value = false })
@@ -252,8 +273,11 @@ function scrollToMessage(id: number) {
 
 // ── Send + stream ────────────────────────────────────────────────────────
 async function send() {
+  if (busy.value) return
+  if (imageTray.value.length) { await sendVision(); return }  // image turn
+
   const text = input.value.trim()
-  if (!text || busy.value) return
+  if (!text) return
 
   // If browsing a history slice, snap back to the live tail first so the LLM
   // history below is the genuine recent conversation (not a stale slice) and the
@@ -297,6 +321,67 @@ async function send() {
       content: t.value.chat.error,
       created_at: Math.floor(Date.now() / 1000),
     })
+  } finally {
+    streaming.value = null
+    busy.value = false
+    scrollToBottom()
+    nextTick(() => inputRef.value?.focus())
+  }
+}
+
+/** Send the tray images (+ optional caption) and stream Mutsumi's text reply. */
+async function sendVision() {
+  if (busy.value || !imageTray.value.length) return
+  const paths = [...imageTray.value]
+  const caption = input.value.trim()
+
+  if (!atPresent.value) await loadPresent()
+  const history = messages.value
+    .slice(-CHAT_MAX_HISTORY * 2)
+    .map(m => ({ role: m.role, content: m.content }))
+
+  // Optimistic user bubble(s) — caption rides on the first image (matches storage).
+  const nowSec = Math.floor(Date.now() / 1000)
+  const startLen = messages.value.length
+  paths.forEach((p, i) => {
+    messages.value.push({
+      role: 'user',
+      kind: 'image',
+      imagePath: p,
+      content: i === 0 ? caption : '',
+      created_at: nowSec,
+    })
+  })
+  imageTray.value = []
+  input.value = ''
+  nextTick(() => autoResize())
+  busy.value = true
+  streaming.value = ''
+
+  let finalContent = ''
+  const channel = new Channel<ChatEvent>()
+  channel.onmessage = ev => {
+    if (ev.kind === 'delta') streaming.value = (streaming.value ?? '') + ev.text
+    else if (ev.kind === 'done') finalContent = ev.content
+  }
+
+  try {
+    await invoke('chat_vision_stream', {
+      message: caption,
+      paths,
+      locale: locale.value,
+      history,
+      onEvent: channel,
+    })
+    messages.value.push({
+      role: 'assistant',
+      content: finalContent || streaming.value || '',
+      created_at: Math.floor(Date.now() / 1000),
+    })
+  } catch (err) {
+    // Roll back the optimistic image bubble(s) and surface the reason as an alert.
+    messages.value.splice(startLen)
+    flash(alertFor(err))
   } finally {
     streaming.value = null
     busy.value = false
@@ -418,6 +503,105 @@ watch(showEmoji, v => {
   else document.removeEventListener('pointerdown', onEmojiOutside, true)
 })
 
+// ── Image input ──────────────────────────────────────────────────────────────
+// Acquisition never moves bytes over IPC: a file pick / OS drop yields a path,
+// and a clipboard paste is staged to a temp file in Rust → also a path. Rust
+// reads + validates (size/type); the frontend only gates the count.
+const imageTray = ref<string[]>([])   // picked/dropped/staged absolute paths
+const dragOver  = ref(false)
+const alertMsg  = ref<string | null>(null)
+let alertTimer: ReturnType<typeof setTimeout> | undefined
+let unlistenDrop: UnlistenFn | undefined
+
+function flash(msg: string) {
+  alertMsg.value = msg
+  clearTimeout(alertTimer)
+  alertTimer = setTimeout(() => { alertMsg.value = null }, 2600)
+}
+
+/** Map a Rust validation error code (or anything) to a user-facing alert. */
+function alertFor(err: unknown): string {
+  const code = String(err)
+  if (code.includes('image_too_large')) return t.value.chat.imageTooLarge
+  if (code.includes('image_bad_type')) return t.value.chat.imageBadType
+  return t.value.chat.error
+}
+
+function extOf(path: string): string {
+  const m = /\.([^.\\/]+)$/.exec(path)
+  return m ? m[1].toLowerCase() : ''
+}
+
+/** Add image paths to the tray, gating on the whitelist + count cap. */
+function addPaths(paths: string[]) {
+  const imgs = paths.filter(p => IMAGE_EXT_WHITELIST.includes(extOf(p)))
+  if (!imgs.length) {
+    if (paths.length) flash(t.value.chat.imageBadType)
+    return
+  }
+  const room = IMAGE_MAX_COUNT - imageTray.value.length
+  if (imgs.length > room) {
+    flash(t.value.chat.imageTooMany)
+    if (room > 0) imageTray.value.push(...imgs.slice(0, room))
+  } else {
+    imageTray.value.push(...imgs)
+  }
+}
+
+function removeTrayItem(i: number) {
+  imageTray.value.splice(i, 1)
+}
+
+async function pickImages() {
+  if (busy.value) return
+  if (imageTray.value.length >= IMAGE_MAX_COUNT) { flash(t.value.chat.imageTooMany); return }
+  try {
+    const sel = await openDialog({
+      multiple: true,
+      filters: [{ name: 'image', extensions: IMAGE_EXT_WHITELIST }],
+    })
+    if (!sel) return
+    addPaths(Array.isArray(sel) ? sel : [sel])
+  } catch { /* dialog dismissed / unavailable */ }
+}
+
+async function onPaste(e: ClipboardEvent) {
+  const items = e.clipboardData?.items
+  if (!items) return
+  if (!Array.from(items).some(it => it.type.startsWith('image/'))) return
+  e.preventDefault()   // an image is on the clipboard — don't also paste a path string
+  if (imageTray.value.length >= IMAGE_MAX_COUNT) { flash(t.value.chat.imageTooMany); return }
+  try {
+    const staged = await invoke<{ path: string }>('chat_stage_clipboard_image')
+    addPaths([staged.path])
+  } catch (err) {
+    flash(alertFor(err))
+  }
+}
+
+// Native OS drag-drop yields paths (dragDropEnabled = true). Registered once;
+// gated on `visible` so drops only count while the chat is open.
+onMounted(async () => {
+  try {
+    unlistenDrop = await getCurrentWebview().onDragDropEvent(ev => {
+      if (!visible.value) return
+      const p = ev.payload
+      if (p.type === 'enter' || p.type === 'over') {
+        dragOver.value = true
+      } else if (p.type === 'leave') {
+        dragOver.value = false
+      } else if (p.type === 'drop') {
+        dragOver.value = false
+        if (!busy.value) addPaths(p.paths ?? [])
+      }
+    })
+  } catch { /* drag-drop unavailable in this environment */ }
+})
+onBeforeUnmount(() => {
+  unlistenDrop?.()
+  clearTimeout(alertTimer)
+})
+
 // ── Textarea auto-resize ────────────────────────────────────────────────────
 const MAX_INPUT_HEIGHT = 88  // ~4 lines (12.5px × 1.4 × 4 + 14px padding)
 
@@ -441,6 +625,16 @@ watch(visible, v => {
 <template>
   <Transition name="chat" :css="!skipLeave">
     <div v-if="visible" class="chat-panel pet-ui-overlay">
+      <!-- Transient in-character alert (validation feedback) -->
+      <Transition name="alert">
+        <div v-if="alertMsg" class="chat-alert">{{ alertMsg }}</div>
+      </Transition>
+
+      <!-- Drag-drop overlay (Tauri native OS file drop) -->
+      <div v-if="dragOver" class="chat-drop">
+        <div class="chat-drop-inner">{{ t.chat.dropHint }}</div>
+      </div>
+
       <header class="chat-header">
         <span class="chat-title">{{ t.chat.title }}</span>
         <div class="chat-header-actions">
@@ -466,10 +660,14 @@ watch(visible, v => {
             class="msg"
             :class="[
               m.role === 'user' ? 'msg--user' : 'msg--mutsumi',
-              { 'msg--highlight': m.id != null && m.id === highlightId },
+              { 'msg--image': m.kind === 'image', 'msg--highlight': m.id != null && m.id === highlightId },
             ]"
           >
-            {{ m.content }}
+            <template v-if="m.kind === 'image' && m.imagePath">
+              <img class="msg-img" :src="imgSrc(m.imagePath)" :alt="t.chat.imageAlt" loading="lazy" />
+              <div v-if="m.content" class="msg-caption">{{ m.content }}</div>
+            </template>
+            <template v-else>{{ m.content }}</template>
           </div>
         </template>
 
@@ -492,8 +690,16 @@ watch(visible, v => {
         </svg>
       </button>
 
-      <!-- Composer card: textarea above, toolbar below -->
+      <!-- Composer card: image tray, textarea, toolbar -->
       <div class="chat-composer">
+        <!-- Picked-image preview tray (created into bubbles only on send) -->
+        <div v-if="imageTray.length" class="chat-tray">
+          <div v-for="(p, i) in imageTray" :key="p" class="tray-item">
+            <img class="tray-thumb" :src="imgSrc(p)" :alt="t.chat.imageAlt" />
+            <button class="tray-remove" :title="t.chat.close" @click="removeTrayItem(i)">✕</button>
+          </div>
+        </div>
+
         <textarea
           ref="inputRef"
           v-model="input"
@@ -502,13 +708,16 @@ watch(visible, v => {
           maxlength="1000"
           @keydown="onKeydown"
           @input="autoResize"
+          @paste="onPaste"
         />
         <div class="chat-toolbar">
           <div class="toolbar-left">
-            <!-- Attach file (incomplete) -->
-            <button class="chat-tool-btn" :title="t.chat.attachFile" disabled>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            <!-- Attach image -->
+            <button class="chat-tool-btn" :title="t.chat.attachImage" @click="pickImages">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+                <rect x="3" y="4" width="18" height="16" rx="2.5" stroke="currentColor" stroke-width="2"/>
+                <circle cx="8.5" cy="9.5" r="1.6" fill="currentColor"/>
+                <path d="M5 18l4.5-5 3.5 4 2.5-3 3.5 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
               </svg>
             </button>
             <!-- Emoji picker toggle -->
@@ -554,7 +763,7 @@ watch(visible, v => {
             <button
               class="chat-send"
               :title="t.chat.send"
-              :disabled="busy || !input.trim()"
+              :disabled="busy || (!input.trim() && !imageTray.length)"
               @click="send"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
@@ -889,6 +1098,96 @@ watch(visible, v => {
 }
 .chat-send:active:not(:disabled) { transform: scale(0.92); }
 .chat-send:disabled { opacity: 0.35; cursor: default; box-shadow: none; }
+
+/* ── Image message bubbles ───────────────────────────────────────── */
+.msg--image { padding: 4px; max-width: 70%; }
+.msg-img {
+  display: block;
+  max-width: 100%;
+  max-height: 200px;
+  border-radius: 9px;
+  object-fit: cover;
+}
+.msg-caption {
+  padding: 5px 6px 2px;
+  font-size: 12px;
+  line-height: 1.35;
+}
+.msg--user.msg--image .msg-caption { color: #f3f8f3; }
+
+/* ── Image preview tray (in the composer, above the textarea) ─────── */
+.chat-tray {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 8px 2px;
+}
+.tray-item { position: relative; width: 52px; height: 52px; }
+.tray-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 185, 148, 0.5);
+}
+.tray-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(60, 80, 60, 0.85);
+  color: #fff;
+  font-size: 9px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.tray-item:hover .tray-remove { opacity: 1; }
+
+/* ── Transient alert (validation feedback) ───────────────────────── */
+.chat-alert {
+  position: absolute;
+  top: 40px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 86%;
+  z-index: 80;
+  padding: 7px 12px;
+  border-radius: 10px;
+  background: rgba(60, 84, 60, 0.94);
+  color: #f3f8f3;
+  font-size: 12px;
+  text-align: center;
+  box-shadow: 0 3px 12px rgba(40, 60, 40, 0.3);
+}
+.alert-enter-active, .alert-leave-active { transition: opacity 200ms ease, transform 200ms ease; }
+.alert-enter-from, .alert-leave-to { opacity: 0; transform: translateX(-50%) translateY(-6px); }
+
+/* ── Drag-drop overlay ───────────────────────────────────────────── */
+.chat-drop {
+  position: absolute;
+  inset: 6px;
+  z-index: 75;
+  border: 2px dashed rgba(119, 153, 119, 0.85);
+  border-radius: 14px;
+  background: rgba(236, 246, 236, 0.82);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.chat-drop-inner {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(40, 80, 40, 0.85);
+}
 
 /* ── Enter / leave ───────────────────────────────────────────────── */
 .chat-enter-active, .chat-leave-active { transition: opacity 200ms ease, transform 200ms ease; }

@@ -28,6 +28,8 @@ use crate::http::{ApiError, HttpClient, HttpClientConfig};
 
 const DEFAULT_BASE_URL: &str = "https://dashscope.aliyuncs.com/compatible-mode/v1";
 const DEFAULT_CHAT_MODEL: &str = "qwen-plus";
+/// Vision-capable model for image turns (multimodal). Env-overridable.
+const DEFAULT_VISION_MODEL: &str = "qwen-vl-max";
 const DEFAULT_EMBED_MODEL: &str = "text-embedding-v3";
 /// `text-embedding-v3` supports 1024/768/512; 1024 is the default/highest.
 const DEFAULT_EMBED_DIMENSIONS: u32 = 1024;
@@ -42,6 +44,7 @@ const EMBED_BATCH_LIMIT: usize = 10;
 const ENV_API_KEY: &str = "DASHSCOPE_API_KEY";
 const ENV_BASE_URL: &str = "QWEN_BASE_URL";
 const ENV_CHAT_MODEL: &str = "QWEN_CHAT_MODEL";
+const ENV_VISION_MODEL: &str = "QWEN_VISION_MODEL";
 
 // ── Configuration ───────────────────────────────────────────────────
 
@@ -51,6 +54,7 @@ pub struct QwenConfig {
     pub api_key: String,
     pub base_url: String,
     pub chat_model: String,
+    pub vision_model: String,
     pub embed_model: String,
     pub embed_dimensions: u32,
 }
@@ -64,6 +68,7 @@ pub fn config_from_env() -> QwenConfig {
         api_key: std::env::var(ENV_API_KEY).unwrap_or_default(),
         base_url: std::env::var(ENV_BASE_URL).unwrap_or_else(|_| DEFAULT_BASE_URL.into()),
         chat_model: std::env::var(ENV_CHAT_MODEL).unwrap_or_else(|_| DEFAULT_CHAT_MODEL.into()),
+        vision_model: std::env::var(ENV_VISION_MODEL).unwrap_or_else(|_| DEFAULT_VISION_MODEL.into()),
         embed_model: DEFAULT_EMBED_MODEL.into(),
         embed_dimensions: DEFAULT_EMBED_DIMENSIONS,
     }
@@ -275,6 +280,7 @@ struct EmbeddingData {
 pub struct QwenClient {
     http: Arc<HttpClient>,
     chat_model: String,
+    vision_model: String,
     embed_model: String,
     embed_dimensions: u32,
 }
@@ -299,6 +305,7 @@ impl QwenClient {
         Ok(Self {
             http: Arc::new(http),
             chat_model: config.chat_model,
+            vision_model: config.vision_model,
             embed_model: config.embed_model,
             embed_dimensions: config.embed_dimensions,
         })
@@ -348,7 +355,7 @@ impl QwenClient {
         messages: &[ChatMessage],
         tools: Option<&[Tool]>,
         options: ChatOptions,
-        mut on_delta: F,
+        on_delta: F,
     ) -> Result<ChatCompletion, ApiError>
     where
         F: FnMut(&str),
@@ -361,8 +368,65 @@ impl QwenClient {
             temperature: options.temperature,
             enable_search: options.enable_search.then_some(true),
         };
+        let body = serde_json::to_value(&request).map_err(|e| ApiError::Build(e.to_string()))?;
+        self.stream_completion(body, on_delta).await
+    }
 
-        let mut resp = self.http.post_json_streaming(CHAT_PATH, &request).await?;
+    /// Streaming **vision** chat completion (multimodal).
+    ///
+    /// Sends the text `messages` (system + history) followed by a final user
+    /// message whose content is the OpenAI-style array
+    /// `[{type:text,text:caption}, {type:image_url,...} × N]`, to the
+    /// vision-capable model. Prior messages keep their plain string `content`;
+    /// DashScope accepts both shapes in one `messages` list.
+    pub async fn chat_vision_stream<F>(
+        &self,
+        messages: &[ChatMessage],
+        image_data_urls: &[String],
+        caption: &str,
+        on_delta: F,
+    ) -> Result<ChatCompletion, ApiError>
+    where
+        F: FnMut(&str),
+    {
+        // Serialize the leading text messages as-is, then append the multimodal turn.
+        let mut msg_values: Vec<serde_json::Value> = messages
+            .iter()
+            .map(|m| serde_json::to_value(m).map_err(|e| ApiError::Build(e.to_string())))
+            .collect::<Result<_, _>>()?;
+
+        let mut parts: Vec<serde_json::Value> = Vec::with_capacity(image_data_urls.len() + 1);
+        if !caption.is_empty() {
+            parts.push(serde_json::json!({ "type": "text", "text": caption }));
+        }
+        for url in image_data_urls {
+            parts.push(serde_json::json!({
+                "type": "image_url",
+                "image_url": { "url": url }
+            }));
+        }
+        msg_values.push(serde_json::json!({ "role": "user", "content": parts }));
+
+        let body = serde_json::json!({
+            "model": self.vision_model,
+            "messages": msg_values,
+            "stream": true,
+        });
+        self.stream_completion(body, on_delta).await
+    }
+
+    /// Shared SSE driver: POST a streaming chat body, feed each content delta to
+    /// `on_delta`, and return the assembled completion. Reassembles `data:` lines
+    /// split across network chunks via a pending-line buffer.
+    async fn stream_completion<F>(
+        &self,
+        body: serde_json::Value,
+        mut on_delta: F,
+    ) -> Result<ChatCompletion, ApiError>
+    where
+        F: FnMut(&str),
+    {
+        let mut resp = self.http.post_json_streaming(CHAT_PATH, &body).await?;
         let mut pending = String::new(); // buffer for a not-yet-complete trailing line
         let mut full = String::new();
         let mut finish_reason = None;

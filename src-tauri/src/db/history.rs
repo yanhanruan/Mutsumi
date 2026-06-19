@@ -19,7 +19,16 @@ pub struct StoredMessage {
     pub role: String, // 'user' | 'assistant'
     pub content: String,
     pub created_at: i64,
+    /// 'text' | 'image'.
+    pub kind: String,
+    /// For image rows, the image path. The DB stores a path **relative** to the
+    /// media dir; the command layer resolves it to an absolute path before
+    /// returning to the frontend. `None` for text rows.
+    pub image_path: Option<String>,
 }
+
+/// Column list shared by every read query (positional order matches `row_to_msg`).
+const COLS: &str = "id, role, content, created_at, kind, image_path";
 
 fn row_to_msg(r: &rusqlite::Row) -> rusqlite::Result<StoredMessage> {
     Ok(StoredMessage {
@@ -27,6 +36,8 @@ fn row_to_msg(r: &rusqlite::Row) -> rusqlite::Result<StoredMessage> {
         role: r.get(1)?,
         content: r.get(2)?,
         created_at: r.get(3)?,
+        kind: r.get(4)?,
+        image_path: r.get(5)?,
     })
 }
 
@@ -36,7 +47,7 @@ fn escape_like(s: &str) -> String {
     s.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")
 }
 
-/// Append one turn; returns its new row id.
+/// Append one text turn; returns its new row id.
 pub fn append_message(
     conn: &Connection,
     role: &str,
@@ -44,8 +55,25 @@ pub fn append_message(
     now: i64,
 ) -> rusqlite::Result<i64> {
     conn.execute(
-        "INSERT INTO chat_messages (role, content, created_at) VALUES (?1, ?2, ?3)",
+        "INSERT INTO chat_messages (role, content, created_at, kind) VALUES (?1, ?2, ?3, 'text')",
         params![role, content, now],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+/// Append one image message from the user (kind `image`). `caption` is the text
+/// the user sent alongside the image (may be empty); `image_path` is the path
+/// **relative** to the media dir. Returns the new row id.
+pub fn append_image_message(
+    conn: &Connection,
+    caption: &str,
+    image_path: &str,
+    now: i64,
+) -> rusqlite::Result<i64> {
+    conn.execute(
+        "INSERT INTO chat_messages (role, content, created_at, kind, image_path)
+         VALUES ('user', ?1, ?2, 'image', ?3)",
+        params![caption, now, image_path],
     )?;
     Ok(conn.last_insert_rowid())
 }
@@ -58,11 +86,11 @@ pub fn recent(
     before: Option<i64>,
     limit: usize,
 ) -> rusqlite::Result<Vec<StoredMessage>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, role, content, created_at FROM chat_messages
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {COLS} FROM chat_messages
          WHERE ?1 IS NULL OR id < ?1
          ORDER BY id DESC LIMIT ?2",
-    )?;
+    ))?;
     let mut rows: Vec<StoredMessage> = stmt
         .query_map(params![before, limit as i64], row_to_msg)?
         .collect::<rusqlite::Result<_>>()?;
@@ -78,10 +106,10 @@ pub fn after(
     after_id: i64,
     limit: usize,
 ) -> rusqlite::Result<Vec<StoredMessage>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, role, content, created_at FROM chat_messages
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {COLS} FROM chat_messages
          WHERE id > ?1 ORDER BY id ASC LIMIT ?2",
-    )?;
+    ))?;
     let rows = stmt
         .query_map(params![after_id, limit as i64], row_to_msg)?
         .collect::<rusqlite::Result<_>>()?;
@@ -99,7 +127,7 @@ pub fn search(
     end: Option<i64>,
     limit: usize,
 ) -> rusqlite::Result<Vec<StoredMessage>> {
-    let mut sql = String::from("SELECT id, role, content, created_at FROM chat_messages");
+    let mut sql = format!("SELECT {COLS} FROM chat_messages");
     let mut conds: Vec<&str> = Vec::new();
     let mut binds: Vec<&dyn rusqlite::ToSql> = Vec::new();
 
@@ -163,6 +191,21 @@ mod tests {
         let conn = mem_db();
         let ids = seed(&conn, &["a", "b", "c"]);
         assert!(ids[0] < ids[1] && ids[1] < ids[2]);
+    }
+
+    #[test]
+    fn image_message_round_trips_kind_and_path() {
+        let conn = mem_db();
+        append_message(&conn, "user", "hi", 1000).unwrap();
+        append_image_message(&conn, "look at this", "media/2026/06/x.jpg", 1001).unwrap();
+        let page = recent(&conn, None, 10).unwrap();
+
+        assert_eq!(page[0].kind, "text");
+        assert_eq!(page[0].image_path, None);
+        assert_eq!(page[1].kind, "image");
+        assert_eq!(page[1].role, "user");
+        assert_eq!(page[1].content, "look at this"); // caption rides on the image row
+        assert_eq!(page[1].image_path.as_deref(), Some("media/2026/06/x.jpg"));
     }
 
     #[test]

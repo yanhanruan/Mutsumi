@@ -8,7 +8,7 @@
 use rusqlite::Connection;
 
 /// The schema version this build expects. Equals the number of migration steps.
-pub const SCHEMA_VERSION: i32 = 4;
+pub const SCHEMA_VERSION: i32 = 5;
 
 /// V1 — the initial three-table design from the blueprint.
 const V1: &str = r#"
@@ -87,6 +87,16 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 CREATE INDEX IF NOT EXISTS idx_chat_messages_created ON chat_messages(created_at);
 "#;
 
+/// V5 — multimodal transcript: image messages.
+///   * `kind`       — 'text' (default; all existing rows) | 'image'.
+///   * `image_path` — for image rows, the **relative** path under the media dir
+///     (e.g. `media/2026/06/…jpg`). The DB never stores image bytes/BLOBs — only
+///     this path — so it stays lightweight and query-efficient.
+const V5: &str = r#"
+ALTER TABLE chat_messages ADD COLUMN kind TEXT NOT NULL DEFAULT 'text';
+ALTER TABLE chat_messages ADD COLUMN image_path TEXT;
+"#;
+
 /// Apply all migrations newer than the connection's stored `user_version`.
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     let current: i32 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
@@ -102,6 +112,9 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     }
     if current < 4 {
         conn.execute_batch(V4)?;
+    }
+    if current < 5 {
+        conn.execute_batch(V5)?;
     }
 
     if current < SCHEMA_VERSION {
@@ -147,6 +160,32 @@ mod tests {
         assert!(cols.iter().any(|c| c == "superseded"));
         assert!(cols.iter().any(|c| c == "subject")); // V3
         assert!(table_exists(&conn, "chat_messages")); // V4
+        let chat_cols = columns(&conn, "chat_messages");
+        assert!(chat_cols.iter().any(|c| c == "kind")); // V5
+        assert!(chat_cols.iter().any(|c| c == "image_path")); // V5
+        let v: i32 = conn
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(v, SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn v4_to_v5_upgrade_adds_image_columns() {
+        // A pre-V5 database (simulated through V4) gains kind + image_path.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(V1).unwrap();
+        conn.execute_batch(V2).unwrap();
+        conn.execute_batch(V3).unwrap();
+        conn.execute_batch(V4).unwrap();
+        conn.pragma_update(None, "user_version", 4).unwrap();
+        let before = columns(&conn, "chat_messages");
+        assert!(!before.iter().any(|c| c == "image_path"));
+
+        migrate(&conn).unwrap();
+
+        let after = columns(&conn, "chat_messages");
+        assert!(after.iter().any(|c| c == "kind"));
+        assert!(after.iter().any(|c| c == "image_path"));
         let v: i32 = conn
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();

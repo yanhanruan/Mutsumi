@@ -156,5 +156,11 @@ export const ja: Translations = {
     emoji:           '絵文字',
     emojiSearch:     '絵文字を検索…',
     emojiNoResults:  '絵文字が見つかりません。',
+    attachImage:     '画像を送る',
+    imageTooLarge:   '……重すぎ。5MB までにして。🐱',
+    imageBadType:    '画像だけだよ、ふぅ~ 📸',
+    imageTooMany:    '三枚までね~',
+    imageAlt:        '共有された画像',
+    dropHint:        'ここに画像をドロップ',
   },
 }

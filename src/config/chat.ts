@@ -36,10 +36,18 @@ export const CHAT_HISTORY_PAGE = 30
  */
 export const CHAT_TIME_GROUP_GAP = 300  // 5 minutes
 
+/** Image input limits. Size (≤5 MB) is enforced in Rust; the frontend gates count. */
+export const IMAGE_MAX_COUNT = 3
+export const IMAGE_EXT_WHITELIST = [
+  'bmp', 'jpe', 'jpeg', 'jpg', 'png', 'tif', 'tiff', 'webp', 'heic',
+]
+
 /** A persisted transcript row, as returned by the `chat_*` history commands. */
 export interface StoredMessage {
   id: number
   role: 'user' | 'assistant'
   content: string
   created_at: number   // unix seconds
+  kind: 'text' | 'image'
+  image_path: string | null   // absolute path (resolved by Rust) for image rows
 }

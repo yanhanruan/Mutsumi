@@ -71,6 +71,8 @@ pub fn run() {
       tauri_plugin_autostart::MacosLauncher::LaunchAgent,
       None,
     ))
+    .plugin(tauri_plugin_dialog::init())
+    .plugin(tauri_plugin_clipboard_manager::init())
     .manage(shared.clone())
     .manage(weather_state)
     .manage(audio_state)
@@ -116,6 +118,8 @@ pub fn run() {
       chat::chat_recent_messages,
       chat::chat_messages_after,
       chat::chat_search_history,
+      chat::chat_vision_stream,
+      chat::chat_stage_clipboard_image,
       search::set_search_engine,
       hide_pet,
     ])

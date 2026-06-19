@@ -156,5 +156,11 @@ export const zh: Translations = {
     emoji:           '表情',
     emojiSearch:     '搜索表情…',
     emojiNoResults:  '没有找到表情。',
+    attachImage:     '发送图片',
+    imageTooLarge:   '……文件超重啦（超过 5MB）~ 🐱',
+    imageBadType:    '只能是图片哦，呼~ 📸',
+    imageTooMany:    '最多三张啦~',
+    imageAlt:        '分享的图片',
+    dropHint:        '把图片放到这里',
   },
 }

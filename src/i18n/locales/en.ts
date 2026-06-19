@@ -156,5 +156,11 @@ export const en: Translations = {
     emoji:           'Emoji',
     emojiSearch:     'Search emoji…',
     emojiNoResults:  'No emoji found.',
+    attachImage:     'Send an image',
+    imageTooLarge:   '…too big, my paws can\'t lift it. Keep it under 5MB. 🐱',
+    imageBadType:    'Images only, please~ 📸',
+    imageTooMany:    'Three at most, okay~',
+    imageAlt:        'Shared image',
+    dropHint:        'Drop the image here',
   },
 }

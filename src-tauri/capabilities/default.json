@@ -9,6 +9,8 @@
   ],
   "permissions": [
     "core:default",
+    "dialog:allow-open",
+    "clipboard-manager:allow-read-image",
     "core:window:allow-start-dragging",
     "core:window:allow-set-position",
     "core:window:allow-set-size",

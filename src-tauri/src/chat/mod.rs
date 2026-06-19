@@ -15,6 +15,7 @@
 #[cfg(test)]
 mod eval;
 pub(crate) mod extraction;
+mod media;
 mod prompt;
 pub mod reflection;
 
@@ -24,6 +25,8 @@ use std::time::Duration;
 use serde::Serialize;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, State};
+
+use base64::Engine as _;
 
 use crate::db::history::{self, StoredMessage};
 use crate::db::memory::{self, MemorySubject, RetrievalWeights};
@@ -45,6 +48,27 @@ const SELF_MEMORY_TOP_K: usize = 3;
 /// little memory freshness for ~Nx fewer extraction LLM calls. The remainder is
 /// flushed when the chat panel closes (`chat_flush_memory`).
 const EXTRACT_BATCH_TURNS: usize = 6;
+
+/// Per-image size cap (5 MB) and per-turn count cap for vision input. The
+/// frontend pre-checks the count; size/type are (re)validated here.
+const IMAGE_MAX_BYTES: usize = 5 * 1024 * 1024;
+const IMAGE_MAX_COUNT: usize = 3;
+/// Accepted image extensions (lowercased, no dot). HEIC is allowed but stored
+/// uncompressed (the `image` crate can't decode it).
+const IMAGE_EXT_WHITELIST: [&str; 9] =
+    ["bmp", "jpe", "jpeg", "jpg", "png", "tif", "tiff", "webp", "heic"];
+
+/// Map a whitelisted extension to its MIME type for the data URL.
+fn mime_for(ext: &str) -> &'static str {
+    match ext {
+        "png" => "image/png",
+        "bmp" => "image/bmp",
+        "tif" | "tiff" => "image/tiff",
+        "webp" => "image/webp",
+        "heic" => "image/heic",
+        _ => "image/jpeg", // jpg/jpe/jpeg + safe default
+    }
+}
 
 /// Managed state: exchanges accumulated since the last extraction pass.
 pub struct ChatBuffer(Mutex<Vec<Exchange>>);
@@ -84,6 +108,11 @@ pub enum ChatError {
     Api(#[from] ApiError),
     #[error("database unavailable: {0}")]
     Db(String),
+    /// Stable codes the frontend maps to localized in-character alerts.
+    #[error("image_too_large")]
+    ImageTooLarge,
+    #[error("image_bad_type")]
+    ImageBadType,
 }
 
 impl Serialize for ChatError {
@@ -304,18 +333,36 @@ pub async fn chat_flush_memory(
 
 // ── Chat history (persistent transcript) ──────────────────────────────────
 
+/// Replace each row's relative `image_path` with an absolute one the frontend can
+/// hand to `convertFileSrc`. A row whose path can't be resolved drops to `None`
+/// (renders as a caption-only bubble) rather than failing the whole page.
+fn resolve_image_paths(app: &AppHandle, msgs: &mut [StoredMessage]) {
+    for m in msgs.iter_mut() {
+        if let Some(rel) = m.image_path.take() {
+            m.image_path = media::resolve(app, &rel)
+                .ok()
+                .map(|p| p.to_string_lossy().into_owned());
+        }
+    }
+}
+
 /// Load a page of the transcript for the IM-style thread. `before` is a keyset
 /// cursor: pass `None` for the newest page (initial load), or an existing
 /// message id to fetch the page *older* than it (upward scroll). Returns
 /// ascending (oldest-first) for direct rendering.
 #[tauri::command]
 pub async fn chat_recent_messages(
+    app: AppHandle,
     db: State<'_, Db>,
     before: Option<i64>,
     limit: usize,
 ) -> Result<Vec<StoredMessage>, ChatError> {
-    let conn = db.0.lock().map_err(db_err)?;
-    history::recent(&conn, before, limit).map_err(db_err)
+    let mut msgs = {
+        let conn = db.0.lock().map_err(db_err)?;
+        history::recent(&conn, before, limit).map_err(db_err)?
+    };
+    resolve_image_paths(&app, &mut msgs);
+    Ok(msgs)
 }
 
 /// Load the page of messages *newer* than `after_id`, ascending. Backs downward
@@ -323,26 +370,193 @@ pub async fn chat_recent_messages(
 /// the present tail has been reached.
 #[tauri::command]
 pub async fn chat_messages_after(
+    app: AppHandle,
     db: State<'_, Db>,
     after_id: i64,
     limit: usize,
 ) -> Result<Vec<StoredMessage>, ChatError> {
-    let conn = db.0.lock().map_err(db_err)?;
-    history::after(&conn, after_id, limit).map_err(db_err)
+    let mut msgs = {
+        let conn = db.0.lock().map_err(db_err)?;
+        history::after(&conn, after_id, limit).map_err(db_err)?
+    };
+    resolve_image_paths(&app, &mut msgs);
+    Ok(msgs)
 }
 
 /// Search the transcript by keyword and/or date range (epoch seconds), newest
 /// first. Backs the History panel.
 #[tauri::command]
 pub async fn chat_search_history(
+    app: AppHandle,
     db: State<'_, Db>,
     query: Option<String>,
     start: Option<i64>,
     end: Option<i64>,
     limit: usize,
 ) -> Result<Vec<StoredMessage>, ChatError> {
-    let conn = db.0.lock().map_err(db_err)?;
-    history::search(&conn, query.as_deref(), start, end, limit).map_err(db_err)
+    let mut msgs = {
+        let conn = db.0.lock().map_err(db_err)?;
+        history::search(&conn, query.as_deref(), start, end, limit).map_err(db_err)?
+    };
+    resolve_image_paths(&app, &mut msgs);
+    Ok(msgs)
+}
+
+// ── Vision (image) chat ───────────────────────────────────────────────────
+
+/// A clipboard image staged to a temp file, returned to the frontend so it joins
+/// the same path-based send flow as a picked/dropped file.
+#[derive(Debug, Clone, Serialize)]
+pub struct StagedImage {
+    pub path: String,
+}
+
+/// Read an image off the system clipboard, validate it, and stage it to a temp
+/// file under the media dir; returns its path. Reading at paste-time means a
+/// later clipboard change can't swap the image out from under the send.
+#[tauri::command]
+pub async fn chat_stage_clipboard_image(app: AppHandle) -> Result<StagedImage, ChatError> {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+
+    let img = app
+        .clipboard()
+        .read_image()
+        .map_err(|_| ChatError::ImageBadType)?; // nothing usable on the clipboard
+    let (w, h) = (img.width(), img.height());
+    let rgba = image::RgbaImage::from_raw(w, h, img.rgba().to_vec())
+        .ok_or(ChatError::ImageBadType)?;
+
+    // Encode to PNG (clipboard images are raw RGBA).
+    let mut bytes = Vec::new();
+    image::DynamicImage::ImageRgba8(rgba)
+        .write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png)
+        .map_err(|e| ChatError::Db(e.to_string()))?;
+    if bytes.len() > IMAGE_MAX_BYTES {
+        return Err(ChatError::ImageTooLarge);
+    }
+
+    let dir = media::staging_dir(&app).map_err(ChatError::Db)?;
+    std::fs::create_dir_all(&dir).map_err(|e| ChatError::Db(e.to_string()))?;
+    let path = dir.join(format!("clip-{}.png", now()));
+    std::fs::write(&path, &bytes).map_err(|e| ChatError::Db(e.to_string()))?;
+    Ok(StagedImage {
+        path: path.to_string_lossy().into_owned(),
+    })
+}
+
+/// Send up to [`IMAGE_MAX_COUNT`] images (by path) with an optional caption and
+/// stream Mutsumi's text reply. Images are read + validated in Rust (no bytes
+/// over IPC), sent to the vision model, and — only on success — compressed,
+/// archived, and persisted to the transcript.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn chat_vision_stream(
+    app: AppHandle,
+    qwen: State<'_, QwenState>,
+    db: State<'_, Db>,
+    search: State<'_, SearchState>,
+    buffer: State<'_, ChatBuffer>,
+    message: Option<String>,
+    paths: Vec<String>,
+    locale: Option<String>,
+    history: Option<Vec<ChatMessage>>,
+    on_event: Channel<ChatEvent>,
+) -> Result<(), ChatError> {
+    let locale = locale.unwrap_or_else(|| "zh".into());
+    let history = history.unwrap_or_default();
+    let caption = message.unwrap_or_default().trim().to_string();
+
+    if paths.is_empty() || paths.len() > IMAGE_MAX_COUNT {
+        return Err(ChatError::ImageBadType);
+    }
+
+    // Read + validate each image (defense in depth; the frontend pre-checks count).
+    let mut images: Vec<(Vec<u8>, String)> = Vec::with_capacity(paths.len());
+    for p in &paths {
+        let ext = std::path::Path::new(p)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        if !IMAGE_EXT_WHITELIST.contains(&ext.as_str()) {
+            return Err(ChatError::ImageBadType);
+        }
+        let bytes = std::fs::read(p).map_err(|_| ChatError::ImageBadType)?;
+        if bytes.len() > IMAGE_MAX_BYTES {
+            return Err(ChatError::ImageTooLarge);
+        }
+        images.push((bytes, ext));
+    }
+
+    // base64 data URLs for the VL request (original bytes).
+    let data_urls: Vec<String> = images
+        .iter()
+        .map(|(bytes, ext)| {
+            format!(
+                "data:{};base64,{}",
+                mime_for(ext),
+                base64::engine::general_purpose::STANDARD.encode(bytes)
+            )
+        })
+        .collect();
+
+    // Reuse the text-pipeline assembly (persona + dynamic context + memory + history)
+    // with the caption as the retrieval query, then drop its trailing user-text
+    // turn (the vision turn re-adds it) and append the vision guidance block.
+    let query = if caption.is_empty() { "图片".to_string() } else { caption.clone() };
+    let mut messages = build_messages(&qwen.0, &db, &search, &query, &locale, &history).await?;
+    messages.pop(); // remove the placeholder user-text message
+    messages.push(ChatMessage::system(persona::vision_guidance().to_string()));
+
+    let completion = qwen
+        .0
+        .chat_vision_stream(&messages, &data_urls, &caption, |delta| {
+            let _ = on_event.send(ChatEvent::Delta { text: delta.to_string() });
+        })
+        .await?;
+    let reply = completion.message.content.unwrap_or_default();
+    let _ = on_event.send(ChatEvent::Done { content: reply.clone() });
+
+    // Success → compress + archive each image (no lock held across this IO).
+    let mut rels: Vec<String> = Vec::with_capacity(images.len());
+    for (bytes, ext) in &images {
+        match media::store(&app, bytes, ext) {
+            Ok(rel) => rels.push(rel),
+            Err(e) => log::warn!("media store failed: {e}"),
+        }
+    }
+
+    // Persist the image row(s) (caption rides on the first) + the assistant reply.
+    {
+        let conn = db.0.lock().map_err(db_err)?;
+        let ts = now();
+        for (i, rel) in rels.iter().enumerate() {
+            let cap = if i == 0 { caption.as_str() } else { "" };
+            let _ = history::append_image_message(&conn, cap, rel, ts);
+        }
+        let _ = history::append_message(&conn, "assistant", &reply, ts);
+    }
+
+    // Best-effort cleanup of any staged clipboard temp files we just consumed.
+    if let Ok(staging) = media::staging_dir(&app) {
+        for p in &paths {
+            if std::path::Path::new(p).starts_with(&staging) {
+                let _ = std::fs::remove_file(p);
+            }
+        }
+    }
+
+    // Feed the exchange to batched extraction (caption-grounded; image-only ⇒ no
+    // user-fact extraction, which is correct).
+    let user_for_mem = if caption.is_empty() { "[图片]".to_string() } else { caption };
+    let ready = {
+        let mut buf = buffer.0.lock().map_err(db_err)?;
+        buffer_push(&mut buf, Exchange { user: user_for_mem, reply }, EXTRACT_BATCH_TURNS)
+    };
+    if let Some(batch) = ready {
+        tauri::async_runtime::spawn(extraction::extract_and_store_batch(app, batch));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
