@@ -128,6 +128,7 @@ export interface Translations {
     thinking:    string   // status shown while awaiting the first token
     empty:       string   // empty-conversation hint
     close:       string   // close-button title
+    minimize:    string   // titlebar minimize-button tooltip
     error:       string   // generic failure line
     attachFile:  string   // attach-file button tooltip (incomplete feature)
     voiceInput:  string   // voice-input button tooltip (idle)
@@ -140,6 +141,9 @@ export interface Translations {
     searchPlaceholder: string  // keyword search input placeholder
     dateFrom:         string   // date-range "from" label
     dateTo:           string   // date-range "to" label
+    datePlaceholder:  string   // date-picker trigger placeholder (no date chosen)
+    dateToday:        string   // date-picker "today" action
+    dateClear:        string   // date-picker "clear" action + clear-filters affordance
     searchNoResults:  string   // empty-results hint
     searchHint:       string   // initial hint before any query
     // ── Emoji picker ──

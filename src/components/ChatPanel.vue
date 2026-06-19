@@ -27,6 +27,8 @@ import {
 } from '../config/chat'
 import ChatHistory from './ChatHistory.vue'
 import EmojiPicker from './EmojiPicker.vue'
+import { setTaskbarVisible, minimizeWindow } from '../composables/useWindowControls'
+import { vTip } from '../composables/useTooltip'
 
 interface Msg {
   id?: number          // present once loaded from / persisted to the transcript
@@ -112,6 +114,7 @@ function fmtGroupTime(sec: number): string {
 // ── Public API (mirrors TarotCard open/dismiss) ───────────────────────────
 function open() {
   visible.value = true
+  void setTaskbarVisible(true)   // expose a taskbar button while the panel is open
   void loadPresent()
   nextTick(() => {
     inputRef.value?.focus()
@@ -128,6 +131,7 @@ function dismiss() {
   imageTray.value = []          // drop any un-sent image picks
   dragOver.value = false
   alertMsg.value = null
+  void setTaskbarVisible(false)  // pet floats again — drop the taskbar button
   skipLeave.value = true        // vanish immediately — no fade at the new window pos
   visible.value = false
   void nextTick(() => { skipLeave.value = false })
@@ -635,16 +639,22 @@ watch(visible, v => {
         <div class="chat-drop-inner">{{ t.chat.dropHint }}</div>
       </div>
 
-      <header class="chat-header">
-        <span class="chat-title">{{ t.chat.title }}</span>
-        <div class="chat-header-actions">
-          <button class="chat-icon-btn" :title="t.chat.history" @click="openHistory">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+      <!-- Titlebar: drag region + window controls (mirrors SettingsWindow). -->
+      <header class="chat-header" data-tauri-drag-region>
+        <span class="chat-title" data-tauri-drag-region>{{ t.chat.title }}</span>
+        <div class="win-controls" @mousedown.stop>
+          <button class="wbtn" :data-tip="t.chat.history" @click="openHistory">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
               <path d="M12 7v5l3 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
               <path d="M3.5 12a8.5 8.5 0 1 0 2.4-5.9M3.5 4v3h3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
           </button>
-          <button class="chat-close" :title="t.chat.close" @click="emit('close')">✕</button>
+          <button class="wbtn wbtn-min" :data-tip="t.chat.minimize" @click="minimizeWindow">
+            <svg width="10" height="2" viewBox="0 0 10 2"><rect width="10" height="1.5" rx="0.75" fill="currentColor"/></svg>
+          </button>
+          <button class="wbtn wbtn-close" :data-tip="t.chat.close" @click="emit('close')">
+            <svg width="10" height="10" viewBox="0 0 10 10"><line x1="1" y1="1" x2="9" y2="9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="9" y1="1" x2="1" y2="9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          </button>
         </div>
       </header>
 
@@ -682,7 +692,7 @@ watch(visible, v => {
       <button
         v-if="!atBottom"
         class="chat-jump-latest"
-        :title="t.chat.jumpToLatest"
+        v-tip="t.chat.jumpToLatest"
         @click="jumpToLatest"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
@@ -713,7 +723,7 @@ watch(visible, v => {
         <div class="chat-toolbar">
           <div class="toolbar-left">
             <!-- Attach image -->
-            <button class="chat-tool-btn" :title="t.chat.attachImage" @click="pickImages">
+            <button class="chat-tool-btn" v-tip="t.chat.attachImage" @click="pickImages">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
                 <rect x="3" y="4" width="18" height="16" rx="2.5" stroke="currentColor" stroke-width="2"/>
                 <circle cx="8.5" cy="9.5" r="1.6" fill="currentColor"/>
@@ -724,7 +734,7 @@ watch(visible, v => {
             <button
               class="chat-tool-btn emoji-toggle"
               :class="{ 'is-active': showEmoji }"
-              :title="t.chat.emoji"
+              v-tip="t.chat.emoji"
               @click="toggleEmoji"
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
@@ -749,7 +759,7 @@ watch(visible, v => {
             <button
               class="chat-tool-btn"
               :class="{ 'is-listening': listening }"
-              :title="voiceTitle()"
+              v-tip="voiceTitle()"
               :disabled="!sttSupported || busy"
               @click="toggleVoice"
             >
@@ -762,7 +772,7 @@ watch(visible, v => {
             <!-- Send -->
             <button
               class="chat-send"
-              :title="t.chat.send"
+              v-tip="t.chat.send"
               :disabled="busy || (!input.trim() && !imageTray.length)"
               @click="send"
             >
@@ -784,8 +794,9 @@ watch(visible, v => {
         />
       </Transition>
 
-      <!-- History search overlay (sits on top of the panel when open) -->
-      <ChatHistory ref="historyRef" @jump="onHistoryJump" />
+      <!-- History search overlay (sits on top of the panel when open).
+           Its ✕ closes the whole chat panel (its ‹ goes back to the chat). -->
+      <ChatHistory ref="historyRef" @jump="onHistoryJump" @close="emit('close')" />
     </div>
   </Transition>
 </template>
@@ -801,6 +812,7 @@ watch(visible, v => {
   box-sizing: border-box;
   z-index: 50;
 
+  border-radius: 12px;   /* match SettingsWindow .shell */
   background: rgba(236, 246, 236, 0.92);
   backdrop-filter: blur(24px) saturate(160%);
   -webkit-backdrop-filter: blur(24px) saturate(160%);
@@ -820,40 +832,56 @@ watch(visible, v => {
   font-weight: 600;
   color: rgba(30, 52, 30, 0.9);
 }
-.chat-header-actions {
+
+/* ── Window controls (mirror SettingsWindow .win-controls / .wbtn) ── */
+.win-controls {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 6px;
+  flex-shrink: 0;
 }
-.chat-icon-btn {
+.wbtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 22px;
   border: none;
-  background: transparent;
-  cursor: pointer;
-  color: rgba(40, 70, 40, 0.55);
-  line-height: 0;
-  padding: 3px 4px;
   border-radius: 6px;
-  transition: background 150ms ease, color 150ms ease;
-}
-.chat-icon-btn:hover {
-  background: rgba(119, 153, 119, 0.16);
-  color: rgba(30, 60, 30, 0.85);
-}
-.chat-close {
-  border: none;
-  background: transparent;
   cursor: pointer;
-  font-size: 13px;
+  background: rgba(0, 0, 0, 0.06);
   color: rgba(40, 70, 40, 0.55);
-  line-height: 1;
-  padding: 2px 4px;
-  border-radius: 6px;
-  transition: background 150ms ease, color 150ms ease;
+  transition: background 100ms ease, color 100ms ease, transform 80ms ease;
 }
-.chat-close:hover {
-  background: rgba(200, 110, 110, 0.16);
-  color: rgba(160, 50, 50, 0.85);
+.wbtn:hover  { background: rgba(0, 0, 0, 0.12); color: rgba(20, 50, 20, 0.85); }
+.wbtn:active { transform: scale(0.90); }
+.wbtn-min:hover   { background: rgba(200, 145, 30, 0.82); color: #fff; }
+.wbtn-close:hover { background: rgba(220, 60, 60, 0.82);  color: #fff; }
+
+/* ── Hover tooltip (mirrors TarotCard .ctrl[data-tip]) ──────────────── */
+[data-tip] { position: relative; }
+[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  top: calc(100% + 7px);
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  padding: 4px 9px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #2a4a2a;
+  background: rgba(245, 250, 245, 0.97);
+  border: 1px solid rgba(148, 185, 148, 0.45);
+  box-shadow: 0 2px 8px rgba(40, 70, 40, 0.14);
+  pointer-events: none;
+  z-index: 90;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 120ms ease, visibility 120ms ease;
 }
+[data-tip]:hover::after { opacity: 1; visibility: visible; }
 
 /* ── Message list ────────────────────────────────────────────────── */
 .chat-list {

@@ -12,6 +12,7 @@
 import { ref, computed, nextTick, onMounted } from 'vue'
 import { useI18n } from '../i18n'
 import { EMOJI_GROUPS, type Emoji, type EmojiGroup } from '../config/emoji'
+import { vTip } from '../composables/useTooltip'
 
 const emit = defineEmits<{ select: [char: string]; close: [] }>()
 const { t, locale } = useI18n()
@@ -62,7 +63,7 @@ onMounted(() => nextTick(() => searchRef.value?.focus()))
             v-for="e in g.emojis"
             :key="e.char"
             class="emoji-cell"
-            :title="localizedKeywords(e)"
+            v-tip="localizedKeywords(e)"
             @click="emit('select', e.char)"
           >
             {{ e.char }}

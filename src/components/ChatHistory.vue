@@ -14,6 +14,8 @@ import { ref, watch, computed, nextTick, onBeforeUnmount } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { useI18n } from '../i18n'
 import type { StoredMessage } from '../config/chat'
+import DatePicker from './DatePicker.vue'
+import { minimizeWindow } from '../composables/useWindowControls'
 
 const emit = defineEmits<{ jump: [id: number]; close: [] }>()
 const { t, locale } = useI18n()
@@ -23,7 +25,7 @@ const DEBOUNCE_MS = 250
 
 const visible  = ref(false)
 const query    = ref('')
-const fromDate = ref('')   // 'YYYY-MM-DD' from <input type="date">
+const fromDate = ref('')   // 'YYYY-MM-DD' from the DatePicker (empty = unset)
 const toDate   = ref('')
 const results  = ref<StoredMessage[]>([])
 const searched = ref(false)  // a query has run at least once with active filters
@@ -109,9 +111,22 @@ function roleLabel(role: string): string {
 <template>
   <Transition name="hist">
     <div v-if="visible" class="chat-history pet-ui-overlay">
-      <header class="hist-header">
-        <button class="hist-back" :title="t.chat.historyClose" @click="close">‹</button>
-        <span class="hist-title">{{ t.chat.history }}</span>
+      <!-- Titlebar: ‹ back-to-chat + drag region + window controls. -->
+      <header class="hist-header" data-tauri-drag-region>
+        <button class="hist-back" :data-tip="t.chat.historyClose" @mousedown.stop @click="close">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+            <path d="M15 5l-7 7 7 7" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <span class="hist-title" data-tauri-drag-region>{{ t.chat.history }}</span>
+        <div class="win-controls" @mousedown.stop>
+          <button class="wbtn wbtn-min" :data-tip="t.chat.minimize" @click="minimizeWindow">
+            <svg width="10" height="2" viewBox="0 0 10 2"><rect width="10" height="1.5" rx="0.75" fill="currentColor"/></svg>
+          </button>
+          <button class="wbtn wbtn-close" :data-tip="t.chat.close" @click="emit('close')">
+            <svg width="10" height="10" viewBox="0 0 10 10"><line x1="1" y1="1" x2="9" y2="9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="9" y1="1" x2="1" y2="9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          </button>
+        </div>
       </header>
 
       <!-- Filters -->
@@ -125,21 +140,26 @@ function roleLabel(role: string): string {
           maxlength="100"
         />
         <div class="hist-dates">
-          <label class="date-field">
-            <span>{{ t.chat.dateFrom }}</span>
-            <input v-model="fromDate" type="date" class="hist-date" />
-          </label>
-          <label class="date-field">
-            <span>{{ t.chat.dateTo }}</span>
-            <input v-model="toDate" type="date" class="hist-date" />
-          </label>
+          <div class="date-field">
+            <span class="date-label">{{ t.chat.dateFrom }}</span>
+            <DatePicker v-model="fromDate" align="left" />
+          </div>
+          <div class="date-field">
+            <span class="date-label">{{ t.chat.dateTo }}</span>
+            <DatePicker v-model="toDate" align="right" />
+          </div>
         </div>
       </div>
 
       <!-- Results -->
       <div class="hist-results">
-        <p v-if="!searched" class="hist-hint">{{ t.chat.searchHint }}</p>
-        <p v-else-if="!results.length" class="hist-hint">{{ t.chat.searchNoResults }}</p>
+        <div v-if="!searched || !results.length" class="hist-empty">
+          <svg class="hist-empty-icon" width="34" height="34" viewBox="0 0 24 24" fill="none">
+            <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/>
+            <path d="M16 16l4.5 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          </svg>
+          <p class="hist-hint">{{ !searched ? t.chat.searchHint : t.chat.searchNoResults }}</p>
+        </div>
         <button
           v-for="m in results"
           :key="m.id"
@@ -169,6 +189,7 @@ function roleLabel(role: string): string {
   box-sizing: border-box;
   z-index: 60;            /* above the chat panel */
 
+  border-radius: 12px;    /* match SettingsWindow .shell */
   background: rgba(236, 246, 236, 0.96);
   backdrop-filter: blur(24px) saturate(160%);
   -webkit-backdrop-filter: blur(24px) saturate(160%);
@@ -183,22 +204,82 @@ function roleLabel(role: string): string {
   gap: 6px;
   flex-shrink: 0;
 }
-.hist-back {
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  font-size: 20px;
-  line-height: 1;
-  color: rgba(40, 70, 40, 0.7);
-  padding: 0 4px;
-  border-radius: 6px;
-  transition: background 150ms ease;
-}
-.hist-back:hover { background: rgba(119, 153, 119, 0.16); }
 .hist-title { font-size: 13px; font-weight: 600; color: rgba(30, 52, 30, 0.9); }
 
+/* Back-to-chat — quiet borderless icon button (not a window control). */
+.hist-back {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 22px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  background: transparent;
+  color: rgba(40, 70, 40, 0.6);
+  transition: background 120ms ease, color 120ms ease, transform 80ms ease;
+}
+.hist-back:hover  { background: rgba(119, 153, 119, 0.16); color: rgba(20, 50, 20, 0.9); }
+.hist-back:active { transform: scale(0.90); }
+
+/* ── Window controls (mirror SettingsWindow .win-controls / .wbtn) ── */
+.win-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  margin-left: auto;   /* push the controls to the right edge */
+}
+.wbtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 22px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  background: rgba(0, 0, 0, 0.06);
+  color: rgba(40, 70, 40, 0.55);
+  transition: background 100ms ease, color 100ms ease, transform 80ms ease;
+}
+.wbtn:hover  { background: rgba(0, 0, 0, 0.12); color: rgba(20, 50, 20, 0.85); }
+.wbtn:active { transform: scale(0.90); }
+.wbtn-min:hover   { background: rgba(200, 145, 30, 0.82); color: #fff; }
+.wbtn-close:hover { background: rgba(220, 60, 60, 0.82);  color: #fff; }
+
+/* ── Hover tooltip (mirrors TarotCard .ctrl[data-tip]) ──────────────── */
+[data-tip] { position: relative; }
+[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  top: calc(100% + 7px);
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  padding: 4px 9px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #2a4a2a;
+  background: rgba(245, 250, 245, 0.97);
+  border: 1px solid rgba(148, 185, 148, 0.45);
+  box-shadow: 0 2px 8px rgba(40, 70, 40, 0.14);
+  pointer-events: none;
+  z-index: 90;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 120ms ease, visibility 120ms ease;
+}
+[data-tip]:hover::after { opacity: 1; visibility: visible; }
+/* The back button hugs the left edge — anchor its tooltip there so it can't clip. */
+.hist-back[data-tip]::after { left: 0; transform: none; }
+
 /* ── Filters ─────────────────────────────────────────────────────── */
-.hist-filters { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
+/* position+z-index so the date-picker popover paints above the results list */
+.hist-filters { position: relative; z-index: 5; display: flex; flex-direction: column; gap: 8px; flex-shrink: 0; }
 .hist-search {
   width: 100%;
   box-sizing: border-box;
@@ -215,29 +296,20 @@ function roleLabel(role: string): string {
   border-color: rgba(119, 153, 119, 0.85);
   box-shadow: 0 0 0 2px rgba(119, 153, 119, 0.18);
 }
-.hist-dates { display: flex; gap: 6px; }
+.hist-dates { display: flex; gap: 8px; }
 .date-field {
   flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
+}
+.date-label {
+  flex-shrink: 0;
   font-size: 11px;
+  font-weight: 500;
   color: rgba(40, 70, 40, 0.6);
 }
-.hist-date {
-  flex: 1;
-  min-width: 0;
-  box-sizing: border-box;
-  padding: 4px 6px;
-  border: 1px solid rgba(148, 185, 148, 0.5);
-  border-radius: 7px;
-  background: rgba(255, 255, 255, 0.9);
-  color: #1a2e1a;
-  font-size: 11px;
-  font-family: inherit;
-  outline: none;
-}
-.hist-date:focus { border-color: rgba(119, 153, 119, 0.85); }
 
 /* ── Results ─────────────────────────────────────────────────────── */
 .hist-results {
@@ -253,12 +325,20 @@ function roleLabel(role: string): string {
   background: rgba(119, 153, 119, 0.4);
   border-radius: 3px;
 }
-.hist-hint {
+.hist-empty {
   margin: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px;
+}
+.hist-empty-icon { color: rgba(119, 153, 119, 0.55); }
+.hist-hint {
+  margin: 0;
   font-size: 12px;
   text-align: center;
-  color: rgba(40, 70, 40, 0.45);
-  padding: 0 16px;
+  color: rgba(40, 70, 40, 0.5);
 }
 .hist-item {
   display: flex;
