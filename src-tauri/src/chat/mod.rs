@@ -14,6 +14,8 @@
 
 #[cfg(test)]
 mod eval;
+#[cfg(test)]
+mod eval_record;
 pub(crate) mod extraction;
 mod media;
 mod prompt;
