@@ -749,7 +749,7 @@ watch(visible, v => {
           <div class="toolbar-right">
             <!-- Model selector (display-only) -->
             <div class="chat-model-selector" aria-hidden="true">
-              <span class="model-name">qwen-plus</span>
+              <span class="model-name">qwen3.7-plus</span>
               <span class="model-badge">Extra</span>
               <svg width="8" height="5" viewBox="0 0 8 5" fill="none">
                 <path d="M1 1l3 3 3-3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>

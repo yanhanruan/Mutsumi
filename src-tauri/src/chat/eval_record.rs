@@ -11,7 +11,7 @@
 //! with the scoring lines left blank for a human reviewer to fill (§3 of the plan).
 //!
 //! Faithfulness notes (documented in the file header it writes too):
-//!   * Reply model = `qwen-plus`, search OFF, temperature default — exactly the
+//!   * Reply model = `qwen3.7-plus`, search OFF, temperature default — exactly the
 //!     user-facing turn (`chat::turn_options`). `MEMORY_TOP_K=5`, self-mem top-3.
 //!   * History window = last 24 messages (frontend `CHAT_MAX_HISTORY*2`).
 //!   * "lite" suites run with an **empty** memory store. On a freshly-reset memory

@@ -27,7 +27,7 @@ use serde::{Deserialize, Serialize};
 use crate::http::{ApiError, HttpClient, HttpClientConfig};
 
 const DEFAULT_BASE_URL: &str = "https://dashscope.aliyuncs.com/compatible-mode/v1";
-const DEFAULT_CHAT_MODEL: &str = "qwen-plus";
+const DEFAULT_CHAT_MODEL: &str = "qwen3.7-plus";
 /// Vision-capable model for image turns (multimodal). Env-overridable.
 const DEFAULT_VISION_MODEL: &str = "qwen-vl-max";
 const DEFAULT_EMBED_MODEL: &str = "text-embedding-v3";
@@ -508,7 +508,7 @@ mod tests {
         // No tools / temperature / search → those keys are omitted.
         let msgs = vec![ChatMessage::system("be terse"), ChatMessage::user("hi")];
         let req = ChatRequest {
-            model: "qwen-plus",
+            model: "qwen3.7-plus",
             messages: &msgs,
             stream: false,
             tools: None,
@@ -516,7 +516,7 @@ mod tests {
             enable_search: None,
         };
         let v = serde_json::to_value(&req).unwrap();
-        assert_eq!(v["model"], "qwen-plus");
+        assert_eq!(v["model"], "qwen3.7-plus");
         assert_eq!(v["stream"], false);
         assert_eq!(v["messages"][0]["role"], "system");
         assert_eq!(v["messages"][1]["content"], "hi");
@@ -533,7 +533,7 @@ mod tests {
             serde_json::json!({"type": "object"}),
         )];
         let req = ChatRequest {
-            model: "qwen-plus",
+            model: "qwen3.7-plus",
             messages: &msgs,
             stream: false,
             tools: Some(&tools),
