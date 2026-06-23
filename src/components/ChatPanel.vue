@@ -1028,7 +1028,10 @@ watch(visible, v => {
   border: 1px solid rgba(148, 185, 148, 0.50);
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.90);
-  overflow: hidden;
+  /* visible (not hidden) so the upward-opening model dropdown isn't clipped at
+     the composer's top edge; the children are transparent, so the rounded
+     background still clips itself cleanly. */
+  overflow: visible;
   transition: border-color 150ms ease, box-shadow 150ms ease;
 }
 .chat-composer:focus-within {
