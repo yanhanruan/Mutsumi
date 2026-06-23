@@ -54,6 +54,18 @@ Mutsumi 是一个静静住在你屏幕角落的小伙伴。
 *  **让她睡觉 / 隐藏**：让她躲起来
 * 🔮 **每日塔罗占卜**：每天抽取3张专属塔罗牌，带来每天不一样的未知惊喜与指引。
 
+💬 **和睦聊天**：无论是太阳天还是雨天，睦头都会安静地陪在你身边：
+* 🥒 **小黄瓜**：为了尽可能还原睦头，我们结合剧情内容、角色设定、荣格八维与九型人格分析，对角色进行了长期拆解与建模。通过 Prompt Engineering 与行为约束设计，实现睦头安静而真诚的性格，而不是千篇一律的 AI 回复。
+* 🧠 **长期记忆**：她会记得你们聊过的事情：家里的猫、最近的工作、偶尔提起的小烦恼，甚至是你们之间那些不起眼的小约定。底层基于 RAG 记忆系统实现，本地化轻量存储。
+* 🗂️ **连续记录 & 历史检索**：所有对话像微信 / iMessage 一样连成一条时间线并保存在本地；可按关键词或日期翻查，向上滚动自动加载更早的消息，并按时间分组显示。
+* 🔍 **搜索增强**：睦头也会主动了解外面的世界。内置轻量级搜索系统，可以获取最新网络热点、Ave Mujica 相关资讯、天气等实时信息。相比依赖模型原生搜索 Agent，响应更快、成本更低，结果也更聚焦。
+* 🖼️ **图片识别**：睦子米可以看得懂你的照片！她会笨拙但真心地用自己的方式来表达（你做的菜、你的猫、窗外的雨……），陪你度过每一次值得纪念的时刻。
+* 💙 **Emoji 选择器**：内置可搜索的表情面板，支持中 / 英 / 日关键词。
+* 🎙️ **语音输入**：支持语音输入转文本。
+
+<!-- 建议这里放一张聊天窗口的截图 -->
+<p><sub><i>聊天为云端 AI 能力，需要配置通义千问（DashScope）的 API Key 后使用；语音朗读（让睦开口说话）仍在开发中。</i></sub></p>
+
 <h3 align="center">🎧 睦子米喜欢跟着节奏摇摆</h3>
 
 <p align="center">
@@ -87,7 +99,7 @@ Mutsumi 是一个静静住在你屏幕角落的小伙伴。
 
 
 
-下个版本即将推出🚀：休闲小音游、屏保飞行模式.....
+下个版本即将推出🚀：GPT-SoVITS小睦AI语音、休闲小音游、屏保飞行模式.....
 
 
 
@@ -124,11 +136,14 @@ Tauri 2（Rust 后端）+ Vue 3 前端，打包为单文件原生 Windows 应用
 ```
 Mutsumi/
 ├── src/                        Vue 前端
-│   ├── components/             UI 组件（PetWindow、SettingsWindow 等）
+│   ├── components/             UI 组件（PetWindow、SettingsWindow、ChatPanel 等）
 │   ├── composables/            逻辑钩子（动画、音频感知、天气、番茄钟…）
 │   ├── i18n/locales/           多语言支持（中文 / 英文 / 日文）
 │   └── data/                   台词与对话数据
 ├── src-tauri/src/              Rust 后端
+│   ├── chat/                   角色扮演聊天（RAG 记忆 · 提取 · 反思）
+│   ├── db/                     SQLite（长期记忆 / 聊天记录）
+│   ├── services/qwen.rs        通义千问 LLM（聊天 / 视觉 / 向量）
 │   ├── audio.rs                全局系统音频监听（WASAPI）
 │   ├── media.rs                媒体播放控制（SMTC）
 │   ├── weather.rs              天气数据获取与缓存
@@ -141,6 +156,14 @@ Mutsumi/
 │   └── idle.rs                 待机行为逻辑
 └── public/assets/              动画帧资源（WebP 序列）
 ```
+### 🎁 致谢与参考
+
+特别感谢以下伙伴及项目的贡献，让小睦能够顺利来到大家的桌面：
+
+*   **社区贡献**：感谢 *-睦头人おれ.**, **可爱睦子米-_**, **CyanKirin99** 的支持与贡献，感谢 **xxx** 提供的 bug 反馈，以及全体用户的热情参与和反馈。
+*   **性格模板 & 搜索功能**：参考自开源项目 [BANDORI-PET-REV](https://github.com/HELPMEEADICE/BANDORI-PET-REV)。
+*   **Agent 状态系统**：设计灵感与架构参考论文 [《Generative Agents》](https://arxiv.org/abs/2304.03442)。
+*   **人物背景剧情**：考据参考自 [萌娘百科 - 若叶睦](https://zh.moegirl.org.cn/%E8%8B%A5%E5%8F%B6%E7%9D%A6)。
 
 ### 🤝 参与贡献
 
@@ -188,6 +211,33 @@ Mutsumi is a quiet little companion living in the corner of your screen. She min
 - 😴 **Put Her to Sleep / Hide Her** — Let her take a break and disappear from view.
 - 🔮 **Daily Tarot Reading** — Draw three tarot cards each day for a fresh dose of mystery, surprises, and inspiration.
 
+💬 **Chat with Mutsumi**: Whether it's a sunny day or a rainy one, Mutsumi will always be quietly by your side.
+
+* 🥒 **Project Cucumber**
+  To recreate Mutsumi as faithfully as possible, we conducted extensive character analysis based on her story, official characterization, Jungian cognitive functions, and the Enneagram. Through prompt engineering and behavioral constraints, Mutsumi is designed to respond with the quiet sincerity and reserved personality that define her, rather than sounding like a generic AI assistant.
+
+* 🧠 **Long-Term Memory**
+  She remembers the things you've talked about: your cat, your work, small worries mentioned in passing, and even the little promises you make together. Powered by a RAG-based memory system with lightweight local storage, your conversations can continue naturally over time.
+
+* 🗂️ **Persistent Chat History & Search**
+  All conversations are stored locally and organized into a continuous timeline, similar to WeChat, iMessage, or other modern messaging apps. Browse past chats by keyword or date, automatically load older messages as you scroll, and view conversations grouped by time.
+
+* 🔍 **Enhanced Search**
+  Mutsumi can keep up with the world outside, too. A built-in lightweight search system allows her to access real-time information such as trending topics, Ave Mujica news, weather updates, and more. Compared with relying solely on an LLM's built-in search agent, this approach is faster, more cost-efficient, and more focused.
+
+* 🖼️ **Image Understanding**
+  Mutsumi can understand the photos you share. Whether it's a meal you cooked, your cat, or the rain outside your window, she'll respond in her own sincere and sometimes awkward way, helping you preserve the moments that matter.
+
+* 💙 **Emoji Picker**
+  Includes a searchable emoji panel with support for Chinese, English, and Japanese keywords.
+
+* 🎙️ **Voice Input**
+  Speak naturally and have your voice automatically converted into text for a more effortless chatting experience.
+
+
+<!-- A screenshot of the chat window could go here -->
+<p><sub><i>Chat is a cloud AI capability and requires your own Qwen (DashScope) API key; spoken replies (Mutsumi talking back) are still under construction.</i></sub></p>
+
 <h3 align="center">🎧 Mutsumi Loves Bopping Along to Your Music</h3>
 
 <p align="center">
@@ -222,7 +272,7 @@ Right-click her icon in the system tray (bottom-right corner) to tweak: `Pomodor
 
 <p align="center"><img src="docs/images/setting.avif" width="440" alt="Settings window" /></p>
 
-🚀 Coming soon: Casual Rhythm Game, Flying Screensaver Mode...
+🚀 Coming soon: Spoken replies (Mutsumi's own voice), Casual Rhythm Game, Flying Screensaver Mode...
 
 ### 🛠️ Architecture
 
@@ -231,11 +281,14 @@ Tauri 2 (Rust backend) + Vue 3 frontend, bundled as a single native Windows app.
 ```
 Mutsumi/
 ├── src/                        Vue frontend
-│   ├── components/             UI components (PetWindow, SettingsWindow, etc.)
+│   ├── components/             UI components (PetWindow, SettingsWindow, ChatPanel, etc.)
 │   ├── composables/            Logic hooks (animation, audio, weather, pomodoro…)
 │   ├── i18n/locales/           Translations (Chinese / English / Japanese)
 │   └── data/                   Dialogue and quote data
 ├── src-tauri/src/              Rust backend
+│   ├── chat/                   Role-play chat (RAG memory · extraction · reflection)
+│   ├── db/                     SQLite (long-term memory / chat history)
+│   ├── services/qwen.rs        Qwen LLM (chat / vision / embeddings)
 │   ├── audio.rs                Global system audio monitoring (WASAPI)
 │   ├── media.rs                Media playback control (SMTC)
 │   ├── weather.rs              Weather fetching and caching
@@ -248,6 +301,14 @@ Mutsumi/
 │   └── idle.rs                 Idle behaviour logic
 └── public/assets/              Animation frames (WebP sequences)
 ```
+### 🎁 Acknowledgements & References
+
+Special thanks to the following contributors and projects whose support made it possible to bring Mutsumi to everyone's desktop:
+
+* **Community Contributions:** Many thanks to **-睦头人おれ.**, **可爱睦子米-_**, and **CyanKirin99** for their support and contributions; to **xxx** for valuable bug reports; and to all users for their enthusiasm, feedback, and continued support.
+* **Character Prompt & Search Functionality:** Inspired by and adapted from the open-source project BANDORI-PET-REV.
+* **Agent State System:** The design and architecture were inspired by the paper *Generative Agents: Interactive Simulacra of Human Behavior*.
+* **Character Background & Lore Research:** Reference materials were gathered from the Moegirl Wiki article on Wakaba Mutsumi.
 
 ### 🤝 Contributing
 
