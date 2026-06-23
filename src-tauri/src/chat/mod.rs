@@ -111,14 +111,22 @@ fn turn_options() -> ChatOptions {
 /// no web context rather than making the user wait.
 const SEARCH_BUDGET: Duration = Duration::from_secs(9);
 
-/// Errors surfaced from the chat pipeline. Serializes as its message so it lands
-/// in the rejected-promise path of the frontend `invoke`.
+/// Errors surfaced from the chat pipeline.
+///
+/// Serializes as a **stable code** (see [`ChatError::code`]) — not a prose
+/// message — so the frontend can map each failure class to its own localized,
+/// in-character line (network down, key missing, out of credit, …) instead of a
+/// single vague "something went wrong".
 #[derive(Debug, thiserror::Error)]
 pub enum ChatError {
     #[error(transparent)]
     Api(#[from] ApiError),
     #[error("database unavailable: {0}")]
     Db(String),
+    /// No API key configured — checked up front so the user gets a "set your
+    /// key" hint rather than a raw auth failure.
+    #[error("api key not configured")]
+    ApiKeyMissing,
     /// Stable codes the frontend maps to localized in-character alerts.
     #[error("image_too_large")]
     ImageTooLarge,
@@ -126,12 +134,77 @@ pub enum ChatError {
     ImageBadType,
 }
 
+impl ChatError {
+    /// A stable, machine-readable code the frontend maps to a localized message.
+    /// HTTP failures are inspected so auth / billing / moderation / rate-limit /
+    /// transport problems are told apart.
+    pub fn code(&self) -> &'static str {
+        match self {
+            ChatError::ApiKeyMissing => "api_key_missing",
+            ChatError::ImageTooLarge => "image_too_large",
+            ChatError::ImageBadType => "image_bad_type",
+            ChatError::Db(_) => "db_error",
+            ChatError::Api(e) => api_error_code(e),
+        }
+    }
+}
+
+/// Classify a transport/HTTP [`ApiError`] into a stable frontend code.
+fn api_error_code(e: &ApiError) -> &'static str {
+    match e {
+        ApiError::Network(re) if re.is_timeout() => "timeout",
+        ApiError::Network(_) => "network",
+        ApiError::Api { status, body } => classify_api_status(*status, body),
+        // A malformed/undecodable body or a request we couldn't build: no useful
+        // category to show the user.
+        ApiError::Decode(_) | ApiError::Build(_) => "unknown",
+    }
+}
+
+/// Bucket a non-2xx DashScope (OpenAI-compatible) response by status code and the
+/// provider error code/message in the body. Billing is checked first so a
+/// `403 AllocationQuota.FreeTierOnly` lands as "out of credit", not an auth error.
+fn classify_api_status(status: u16, body: &str) -> &'static str {
+    let b = body.to_ascii_lowercase();
+    // Billing / quota: Arrearage, AllocationQuota.FreeTierOnly, quota exceeded, …
+    if status == 402
+        || b.contains("arrearage")
+        || b.contains("insufficient")
+        || b.contains("allocationquota")
+        || b.contains("freetieronly")
+        || b.contains("quota")
+    {
+        return "insufficient_balance";
+    }
+    // Auth / API key.
+    if status == 401
+        || b.contains("invalidapikey")
+        || b.contains("invalid_api_key")
+        || b.contains("incorrect api key")
+        || b.contains("authentication")
+    {
+        return "api_key_invalid";
+    }
+    // Rate limiting / throttling.
+    if status == 429 || b.contains("throttl") || b.contains("rate limit") || b.contains("requests rate") {
+        return "rate_limited";
+    }
+    // Content moderation — the input itself was rejected ("invalid question").
+    if b.contains("datainspectionfailed") || b.contains("data_inspection") || b.contains("inappropriate") {
+        return "content_filtered";
+    }
+    if status >= 500 {
+        return "server_error";
+    }
+    "api_error"
+}
+
 impl Serialize for ChatError {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        serializer.serialize_str(&self.to_string())
+        serializer.serialize_str(self.code())
     }
 }
 
@@ -237,6 +310,9 @@ pub async fn chat_send(
     locale: Option<String>,
     history: Option<Vec<ChatMessage>>,
 ) -> Result<String, ChatError> {
+    if !qwen.has_key() {
+        return Err(ChatError::ApiKeyMissing);
+    }
     let locale = locale.unwrap_or_else(|| "zh".into());
     let history = history.unwrap_or_default();
 
@@ -274,6 +350,9 @@ pub async fn chat_stream(
     history: Option<Vec<ChatMessage>>,
     on_event: Channel<ChatEvent>,
 ) -> Result<(), ChatError> {
+    if !qwen.has_key() {
+        return Err(ChatError::ApiKeyMissing);
+    }
     let locale = locale.unwrap_or_else(|| "zh".into());
     let history = history.unwrap_or_default();
 
@@ -474,6 +553,9 @@ pub async fn chat_vision_stream(
     history: Option<Vec<ChatMessage>>,
     on_event: Channel<ChatEvent>,
 ) -> Result<(), ChatError> {
+    if !qwen.has_key() {
+        return Err(ChatError::ApiKeyMissing);
+    }
     let locale = locale.unwrap_or_else(|| "zh".into());
     let history = history.unwrap_or_default();
     let caption = message.unwrap_or_default().trim().to_string();
@@ -577,6 +659,34 @@ mod tests {
 
     fn ex(u: &str) -> Exchange {
         Exchange { user: u.into(), reply: "……".into() }
+    }
+
+    #[test]
+    fn classify_api_status_buckets_known_failures() {
+        // Billing / quota — including the 403 free-tier allocation gate.
+        assert_eq!(classify_api_status(402, ""), "insufficient_balance");
+        assert_eq!(
+            classify_api_status(403, r#"{"error":{"code":"AllocationQuota.FreeTierOnly"}}"#),
+            "insufficient_balance"
+        );
+        assert_eq!(
+            classify_api_status(400, r#"{"code":"Arrearage","message":"insufficient balance"}"#),
+            "insufficient_balance"
+        );
+        // Auth.
+        assert_eq!(classify_api_status(401, ""), "api_key_invalid");
+        assert_eq!(
+            classify_api_status(400, r#"{"code":"InvalidApiKey"}"#),
+            "api_key_invalid"
+        );
+        // Rate limit + moderation + server + generic.
+        assert_eq!(classify_api_status(429, ""), "rate_limited");
+        assert_eq!(
+            classify_api_status(400, r#"{"code":"DataInspectionFailed"}"#),
+            "content_filtered"
+        );
+        assert_eq!(classify_api_status(503, ""), "server_error");
+        assert_eq!(classify_api_status(418, "teapot"), "api_error");
     }
 
     #[test]

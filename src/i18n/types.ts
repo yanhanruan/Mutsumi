@@ -149,7 +149,16 @@ export interface Translations {
     empty:       string   // empty-conversation hint
     close:       string   // close-button title
     minimize:    string   // titlebar minimize-button tooltip
-    error:       string   // generic failure line
+    error:       string   // generic failure line (fallback for unclassified errors)
+    // ── Classified failure lines (mapped from the Rust ChatError code) ──
+    errorNetwork:             string   // transport down / DNS / connection refused
+    errorTimeout:             string   // request timed out
+    errorApiKeyMissing:       string   // no API key configured
+    errorApiKeyInvalid:       string   // key rejected by the provider (401)
+    errorInsufficientBalance: string   // account out of credit / quota exhausted
+    errorContentFiltered:     string   // input rejected by content moderation
+    errorRateLimited:         string   // throttled — too many requests
+    errorServer:              string   // provider-side 5xx
     attachFile:  string   // attach-file button tooltip (incomplete feature)
     voiceInput:  string   // voice-input button tooltip (idle)
     voiceListening:  string   // voice-input button tooltip while recording

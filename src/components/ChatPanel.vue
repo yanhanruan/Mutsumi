@@ -320,10 +320,10 @@ async function send() {
       content: finalContent || streaming.value || '',
       created_at: Math.floor(Date.now() / 1000),
     })
-  } catch {
+  } catch (err) {
     messages.value.push({
       role: 'assistant',
-      content: t.value.chat.error,
+      content: chatErrorMsg(err),
       created_at: Math.floor(Date.now() / 1000),
     })
   } finally {
@@ -386,7 +386,7 @@ async function sendVision() {
   } catch (err) {
     // Roll back the optimistic image bubble(s) and surface the reason as an alert.
     messages.value.splice(startLen)
-    flash(alertFor(err))
+    flash(chatErrorMsg(err))
   } finally {
     streaming.value = null
     busy.value = false
@@ -555,12 +555,26 @@ function flash(msg: string) {
   alertTimer = setTimeout(() => { alertMsg.value = null }, 2600)
 }
 
-/** Map a Rust validation error code (or anything) to a user-facing alert. */
-function alertFor(err: unknown): string {
-  const code = String(err)
-  if (code.includes('image_too_large')) return t.value.chat.imageTooLarge
-  if (code.includes('image_bad_type')) return t.value.chat.imageBadType
-  return t.value.chat.error
+/**
+ * Map a Rust `ChatError` code to a user-facing, in-character line. The backend
+ * serializes a stable code (network / timeout / api_key_missing / … — see
+ * `ChatError::code`); anything unrecognised falls back to the generic line.
+ */
+function chatErrorMsg(err: unknown): string {
+  const c = t.value.chat
+  switch (String(err)) {
+    case 'image_too_large':       return c.imageTooLarge
+    case 'image_bad_type':        return c.imageBadType
+    case 'network':               return c.errorNetwork
+    case 'timeout':               return c.errorTimeout
+    case 'api_key_missing':       return c.errorApiKeyMissing
+    case 'api_key_invalid':       return c.errorApiKeyInvalid
+    case 'insufficient_balance':  return c.errorInsufficientBalance
+    case 'content_filtered':      return c.errorContentFiltered
+    case 'rate_limited':          return c.errorRateLimited
+    case 'server_error':          return c.errorServer
+    default:                      return c.error
+  }
 }
 
 function extOf(path: string): string {
@@ -611,7 +625,7 @@ async function onPaste(e: ClipboardEvent) {
     const staged = await invoke<{ path: string }>('chat_stage_clipboard_image')
     addPaths([staged.path])
   } catch (err) {
-    flash(alertFor(err))
+    flash(chatErrorMsg(err))
   }
 }
 
