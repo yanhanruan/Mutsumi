@@ -87,13 +87,22 @@ impl Default for ChatBuffer {
     }
 }
 
-/// Chat options for the user-facing turn. Enables DashScope's built-in web search
-/// so in-world factual questions (band rosters, dates, real events) are grounded
-/// rather than hallucinated. It is model-gated — Qwen only actually searches when
-/// it judges it needs to — so casual/emotional turns pay no extra latency.
+/// Upper bound on a single reply's generated tokens. Mutsumi is terse (1–2 short
+/// lines), so this only guards against a runaway generation — it rarely binds.
+const MAX_REPLY_TOKENS: u32 = 512;
+
+/// Chat options for the user-facing turn.
+///
+/// `enable_thinking: false` skips the Qwen3.x chain-of-thought — for terse,
+/// in-character replies the reasoning pass adds latency without improving the
+/// answer (world-facts are already grounded by the persona block), so turning it
+/// off is the main per-turn latency win. `max_completion_tokens` caps a runaway
+/// reply. Web search stays off (grounding comes from the model + persona facts).
 fn turn_options() -> ChatOptions {
     ChatOptions {
         enable_search: false,
+        enable_thinking: Some(false),
+        max_completion_tokens: Some(MAX_REPLY_TOKENS),
         ..Default::default()
     }
 }

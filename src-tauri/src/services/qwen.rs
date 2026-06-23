@@ -179,6 +179,10 @@ struct ChatRequest<'a> {
     model: &'a str,
     messages: &'a [ChatMessage],
     stream: bool,
+    /// Stream-only: ask the provider to emit a final `usage` chunk so we can see
+    /// `cached_tokens` (whether the stable persona prefix hit the context cache).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stream_options: Option<StreamOptions>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<&'a [Tool]>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -186,6 +190,19 @@ struct ChatRequest<'a> {
     /// DashScope extension: enable built-in web search for this turn.
     #[serde(skip_serializing_if = "Option::is_none")]
     enable_search: Option<bool>,
+    /// DashScope extension: hybrid-thinking switch (Qwen3.x). `Some(false)` skips
+    /// chain-of-thought → much lower latency. Omitted (`None`) ⇒ provider default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    enable_thinking: Option<bool>,
+    /// Cap on generated tokens (the current param; supersedes the deprecated
+    /// `max_tokens`). For a thinking model this also bounds the reasoning length.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_completion_tokens: Option<u32>,
+}
+
+#[derive(Debug, Serialize)]
+struct StreamOptions {
+    include_usage: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -207,6 +224,16 @@ pub struct Usage {
     pub prompt_tokens: u32,
     pub completion_tokens: u32,
     pub total_tokens: u32,
+    /// Prompt-token breakdown; `cached_tokens` is how much of the prompt was
+    /// served from the provider's context cache (the big stable persona prefix).
+    #[serde(default)]
+    pub prompt_tokens_details: Option<PromptTokensDetails>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PromptTokensDetails {
+    #[serde(default)]
+    pub cached_tokens: u32,
 }
 
 /// Per-call chat tuning. `Default` leaves everything provider-default.
@@ -214,6 +241,11 @@ pub struct Usage {
 pub struct ChatOptions {
     pub temperature: Option<f32>,
     pub enable_search: bool,
+    /// Hybrid-thinking models (Qwen3.x): `Some(false)` skips chain-of-thought for
+    /// much lower latency; `None` leaves the provider default.
+    pub enable_thinking: Option<bool>,
+    /// Cap on generated tokens for this call. `None` = the model's max.
+    pub max_completion_tokens: Option<u32>,
 }
 
 /// The assistant's reply plus why generation stopped (`"stop"` | `"tool_calls"`).
@@ -232,7 +264,11 @@ pub struct ChatCompletion {
 
 #[derive(Debug, Deserialize)]
 struct ChatStreamChunk {
+    #[serde(default)]
     choices: Vec<StreamChoice>,
+    /// Present only on the final chunk when `stream_options.include_usage` is set.
+    #[serde(default)]
+    usage: Option<Usage>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -325,9 +361,12 @@ impl QwenClient {
             model: &self.chat_model,
             messages,
             stream: false,
+            stream_options: None,
             tools,
             temperature: options.temperature,
             enable_search: options.enable_search.then_some(true),
+            enable_thinking: options.enable_thinking,
+            max_completion_tokens: options.max_completion_tokens,
         };
 
         let resp: ChatResponse = self.http.post_json(CHAT_PATH, &request).await?;
@@ -364,9 +403,12 @@ impl QwenClient {
             model: &self.chat_model,
             messages,
             stream: true,
+            stream_options: Some(StreamOptions { include_usage: true }),
             tools,
             temperature: options.temperature,
             enable_search: options.enable_search.then_some(true),
+            enable_thinking: options.enable_thinking,
+            max_completion_tokens: options.max_completion_tokens,
         };
         let body = serde_json::to_value(&request).map_err(|e| ApiError::Build(e.to_string()))?;
         self.stream_completion(body, on_delta).await
@@ -430,6 +472,7 @@ impl QwenClient {
         let mut pending = String::new(); // buffer for a not-yet-complete trailing line
         let mut full = String::new();
         let mut finish_reason = None;
+        let mut usage: Option<Usage> = None; // carried on the final chunk (include_usage)
 
         while let Some(chunk) = resp.chunk().await? {
             pending.push_str(&String::from_utf8_lossy(&chunk));
@@ -446,7 +489,11 @@ impl QwenClient {
                 }
                 // A malformed chunk shouldn't abort the stream — skip it.
                 if let Ok(parsed) = serde_json::from_str::<ChatStreamChunk>(payload) {
-                    if let Some(choice) = parsed.choices.into_iter().next() {
+                    let ChatStreamChunk { choices, usage: chunk_usage } = parsed;
+                    if chunk_usage.is_some() {
+                        usage = chunk_usage; // final usage-only chunk
+                    }
+                    if let Some(choice) = choices.into_iter().next() {
                         if let Some(content) = choice.delta.content {
                             if !content.is_empty() {
                                 full.push_str(&content);
@@ -461,10 +508,23 @@ impl QwenClient {
             }
         }
 
+        // Visibility into context-cache effectiveness: how much of the (large,
+        // stable persona) prompt was served from cache vs. reprocessed each turn.
+        if cfg!(debug_assertions) {
+            if let Some(u) = &usage {
+                let cached = u.prompt_tokens_details.as_ref().map_or(0, |d| d.cached_tokens);
+                log::info!(
+                    target: "qwen",
+                    "← stream usage: prompt={} (cached {}), completion={}",
+                    u.prompt_tokens, cached, u.completion_tokens
+                );
+            }
+        }
+
         Ok(ChatCompletion {
             message: ChatMessage::assistant(full),
             finish_reason,
-            usage: None, // streaming responses don't carry usage in this path
+            usage,
         })
     }
 
@@ -511,9 +571,12 @@ mod tests {
             model: "qwen3.7-plus",
             messages: &msgs,
             stream: false,
+            stream_options: None,
             tools: None,
             temperature: None,
             enable_search: None,
+            enable_thinking: None,
+            max_completion_tokens: None,
         };
         let v = serde_json::to_value(&req).unwrap();
         assert_eq!(v["model"], "qwen3.7-plus");
@@ -522,6 +585,9 @@ mod tests {
         assert_eq!(v["messages"][1]["content"], "hi");
         assert!(v.get("tools").is_none());
         assert!(v.get("enable_search").is_none());
+        assert!(v.get("enable_thinking").is_none());
+        assert!(v.get("max_completion_tokens").is_none());
+        assert!(v.get("stream_options").is_none());
     }
 
     #[test]
@@ -536,11 +602,16 @@ mod tests {
             model: "qwen3.7-plus",
             messages: &msgs,
             stream: false,
+            stream_options: None,
             tools: Some(&tools),
             temperature: Some(0.7),
             enable_search: Some(true),
+            enable_thinking: Some(false),
+            max_completion_tokens: Some(512),
         };
         let v = serde_json::to_value(&req).unwrap();
+        assert_eq!(v["enable_thinking"], false);
+        assert_eq!(v["max_completion_tokens"], 512);
         assert_eq!(v["tools"][0]["type"], "function");
         assert_eq!(v["tools"][0]["function"]["name"], "extract_memory");
         // f32 → JSON loses exact 0.7; compare with tolerance.

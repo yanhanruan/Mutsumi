@@ -18,8 +18,13 @@ export const CHAT_WINDOW_DIMS: Record<'small' | 'medium' | 'large', [number, num
   large:  [400, 600],
 }
 
-/** Cap on the conversation history (message pairs) kept in memory / sent back. */
-export const CHAT_MAX_HISTORY = 12
+/**
+ * Cap on the conversation history (message pairs) sent back to the model each
+ * turn. Kept modest to bound the per-turn input (→ lower latency): older context
+ * is backfilled by the RAG memory pipeline, so trimming the raw window costs
+ * little coherence. ×2 messages are sent (a user + assistant per pair).
+ */
+export const CHAT_MAX_HISTORY = 8
 
 /**
  * How many transcript messages to load per page — for the initial open, for
