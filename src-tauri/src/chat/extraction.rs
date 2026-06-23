@@ -249,7 +249,7 @@ async fn run(app: &AppHandle, exchanges: &[Exchange]) -> Result<(), ApiError> {
     let Some(qwen_state) = app.try_state::<QwenState>() else {
         return Ok(());
     };
-    let qwen = qwen_state.0.clone();
+    let qwen = qwen_state.client();
 
     let facts = extract_from_batch(&qwen, exchanges).await?;
     if facts.is_empty() {

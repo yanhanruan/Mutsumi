@@ -72,6 +72,18 @@ export const zh: Translations = {
   clearMemoryConfirm: '再点一次确认',
   clearMemoryDoneMsg: '记忆已清空。',
 
+  // ── 通义千问 / 百炼 API Key ────────────────────────────────────────
+  apiKey:               '通义千问 API Key',
+  apiKeyHint:           '聊天功能需要申请阿里云百炼（有免费额度）API Key。在百炼控制台创建后粘贴到这里，安全加密，仅保存在本机，配置后立即生效。',
+  apiKeyPlaceholder:    'sk-... 粘贴你的 API Key',
+  apiKeySetPlaceholder: '已配置 · 粘贴可替换',
+  apiKeyStatusSet:      '✓ 已配置',
+  apiKeyStatusUnset:    '尚未配置——聊天将无法使用',
+  apiKeyClear:          '清除',
+  apiKeySavedMsg:       'API Key 已保存。',
+  apiKeyClearedMsg:     'API Key 已清除。',
+  apiKeyHelp:           '如何获取 API Key？',
+
   // ── Pomodoro badge ────────────────────────────────────────────────
   pomFocus: '专注',
   pomBreak: '休息',

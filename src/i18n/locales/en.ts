@@ -72,6 +72,18 @@ export const en: Translations = {
   clearMemoryConfirm: 'Tap again to confirm',
   clearMemoryDoneMsg: 'Memory cleared.',
 
+  // ── Qwen / Bailian (DashScope) API key ────────────────────────────
+  apiKey:               'Qwen API Key',
+  apiKeyHint:           'The chat feature requires an API Key from Alibaba Cloud Bailian (free quota available). Create an API Key in the Bailian Console and paste it here. It will be securely encrypted and stored only on your local device. The configuration takes effect immediately after being saved.',
+  apiKeyPlaceholder:    'sk-... paste your API key',
+  apiKeySetPlaceholder: 'Configured · paste to replace',
+  apiKeyStatusSet:      '✓ Configured',
+  apiKeyStatusUnset:    'Not set — chat will not work',
+  apiKeyClear:          'Clear',
+  apiKeySavedMsg:       'API key saved.',
+  apiKeyClearedMsg:     'API key cleared.',
+  apiKeyHelp:           'How to get an API key?',
+
   // ── Pomodoro badge ────────────────────────────────────────────────
   pomFocus: 'Focus',
   pomBreak: 'Break',

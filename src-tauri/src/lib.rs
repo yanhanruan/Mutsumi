@@ -73,6 +73,7 @@ pub fn run() {
     ))
     .plugin(tauri_plugin_dialog::init())
     .plugin(tauri_plugin_clipboard_manager::init())
+    .plugin(tauri_plugin_opener::init())
     .manage(shared.clone())
     .manage(weather_state)
     .manage(audio_state)
@@ -111,6 +112,8 @@ pub fn run() {
       card_export::reveal_in_folder,
       services::tts_synthesize,
       services::tts_set_recaptcha,
+      services::qwen_set_api_key,
+      services::qwen_key_status,
       chat::chat_send,
       chat::chat_stream,
       chat::chat_clear_memory,
@@ -148,6 +151,16 @@ pub fn run() {
           });
         }
         Err(e) => log::error!("failed to open memory database: {e}"),
+      }
+
+      // Apply a user-set 百炼 (Qwen/DashScope) API key from Settings, overriding
+      // the .env default. End users without a .env rely entirely on this.
+      if let Some(key) = services::load_persisted_qwen_key() {
+        if let Some(qwen) = app.try_state::<services::QwenState>() {
+          if let Err(e) = qwen.set_api_key(&key) {
+            log::warn!("failed to apply persisted Qwen API key: {e}");
+          }
+        }
       }
 
       // Load persisted state (energy/affection + pomodoro durations) if any.

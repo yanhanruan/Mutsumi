@@ -27,6 +27,10 @@ tauri-plugin-autostart = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-dialog = "2"               # native file-open picker (image attach)
 tauri-plugin-clipboard-manager = "2"    # read pasted clipboard images
+tauri-plugin-opener = "2"               # open the "how to get a key" tutorial in the system browser
+# OS credential store for the user's Qwen/百炼 API key (Windows Credential
+# Manager / macOS Keychain / Linux Secret Service) — never plaintext on disk.
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "bmp", "tiff", "webp"] }  # silent local image compression (no HEIC)
 base64 = "0.22"   # data-URL encoding for vision image payloads
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "native-tls", "stream"] }

@@ -11,6 +11,10 @@
     "core:default",
     "dialog:allow-open",
     "clipboard-manager:allow-read-image",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [{ "url": "https://developer.aliyun.com/*" }]
+    },
     "core:window:allow-start-dragging",
     "core:window:allow-set-position",
     "core:window:allow-set-size",

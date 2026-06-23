@@ -12,6 +12,7 @@ import { onMounted, onUnmounted, nextTick, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { enable, disable, isEnabled } from '@tauri-apps/plugin-autostart'
+import { openUrl } from '@tauri-apps/plugin-opener'
 import { useI18n, setLocale, type Locale } from '../i18n'
 import { useAppConfig, type CharacterSize, type SearchEngineKey } from '../composables/useAppConfig'
 import { useWeatherAvailable } from '../composables/useWeatherAvailable'
@@ -160,6 +161,54 @@ async function clearMemory() {
   }
 }
 
+// ── Qwen / 百炼 API key ─────────────────────────────────────────────
+// The chat/memory pipeline calls Alibaba Bailian (DashScope). End users supply
+// their own key here; it's applied to the live backend client immediately and
+// persisted on-device (never broadcast to the other window).
+const apiKeyInput = ref('')
+const apiKeyConfigured = ref(false)
+const savingKey = ref(false)
+
+async function refreshApiKeyStatus() {
+  try { apiKeyConfigured.value = await invoke<boolean>('qwen_key_status') }
+  catch { apiKeyConfigured.value = false }
+}
+
+async function saveApiKey() {
+  const key = apiKeyInput.value.trim()
+  if (!key || savingKey.value) return
+  savingKey.value = true
+  try {
+    apiKeyConfigured.value = await invoke<boolean>('qwen_set_api_key', { key })
+    apiKeyInput.value = ''
+    showStatus(t.value.apiKeySavedMsg)
+  } catch (e) {
+    console.error('save api key failed', e)
+  } finally {
+    savingKey.value = false
+  }
+}
+
+// Tutorial: how to obtain a Bailian (DashScope) API key — opens in the browser.
+const API_KEY_HELP_URL = 'https://developer.aliyun.com/article/1714006'
+function openApiKeyHelp() {
+  openUrl(API_KEY_HELP_URL).catch(e => console.error('open help url failed', e))
+}
+
+async function clearApiKey() {
+  if (savingKey.value) return
+  savingKey.value = true
+  try {
+    apiKeyConfigured.value = await invoke<boolean>('qwen_set_api_key', { key: '' })
+    apiKeyInput.value = ''
+    showStatus(t.value.apiKeyClearedMsg)
+  } catch (e) {
+    console.error('clear api key failed', e)
+  } finally {
+    savingKey.value = false
+  }
+}
+
 // ── Window controls ────────────────────────────────────────────────
 
 const win = getCurrentWindow()
@@ -223,6 +272,7 @@ async function closeContent() {
 onMounted(async () => {
   await refresh()
   await refreshAutostart()
+  await refreshApiKeyStatus()
 })
 </script>
 
@@ -372,6 +422,43 @@ onMounted(async () => {
               {{ t.searchEngines[opt.labelKey] }}
             </button>
           </div>
+        </div>
+      </section>
+
+      <!-- Qwen / 百炼 API key -->
+      <section class="card">
+        <h2 class="card-title">
+          <span class="card-icon">🔑</span>{{ t.apiKey }}
+        </h2>
+        <p class="card-hint">{{ t.apiKeyHint }}</p>
+        <button type="button" class="key-help" @click="openApiKeyHelp">{{ t.apiKeyHelp }} ↗</button>
+        <div class="key-row">
+          <input
+            class="key-input"
+            type="password"
+            v-model="apiKeyInput"
+            :placeholder="apiKeyConfigured ? t.apiKeySetPlaceholder : t.apiKeyPlaceholder"
+            autocomplete="off"
+            autocorrect="off"
+            spellcheck="false"
+            @keydown.enter="saveApiKey"
+          />
+          <button
+            class="btn btn-primary key-save"
+            :disabled="savingKey || !apiKeyInput.trim()"
+            @click="saveApiKey"
+          >{{ t.save }}</button>
+        </div>
+        <div class="key-foot">
+          <span class="key-status" :class="{ ok: apiKeyConfigured }">
+            {{ apiKeyConfigured ? t.apiKeyStatusSet : t.apiKeyStatusUnset }}
+          </span>
+          <button
+            v-if="apiKeyConfigured"
+            class="key-clear"
+            :disabled="savingKey"
+            @click="clearApiKey"
+          >{{ t.apiKeyClear }}</button>
         </div>
       </section>
 
@@ -848,6 +935,64 @@ onMounted(async () => {
   border-color: transparent;
   color: white;
 }
+
+/* ── API key field ───────────────────────────────────────── */
+.key-help {
+  display: inline-block;
+  margin: -4px 0 9px;
+  padding: 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #4a7a9a;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: color 120ms ease;
+}
+.key-help:hover { color: #2c5f80; text-decoration: underline; }
+.key-row { display: flex; gap: 7px; align-items: center; }
+.key-input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  font-size: 12.5px;
+  border: 1.5px solid rgba(119, 153, 119, 0.40);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.72);
+  color: #1a2e1a;
+  outline: none;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+.key-input:focus {
+  border-color: #779977;
+  box-shadow: 0 0 0 3px rgba(119, 153, 119, 0.18);
+}
+.key-input::placeholder { color: rgba(45, 85, 45, 0.40); }
+.key-save { flex-shrink: 0; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.key-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 7px;
+}
+.key-status { font-size: 11px; font-weight: 600; color: rgba(160, 60, 60, 0.85); }
+.key-status.ok { color: #3a7d3a; }
+.key-clear {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(55, 88, 55, 0.56);
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.key-clear:hover { color: #a23a3a; background: rgba(220, 120, 120, 0.12); }
 
 /* ── Search engine dropdown ───────────────────────────────── */
 .dropdown {

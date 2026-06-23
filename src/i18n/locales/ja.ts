@@ -72,6 +72,18 @@ export const ja: Translations = {
   clearMemoryConfirm: 'もう一度押して確定',
   clearMemoryDoneMsg: '記憶を消去しました。',
 
+  // ── Qwen / 百錬 (DashScope) API キー ──────────────────────────────
+  apiKey:               'Qwen API キー',
+  apiKeyHint:           'チャット機能を利用するには、阿里雲（Alibaba Cloud）百炼（Bailian）のAPIキー（無料利用枠あり）が必要です。百炼コンソールでAPIキーを作成し、ここに貼り付けてください。APIキーは安全に暗号化され、本端末内にのみ保存されます。設定後、すぐに有効になります。',
+  apiKeyPlaceholder:    'sk-... API キーを貼り付け',
+  apiKeySetPlaceholder: '設定済み · 貼り付けて置き換え',
+  apiKeyStatusSet:      '✓ 設定済み',
+  apiKeyStatusUnset:    '未設定 — チャットは利用できません',
+  apiKeyClear:          'クリア',
+  apiKeySavedMsg:       'API キーを保存しました。',
+  apiKeyClearedMsg:     'API キーをクリアしました。',
+  apiKeyHelp:           'API キーの取得方法は？',
+
   // ── Pomodoro badge ────────────────────────────────────────────────
   pomFocus: '集中',
   pomBreak: '休憩',

@@ -124,7 +124,7 @@ pub async fn maybe_reflect(app: &AppHandle, min_count: usize) {
 async fn run(app: &AppHandle, min_count: usize) -> Result<(), ApiError> {
     // Clone the client out of state so no guard is held across awaits.
     let qwen: QwenClient = match app.try_state::<QwenState>() {
-        Some(s) => s.0.clone(),
+        Some(s) => s.client(),
         None => return Ok(()),
     };
 

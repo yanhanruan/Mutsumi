@@ -42,13 +42,83 @@ impl FishAudioState {
 }
 
 /// Tauri-managed handle to the Qwen LLM client.
-#[allow(dead_code)]
-pub struct QwenState(pub QwenClient);
+///
+/// Interior-mutable so the user can set their own 百炼 (DashScope) API key from
+/// the Settings window at runtime: [`set_api_key`](QwenState::set_api_key)
+/// rebuilds the underlying client (the key is baked into the HTTP auth header,
+/// so a new key means a new client) while call sites keep reading a cheap,
+/// Arc-backed [`client`](QwenState::client) clone.
+pub struct QwenState {
+    client: std::sync::RwLock<QwenClient>,
+    /// Kept so a key change can rebuild the client with the same base URL/models.
+    config: std::sync::RwLock<QwenConfig>,
+}
 
 impl QwenState {
     /// Construct from static config. Built once at startup and `.manage()`d.
     pub fn new(config: QwenConfig) -> Result<Self, ApiError> {
-        Ok(Self(QwenClient::new(config)?))
+        let client = QwenClient::new(config.clone())?;
+        Ok(Self {
+            client: std::sync::RwLock::new(client),
+            config: std::sync::RwLock::new(config),
+        })
+    }
+
+    /// A cheap (Arc-backed) clone of the live client, safe to hold across awaits.
+    pub fn client(&self) -> QwenClient {
+        self.client.read().unwrap().clone()
+    }
+
+    /// Whether a non-empty API key is currently configured.
+    pub fn has_key(&self) -> bool {
+        !self.config.read().unwrap().api_key.trim().is_empty()
+    }
+
+    /// Replace the API key and rebuild the live client. An empty string clears it
+    /// (subsequent calls then fail with an auth error until a key is set again).
+    pub fn set_api_key(&self, key: &str) -> Result<(), ApiError> {
+        let new_client = {
+            let mut cfg = self.config.write().unwrap();
+            cfg.api_key = key.trim().to_string();
+            QwenClient::new(cfg.clone())?
+        };
+        *self.client.write().unwrap() = new_client;
+        Ok(())
+    }
+}
+
+// ── Persisted Qwen API key (set via Settings; overrides the .env default) ──
+//
+// Stored in the OS credential store via `keyring` (Windows Credential Manager /
+// macOS Keychain / Linux Secret Service) — never plaintext on disk.
+
+const KEYRING_SERVICE: &str = "com.mutsumi.app";
+const KEYRING_USER: &str = "dashscope_api_key";
+
+fn qwen_key_entry() -> keyring::Result<keyring::Entry> {
+    keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER)
+}
+
+/// Load a previously-saved key from the OS credential store, if any (called at
+/// startup to override the `.env` default).
+pub fn load_persisted_qwen_key() -> Option<String> {
+    match qwen_key_entry().ok()?.get_password() {
+        Ok(s) if !s.trim().is_empty() => Some(s.trim().to_string()),
+        _ => None, // no entry, empty, or backend error → fall back to .env
+    }
+}
+
+/// Persist (or, for an empty key, delete) the key in the OS credential store.
+fn save_persisted_qwen_key(key: &str) -> keyring::Result<()> {
+    let entry = qwen_key_entry()?;
+    let key = key.trim();
+    if key.is_empty() {
+        match entry.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(e),
+        }
+    } else {
+        entry.set_password(key)
     }
 }
 
@@ -72,4 +142,23 @@ pub async fn tts_synthesize(
 #[tauri::command]
 pub fn tts_set_recaptcha(state: tauri::State<'_, FishAudioState>, token: String) {
     state.0.set_recaptcha(token);
+}
+
+/// Whether a Qwen / 百炼 (DashScope) API key is currently configured.
+#[tauri::command]
+pub fn qwen_key_status(qwen: tauri::State<'_, QwenState>) -> bool {
+    qwen.has_key()
+}
+
+/// Set the user's Qwen / 百炼 (DashScope) API key: applies it to the live client
+/// immediately (no restart) and persists it for next launch. Pass an empty
+/// string to clear it. Returns whether a key is configured afterwards.
+#[tauri::command]
+pub fn qwen_set_api_key(
+    qwen: tauri::State<'_, QwenState>,
+    key: String,
+) -> Result<bool, String> {
+    qwen.set_api_key(&key).map_err(|e| e.to_string())?;
+    save_persisted_qwen_key(&key).map_err(|e| e.to_string())?;
+    Ok(qwen.has_key())
 }

@@ -231,8 +231,9 @@ pub async fn chat_send(
     let locale = locale.unwrap_or_else(|| "zh".into());
     let history = history.unwrap_or_default();
 
-    let messages = build_messages(&qwen.0, &db, &search, &message, &locale, &history).await?;
-    let completion = qwen.0.chat(&messages, None, turn_options()).await?;
+    let client = qwen.client();
+    let messages = build_messages(&client, &db, &search, &message, &locale, &history).await?;
+    let completion = client.chat(&messages, None, turn_options()).await?;
     Ok(completion.message.content.unwrap_or_default())
 }
 
@@ -267,10 +268,10 @@ pub async fn chat_stream(
     let locale = locale.unwrap_or_else(|| "zh".into());
     let history = history.unwrap_or_default();
 
-    let messages = build_messages(&qwen.0, &db, &search, &message, &locale, &history).await?;
+    let client = qwen.client();
+    let messages = build_messages(&client, &db, &search, &message, &locale, &history).await?;
 
-    let completion = qwen
-        .0
+    let completion = client
         .chat_stream(&messages, None, turn_options(), |delta| {
             // Send failures mean the frontend dropped the channel — ignore and
             // let the stream finish (or the connection will simply be unused).
@@ -506,12 +507,12 @@ pub async fn chat_vision_stream(
     // with the caption as the retrieval query, then drop its trailing user-text
     // turn (the vision turn re-adds it) and append the vision guidance block.
     let query = if caption.is_empty() { "图片".to_string() } else { caption.clone() };
-    let mut messages = build_messages(&qwen.0, &db, &search, &query, &locale, &history).await?;
+    let client = qwen.client();
+    let mut messages = build_messages(&client, &db, &search, &query, &locale, &history).await?;
     messages.pop(); // remove the placeholder user-text message
     messages.push(ChatMessage::system(persona::vision_guidance().to_string()));
 
-    let completion = qwen
-        .0
+    let completion = client
         .chat_vision_stream(&messages, &data_urls, &caption, |delta| {
             let _ = on_event.send(ChatEvent::Delta { text: delta.to_string() });
         })

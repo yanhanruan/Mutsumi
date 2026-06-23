@@ -77,6 +77,18 @@ export interface Translations {
   clearMemoryConfirm:   string
   clearMemoryDoneMsg:   string
 
+  // ── Qwen / 百炼 (DashScope) API key ──────────────────────────────
+  apiKey:               string
+  apiKeyHint:           string
+  apiKeyPlaceholder:    string
+  apiKeySetPlaceholder: string
+  apiKeyStatusSet:      string
+  apiKeyStatusUnset:    string
+  apiKeyClear:          string
+  apiKeySavedMsg:       string
+  apiKeyClearedMsg:     string
+  apiKeyHelp:           string
+
   // ── Pomodoro badge ──────────────────────────────────────────────
   pomFocus:  string
   pomBreak:  string
