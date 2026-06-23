@@ -29,6 +29,7 @@ import ChatHistory from './ChatHistory.vue'
 import EmojiPicker from './EmojiPicker.vue'
 import { setTaskbarVisible, minimizeWindow } from '../composables/useWindowControls'
 import { vTip } from '../composables/useTooltip'
+import { useAppConfig, type ChatModelKey } from '../composables/useAppConfig'
 
 interface Msg {
   id?: number          // present once loaded from / persisted to the transcript
@@ -507,6 +508,37 @@ watch(showEmoji, v => {
   else document.removeEventListener('pointerdown', onEmojiOutside, true)
 })
 
+// ── Chat model picker ──────────────────────────────────────────────────────
+// Shares the persisted model choice with SettingsWindow through useAppConfig:
+// changing it here broadcasts cross-window, so both pickers stay in sync. The
+// watch below mirrors a change made in Settings back into this dropdown.
+const { config, updateConfig } = useAppConfig()
+const MODEL_OPTIONS: { key: ChatModelKey; isDefault?: boolean }[] = [
+  { key: 'qwen3.7-max'   },
+  { key: 'qwen3.7-plus', isDefault: true },
+  { key: 'qwen3.6-flash' },
+]
+const localModel = ref<ChatModelKey>(config.value.chatModel)
+watch(() => config.value.chatModel, v => { localModel.value = v })
+const modelOpen = ref(false)
+
+async function setModel(m: ChatModelKey) {
+  localModel.value = m
+  modelOpen.value = false
+  await updateConfig({ chatModel: m })                       // persist + broadcast to Settings
+  try { await invoke('qwen_set_chat_model', { model: m }) }  // apply to the backend now
+  catch { /* best-effort; re-synced on next startup */ }
+}
+
+function onModelOutside(e: PointerEvent) {
+  if ((e.target as HTMLElement).closest('.chat-model-selector')) return
+  modelOpen.value = false
+}
+watch(modelOpen, v => {
+  if (v) document.addEventListener('pointerdown', onModelOutside, true)
+  else document.removeEventListener('pointerdown', onModelOutside, true)
+})
+
 // ── Image input ──────────────────────────────────────────────────────────────
 // Acquisition never moves bytes over IPC: a file pick / OS drop yields a path,
 // and a clipboard paste is staged to a temp file in Rust → also a path. Rust
@@ -604,6 +636,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   unlistenDrop?.()
   clearTimeout(alertTimer)
+  document.removeEventListener('pointerdown', onModelOutside, true)
 })
 
 // ── Textarea auto-resize ────────────────────────────────────────────────────
@@ -747,13 +780,28 @@ watch(visible, v => {
           </div>
 
           <div class="toolbar-right">
-            <!-- Model selector (display-only) -->
-            <div class="chat-model-selector" aria-hidden="true">
-              <span class="model-name">qwen3.7-plus</span>
-              <span class="model-badge">Extra</span>
-              <svg width="8" height="5" viewBox="0 0 8 5" fill="none">
-                <path d="M1 1l3 3 3-3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
+            <!-- Model selector (functional — synced with Settings via useAppConfig) -->
+            <div class="chat-model-selector">
+              <button class="model-trigger" v-tip="t.chatModel" @click.stop="modelOpen = !modelOpen">
+                <span class="model-name">{{ localModel }}</span>
+                <!-- Extra tag (removed — the real picker supersedes the static badge)
+                <span class="model-badge">Extra</span>
+                -->
+                <svg class="model-chevron" :class="{ open: modelOpen }" width="8" height="5" viewBox="0 0 8 5" fill="none">
+                  <path d="M1 1l3 3 3-3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </button>
+              <div v-if="modelOpen" class="model-menu" @click.stop>
+                <button
+                  v-for="opt in MODEL_OPTIONS"
+                  :key="opt.key"
+                  class="model-option"
+                  :class="{ active: localModel === opt.key }"
+                  @click="setModel(opt.key)"
+                >
+                  {{ opt.key }}<template v-if="opt.isDefault"> ({{ t.modelDefaultTag }})</template>
+                </button>
+              </div>
             </div>
             <!-- Voice input (Web Speech API) -->
             <button
@@ -1079,31 +1127,69 @@ watch(visible, v => {
   50%      { box-shadow: 0 0 0 4px rgba(200, 90, 90, 0.18); }
 }
 
-/* ── Model selector (display-only) ──────────────────────────────── */
-.chat-model-selector {
+/* ── Model selector (functional dropdown, synced with Settings) ──── */
+.chat-model-selector { position: relative; }
+.model-trigger {
   display: flex;
   align-items: center;
   gap: 4px;
   padding: 0 7px;
   height: 28px;
+  border: none;
   border-radius: 7px;
+  background: transparent;
   color: rgba(30, 60, 30, 0.60);
   font-size: 11px;
   font-weight: 500;
-  cursor: default;
+  cursor: pointer;
   user-select: none;
   transition: background 120ms ease;
 }
-.chat-model-selector:hover { background: rgba(119, 153, 119, 0.10); }
+.model-trigger:hover { background: rgba(119, 153, 119, 0.10); }
 .model-name { font-weight: 600; color: rgba(30, 60, 30, 0.70); letter-spacing: -0.1px; }
-.model-badge {
-  padding: 1px 5px;
-  border-radius: 4px;
-  background: rgba(119, 153, 119, 0.14);
-  font-size: 10px;
-  font-weight: 600;
-  color: rgba(40, 80, 40, 0.65);
+.model-chevron {
+  flex-shrink: 0;
+  color: rgba(30, 60, 30, 0.45);
+  transition: transform 180ms ease;
 }
+.model-chevron.open { transform: rotate(180deg); }
+
+/* Opens upward — the composer sits at the bottom of the panel. */
+.model-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  z-index: 80;
+  min-width: 150px;
+  background: rgba(240, 248, 240, 0.97);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1.5px solid rgba(119, 153, 119, 0.35);
+  border-radius: 10px;
+  box-shadow:
+    0 4px 20px rgba(40, 80, 40, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.60);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.model-option {
+  width: 100%;
+  padding: 7px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #2c4e2c;
+  background: transparent;
+  border: none;
+  border-radius: 7px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 100ms ease, color 100ms ease;
+}
+.model-option:hover  { background: rgba(119, 153, 119, 0.14); color: #1a3a1a; }
+.model-option.active { background: rgba(119, 153, 119, 0.22); color: #1a3a1a; font-weight: 700; }
 
 /* ── Send button ─────────────────────────────────────────────────── */
 .chat-send {

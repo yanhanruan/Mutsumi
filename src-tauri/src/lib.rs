@@ -114,6 +114,7 @@ pub fn run() {
       services::tts_set_recaptcha,
       services::qwen_set_api_key,
       services::qwen_key_status,
+      services::qwen_set_chat_model,
       chat::chat_send,
       chat::chat_stream,
       chat::chat_clear_memory,
@@ -124,6 +125,7 @@ pub fn run() {
       chat::chat_vision_stream,
       chat::chat_stage_clipboard_image,
       search::set_search_engine,
+      search::set_search_enabled,
       hide_pet,
     ])
     .setup(move |app| {

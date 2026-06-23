@@ -69,6 +69,14 @@ export interface Translations {
     google:     string
     baidu:      string
   }
+  /** Master on/off toggle for web search. */
+  searchEnabled:     string
+  searchEnabledHint: string
+
+  // ── Chat model ──────────────────────────────────────────────────
+  chatModel:       string
+  chatModelHint:   string
+  modelDefaultTag: string
 
   // ── Chat memory reset ───────────────────────────────────────────
   chatMemory:           string

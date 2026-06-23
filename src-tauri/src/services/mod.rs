@@ -85,6 +85,27 @@ impl QwenState {
         *self.client.write().unwrap() = new_client;
         Ok(())
     }
+
+    /// Switch the chat model and rebuild the live client. The current API key and
+    /// other config are preserved (we rebuild from the stored `QwenConfig`). A
+    /// blank model is ignored. Only the text chat model changes; vision/embeddings
+    /// keep their configured models.
+    pub fn set_chat_model(&self, model: &str) -> Result<(), ApiError> {
+        let model = model.trim();
+        if model.is_empty() {
+            return Ok(());
+        }
+        let new_client = {
+            let mut cfg = self.config.write().unwrap();
+            if cfg.chat_model == model {
+                return Ok(()); // no-op; avoid a needless client rebuild
+            }
+            cfg.chat_model = model.to_string();
+            QwenClient::new(cfg.clone())?
+        };
+        *self.client.write().unwrap() = new_client;
+        Ok(())
+    }
 }
 
 // ── Persisted Qwen API key (set via Settings; overrides the .env default) ──
@@ -161,4 +182,14 @@ pub fn qwen_set_api_key(
     qwen.set_api_key(&key).map_err(|e| e.to_string())?;
     save_persisted_qwen_key(&key).map_err(|e| e.to_string())?;
     Ok(qwen.has_key())
+}
+
+/// Switch the active chat model at runtime (Settings UI). The choice is persisted
+/// in the frontend config and re-applied on startup, so no backend file is needed.
+#[tauri::command]
+pub fn qwen_set_chat_model(
+    qwen: tauri::State<'_, QwenState>,
+    model: String,
+) -> Result<(), String> {
+    qwen.set_chat_model(&model).map_err(|e| e.to_string())
 }

@@ -168,7 +168,7 @@ async fn build_messages(
     // flaky engine can never stall the turn — on timeout we just proceed
     // without web context.
     let search_fut = async {
-        if trigger::needs_search(message) {
+        if search.enabled() && trigger::needs_search(message) {
             let results = tokio::time::timeout(
                 SEARCH_BUDGET,
                 search::search(&search.client, search.engine(), message),

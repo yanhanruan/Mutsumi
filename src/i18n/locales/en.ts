@@ -64,6 +64,13 @@ export const en: Translations = {
     google:     'Google',
     baidu:      'Baidu',
   },
+  searchEnabled:     'Web search',
+  searchEnabledHint: 'When on, current-events / real-time questions are looked up online for grounding; when off, replies use only the model and memory (faster).',
+
+  // ── Chat model ────────────────────────────────────────────────────
+  chatModel:       'Chat model',
+  chatModelHint:   'Switch the model behind chat: max is strongest, flash is fastest, plus balances quality and speed.',
+  modelDefaultTag: 'default',
 
   // ── Chat memory reset ─────────────────────────────────────────────
   chatMemory:         'Chat Memory',

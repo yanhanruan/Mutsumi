@@ -21,6 +21,9 @@ export type CharacterSize = 'small' | 'medium' | 'large'
 /** Search engine key — kebab-case, matches the Rust `SearchEngine::from_str`. */
 export type SearchEngineKey = 'duckduckgo' | 'bing-cn' | 'bing' | 'google' | 'baidu'
 
+/** Selectable chat model — the exact DashScope model id sent as `chat_model`. */
+export type ChatModelKey = 'qwen3.7-max' | 'qwen3.7-plus' | 'qwen3.6-flash'
+
 export interface AppConfig {
   characterSize: CharacterSize
   showWeather:   boolean
@@ -34,6 +37,10 @@ export interface AppConfig {
   language:      Locale | null
   /** Primary web-search engine for chat search-enhancement. */
   searchEngine:  SearchEngineKey
+  /** Master on/off for chat web search (applied to the backend at startup). */
+  searchEnabled: boolean
+  /** Active chat model (applied to the backend at startup + on change). */
+  chatModel:     ChatModelKey
 }
 
 // ── Size dimensions ──────────────────────────────────────────────────
@@ -59,6 +66,8 @@ const DEFAULT_CONFIG: AppConfig = {
   showMusic:     true,
   language:      null,          // null → follow system locale
   searchEngine:  'duckduckgo',  // fast + scrape-friendly default (matches Rust)
+  searchEnabled: true,          // web search on by default (matches prior behavior)
+  chatModel:     'qwen3.7-plus',// balanced default
 }
 
 function loadConfig(): AppConfig {

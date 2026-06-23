@@ -138,10 +138,14 @@ impl SearchClient {
     }
 }
 
-/// Managed state: the search client + the currently-selected engine.
+/// Managed state: the search client + the currently-selected engine + whether
+/// search is enabled at all (user toggle in Settings).
 pub struct SearchState {
     pub client: SearchClient,
     engine: Mutex<SearchEngine>,
+    /// Master on/off for web search. When off, no SERP fetch happens regardless
+    /// of the keyword trigger — chat replies purely from the model + memory.
+    enabled: std::sync::atomic::AtomicBool,
 }
 
 impl SearchState {
@@ -149,6 +153,7 @@ impl SearchState {
         Ok(Self {
             client: SearchClient::new()?,
             engine: Mutex::new(engine),
+            enabled: std::sync::atomic::AtomicBool::new(true), // on by default
         })
     }
 
@@ -159,6 +164,14 @@ impl SearchState {
     pub fn set_engine(&self, engine: SearchEngine) {
         *self.engine.lock().expect("search engine mutex") = engine;
     }
+
+    pub fn enabled(&self) -> bool {
+        self.enabled.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub fn set_enabled(&self, enabled: bool) {
+        self.enabled.store(enabled, std::sync::atomic::Ordering::Relaxed);
+    }
 }
 
 /// Tauri command: switch the active search engine at runtime (settings UI).
@@ -166,6 +179,12 @@ impl SearchState {
 #[tauri::command]
 pub fn set_search_engine(engine: String, search: tauri::State<'_, SearchState>) {
     search.set_engine(SearchEngine::from_str(&engine));
+}
+
+/// Tauri command: enable/disable web search entirely (settings UI).
+#[tauri::command]
+pub fn set_search_enabled(enabled: bool, search: tauri::State<'_, SearchState>) {
+    search.set_enabled(enabled);
 }
 
 /// Run a search and return up to [`MAX_RESULTS`] hits, deep-scraping the top

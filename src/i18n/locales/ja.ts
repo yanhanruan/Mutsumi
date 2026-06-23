@@ -64,6 +64,13 @@ export const ja: Translations = {
     google:     'Google',
     baidu:      'Baidu',
   },
+  searchEnabled:     'ウェブ検索',
+  searchEnabledHint: 'オンの時は時事・リアルタイムな質問でネット検索を参照します。オフなら睦の知識と記憶のみで返答します（高速）。',
+
+  // ── チャットモデル ────────────────────────────────────────────────
+  chatModel:       'チャットモデル',
+  chatModelHint:   'チャットを動かすモデルを切り替えます：max は最も高性能、flash は最速、plus は品質と速度のバランス型。',
+  modelDefaultTag: 'デフォルト',
 
   // ── チャットの記憶リセット ────────────────────────────────────────
   chatMemory:         'チャットの記憶',

@@ -14,7 +14,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import { enable, disable, isEnabled } from '@tauri-apps/plugin-autostart'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { useI18n, setLocale, type Locale } from '../i18n'
-import { useAppConfig, type CharacterSize, type SearchEngineKey } from '../composables/useAppConfig'
+import { useAppConfig, type CharacterSize, type SearchEngineKey, type ChatModelKey } from '../composables/useAppConfig'
 import { useWeatherAvailable } from '../composables/useWeatherAvailable'
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -124,20 +124,58 @@ async function setSearchEngine(e: SearchEngineKey) {
   catch { /* best-effort; synced again on next startup */ }
 }
 
-// ── Search engine dropdown ────────────────────────────────────
+// ── Web search on/off (master toggle) ─────────────────────────────
+const localSearchEnabled = ref<boolean>(config.value.searchEnabled)
+watch(() => config.value.searchEnabled, v => { localSearchEnabled.value = v })
+
+async function toggleSearchEnabled() {
+  await updateConfig({ searchEnabled: localSearchEnabled.value })   // persist + broadcast
+  try { await invoke('set_search_enabled', { enabled: localSearchEnabled.value }) }
+  catch { /* best-effort; re-synced on next startup */ }
+}
+
+// ── Chat model picker ─────────────────────────────────────────────
+const MODEL_OPTIONS: { key: ChatModelKey; isDefault?: boolean }[] = [
+  { key: 'qwen3.7-max'   },
+  { key: 'qwen3.7-plus', isDefault: true },
+  { key: 'qwen3.6-flash' },
+]
+const localModel = ref<ChatModelKey>(config.value.chatModel)
+watch(() => config.value.chatModel, v => { localModel.value = v })
+
+async function setModel(m: ChatModelKey) {
+  localModel.value = m
+  await updateConfig({ chatModel: m })             // persist + broadcast
+  try { await invoke('qwen_set_chat_model', { model: m }) }  // apply to backend now
+  catch { /* best-effort; re-synced on next startup */ }
+}
+
+// ── Dropdowns (search engine + model) ─────────────────────────────
 const engineDropOpen = ref(false)
+const modelDropOpen = ref(false)
 
 function onEngineOutside() {
   engineDropOpen.value = false
   document.removeEventListener('click', onEngineOutside)
+}
+function onModelOutside() {
+  modelDropOpen.value = false
+  document.removeEventListener('click', onModelOutside)
 }
 
 watch(engineDropOpen, open => {
   if (open) nextTick(() => document.addEventListener('click', onEngineOutside))
   else      document.removeEventListener('click', onEngineOutside)
 })
+watch(modelDropOpen, open => {
+  if (open) nextTick(() => document.addEventListener('click', onModelOutside))
+  else      document.removeEventListener('click', onModelOutside)
+})
 
-onUnmounted(() => document.removeEventListener('click', onEngineOutside))
+onUnmounted(() => {
+  document.removeEventListener('click', onEngineOutside)
+  document.removeEventListener('click', onModelOutside)
+})
 
 // ── Chat memory reset ──────────────────────────────────────────────
 // Destructive, so a two-step confirm: first tap arms, second tap (within a few
@@ -399,12 +437,51 @@ onMounted(async () => {
         </div>
       </section>
 
-      <!-- Search engine -->
+      <!-- Chat model -->
+      <section class="card" :style="{ zIndex: modelDropOpen ? 20 : 1, position: 'relative' }">
+        <h2 class="card-title">
+          <span class="card-icon">🧩</span>{{ t.chatModel }}
+        </h2>
+        <div class="dropdown">
+          <button class="engine-trigger" @click.stop="modelDropOpen = !modelDropOpen">
+            <span>{{ localModel }}<template v-if="localModel === 'qwen3.7-plus'"> ({{ t.modelDefaultTag }})</template></span>
+            <svg class="engine-chevron" :class="{ open: modelDropOpen }" width="10" height="6" viewBox="0 0 10 6" fill="none">
+              <path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+          <div v-if="modelDropOpen" class="engine-menu" @click.stop>
+            <button
+              v-for="opt in MODEL_OPTIONS"
+              :key="opt.key"
+              class="engine-option"
+              :class="{ active: localModel === opt.key }"
+              @click="setModel(opt.key); modelDropOpen = false"
+            >
+              {{ opt.key }}<template v-if="opt.isDefault"> ({{ t.modelDefaultTag }})</template>
+            </button>
+          </div>
+        </div>
+        <p class="card-hint" style="margin: 8px 0 0;">{{ t.chatModelHint }}</p>
+      </section>
+
+      <!-- Search engine + on/off -->
       <section class="card" :style="{ zIndex: engineDropOpen ? 20 : 1, position: 'relative' }">
         <h2 class="card-title">
           <span class="card-icon">🔍</span>{{ t.searchEngine }}
         </h2>
-        <div class="dropdown">
+        <div class="field-row" style="margin-bottom: 8px;">
+          <label for="search-toggle">{{ t.searchEnabled }}</label>
+          <label class="toggle">
+            <input
+              id="search-toggle"
+              type="checkbox"
+              v-model="localSearchEnabled"
+              @change="toggleSearchEnabled"
+            />
+            <span class="thumb" />
+          </label>
+        </div>
+        <div class="dropdown" :style="localSearchEnabled ? '' : 'opacity: 0.45; pointer-events: none;'">
           <button class="engine-trigger" @click.stop="engineDropOpen = !engineDropOpen">
             <span>{{ t.searchEngines[ENGINE_OPTIONS.find(o => o.key === localEngine)!.labelKey] }}</span>
             <svg class="engine-chevron" :class="{ open: engineDropOpen }" width="10" height="6" viewBox="0 0 10 6" fill="none">
@@ -423,6 +500,7 @@ onMounted(async () => {
             </button>
           </div>
         </div>
+        <p class="card-hint" style="margin: 8px 0 0;">{{ t.searchEnabledHint }}</p>
       </section>
 
       <!-- Qwen / 百炼 API key -->

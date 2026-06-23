@@ -64,6 +64,13 @@ export const zh: Translations = {
     google:     'Google',
     baidu:      '百度',
   },
+  searchEnabled:     '联网搜索',
+  searchEnabledHint: '开启后，遇到时事/实时类问题时会联网检索作为参考；关闭则只凭模型与记忆回答（更快）。',
+
+  // ── 对话模型 ──────────────────────────────────────────────────────
+  chatModel:       '对话模型',
+  chatModelHint:   '切换驱动聊天的模型：max 更强、flash 更快、plus 兼顾质量与速度。',
+  modelDefaultTag: '默认',
 
   // ── 聊天记忆重置 ──────────────────────────────────────────────────
   chatMemory:         '聊天记忆',
