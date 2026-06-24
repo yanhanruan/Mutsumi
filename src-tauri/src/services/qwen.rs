@@ -27,9 +27,17 @@ use serde::{Deserialize, Serialize};
 use crate::http::{ApiError, HttpClient, HttpClientConfig};
 
 const DEFAULT_BASE_URL: &str = "https://dashscope.aliyuncs.com/compatible-mode/v1";
+// The Qwen3.x flagship chat models are unified multimodal (text + image + video
+// in), so the same model handles both text and image turns — there is no longer
+// a separate `qwen-vl-*` vision model.
 const DEFAULT_CHAT_MODEL: &str = "qwen3.7-plus";
-/// Vision-capable model for image turns (multimodal). Env-overridable.
-const DEFAULT_VISION_MODEL: &str = "qwen-vl-max";
+/// Per-request override for image turns (see [`QwenClient::chat_vision_stream`]).
+/// When the user actually *sends* image(s), the request is forced onto this model
+/// with built-in web search on — empirically the most reliable setup for reading
+/// real-world photos / memes — regardless of the user's selected chat model. It
+/// is applied only at send time and never persisted, so plain-text turns keep
+/// using the user's configured model.
+const IMAGE_TURN_MODEL: &str = "qwen3.6-flash";
 const DEFAULT_EMBED_MODEL: &str = "text-embedding-v3";
 /// `text-embedding-v3` supports 1024/768/512; 1024 is the default/highest.
 const DEFAULT_EMBED_DIMENSIONS: u32 = 1024;
@@ -44,7 +52,6 @@ const EMBED_BATCH_LIMIT: usize = 10;
 const ENV_API_KEY: &str = "DASHSCOPE_API_KEY";
 const ENV_BASE_URL: &str = "QWEN_BASE_URL";
 const ENV_CHAT_MODEL: &str = "QWEN_CHAT_MODEL";
-const ENV_VISION_MODEL: &str = "QWEN_VISION_MODEL";
 
 // ── Configuration ───────────────────────────────────────────────────
 
@@ -54,7 +61,6 @@ pub struct QwenConfig {
     pub api_key: String,
     pub base_url: String,
     pub chat_model: String,
-    pub vision_model: String,
     pub embed_model: String,
     pub embed_dimensions: u32,
 }
@@ -68,7 +74,6 @@ pub fn config_from_env() -> QwenConfig {
         api_key: std::env::var(ENV_API_KEY).unwrap_or_default(),
         base_url: std::env::var(ENV_BASE_URL).unwrap_or_else(|_| DEFAULT_BASE_URL.into()),
         chat_model: std::env::var(ENV_CHAT_MODEL).unwrap_or_else(|_| DEFAULT_CHAT_MODEL.into()),
-        vision_model: std::env::var(ENV_VISION_MODEL).unwrap_or_else(|_| DEFAULT_VISION_MODEL.into()),
         embed_model: DEFAULT_EMBED_MODEL.into(),
         embed_dimensions: DEFAULT_EMBED_DIMENSIONS,
     }
@@ -316,7 +321,6 @@ struct EmbeddingData {
 pub struct QwenClient {
     http: Arc<HttpClient>,
     chat_model: String,
-    vision_model: String,
     embed_model: String,
     embed_dimensions: u32,
 }
@@ -341,7 +345,6 @@ impl QwenClient {
         Ok(Self {
             http: Arc::new(http),
             chat_model: config.chat_model,
-            vision_model: config.vision_model,
             embed_model: config.embed_model,
             embed_dimensions: config.embed_dimensions,
         })
@@ -418,9 +421,14 @@ impl QwenClient {
     ///
     /// Sends the text `messages` (system + history) followed by a final user
     /// message whose content is the OpenAI-style array
-    /// `[{type:text,text:caption}, {type:image_url,...} × N]`, to the
-    /// vision-capable model. Prior messages keep their plain string `content`;
-    /// DashScope accepts both shapes in one `messages` list.
+    /// `[{type:text,text:caption}, {type:image_url,...} × N]`. Prior messages keep
+    /// their plain string `content`; DashScope accepts both shapes in one list.
+    ///
+    /// **Image-turn interceptor:** the request is forced onto [`IMAGE_TURN_MODEL`]
+    /// with web search enabled, overriding the user's configured chat model just
+    /// for this call. This is the single chokepoint for image sends and runs right
+    /// before the POST, so it fires only on an actual upload (never on an attached-
+    /// then-removed image) and leaves the persisted config untouched.
     pub async fn chat_vision_stream<F>(
         &self,
         messages: &[ChatMessage],
@@ -449,11 +457,22 @@ impl QwenClient {
         }
         msg_values.push(serde_json::json!({ "role": "user", "content": parts }));
 
+        // Interceptor: override the model + force web search for this image turn
+        // only (the user's configured model is intentionally ignored here).
         let body = serde_json::json!({
-            "model": self.vision_model,
+            "model": IMAGE_TURN_MODEL,
             "messages": msg_values,
             "stream": true,
+            "enable_search": true,
         });
+
+        log::info!(
+            target: "qwen",
+            "→ vision request (override): model={}, images={}, enable_search=true",
+            IMAGE_TURN_MODEL,
+            image_data_urls.len()
+        );
+
         self.stream_completion(body, on_delta).await
     }
 

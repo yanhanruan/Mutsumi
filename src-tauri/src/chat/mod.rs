@@ -100,7 +100,7 @@ const MAX_REPLY_TOKENS: u32 = 512;
 /// reply. Web search stays off (grounding comes from the model + persona facts).
 fn turn_options() -> ChatOptions {
     ChatOptions {
-        enable_search: false,
+        enable_search: true,
         enable_thinking: Some(false),
         max_completion_tokens: Some(MAX_REPLY_TOKENS),
         ..Default::default()
@@ -537,8 +537,8 @@ pub async fn chat_stage_clipboard_image(app: AppHandle) -> Result<StagedImage, C
 
 /// Send up to [`IMAGE_MAX_COUNT`] images (by path) with an optional caption and
 /// stream Mutsumi's text reply. Images are read + validated in Rust (no bytes
-/// over IPC), sent to the vision model, and — only on success — compressed,
-/// archived, and persisted to the transcript.
+/// over IPC), sent to the (unified multimodal) chat model, and — only on success
+/// — compressed, archived, and persisted to the transcript.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn chat_vision_stream(

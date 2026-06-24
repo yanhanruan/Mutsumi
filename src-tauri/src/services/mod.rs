@@ -88,8 +88,8 @@ impl QwenState {
 
     /// Switch the chat model and rebuild the live client. The current API key and
     /// other config are preserved (we rebuild from the stored `QwenConfig`). A
-    /// blank model is ignored. Only the text chat model changes; vision/embeddings
-    /// keep their configured models.
+    /// blank model is ignored. The chat model is unified multimodal, so this also
+    /// changes which model handles image turns; embeddings keep their own model.
     pub fn set_chat_model(&self, model: &str) -> Result<(), ApiError> {
         let model = model.trim();
         if model.is_empty() {
