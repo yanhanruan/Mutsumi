@@ -23,11 +23,22 @@
         "alwaysOnTop": true,
         "skipTaskbar": true,
         "shadow": false,
-        "dragDropEnabled": false
+        "dragDropEnabled": true
       }
     ],
     "security": {
-      "csp": null
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": [
+          "$APPDATA/media/**",
+          "$PICTURE/**",
+          "$DOWNLOAD/**",
+          "$DESKTOP/**",
+          "$DOCUMENT/**",
+          "$HOME/**"
+        ]
+      }
     }
   },
   "bundle": {

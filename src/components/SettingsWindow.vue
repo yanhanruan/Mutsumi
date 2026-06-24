@@ -8,12 +8,13 @@
  *
  * Primary theme: #779977 (sage green).
  */
-import { onMounted, ref, watch } from 'vue'
+import { onMounted, onUnmounted, nextTick, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { enable, disable, isEnabled } from '@tauri-apps/plugin-autostart'
+import { openUrl } from '@tauri-apps/plugin-opener'
 import { useI18n, setLocale, type Locale } from '../i18n'
-import { useAppConfig, type CharacterSize } from '../composables/useAppConfig'
+import { useAppConfig, type CharacterSize, type SearchEngineKey, type ChatModelKey } from '../composables/useAppConfig'
 import { useWeatherAvailable } from '../composables/useWeatherAvailable'
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -103,6 +104,149 @@ async function toggleMusic() {
   await updateConfig({ showMusic: localShowMusic.value })
 }
 
+// ── Search engine (chat search-enhancement) ───────────────────────
+type EngineLabelKey = 'duckduckgo' | 'bingCn' | 'bing' | 'google' | 'baidu'
+const ENGINE_OPTIONS: { key: SearchEngineKey; labelKey: EngineLabelKey }[] = [
+  { key: 'duckduckgo', labelKey: 'duckduckgo' },
+  { key: 'bing-cn',    labelKey: 'bingCn'     },
+  { key: 'bing',       labelKey: 'bing'       },
+  { key: 'google',     labelKey: 'google'     },
+  { key: 'baidu',      labelKey: 'baidu'      },
+]
+
+const localEngine = ref<SearchEngineKey>(config.value.searchEngine)
+watch(() => config.value.searchEngine, v => { localEngine.value = v })
+
+async function setSearchEngine(e: SearchEngineKey) {
+  localEngine.value = e
+  await updateConfig({ searchEngine: e })          // persist + broadcast
+  try { await invoke('set_search_engine', { engine: e }) }  // apply to backend now
+  catch { /* best-effort; synced again on next startup */ }
+}
+
+// ── Web search on/off (master toggle) ─────────────────────────────
+const localSearchEnabled = ref<boolean>(config.value.searchEnabled)
+watch(() => config.value.searchEnabled, v => { localSearchEnabled.value = v })
+
+async function toggleSearchEnabled() {
+  await updateConfig({ searchEnabled: localSearchEnabled.value })   // persist + broadcast
+  try { await invoke('set_search_enabled', { enabled: localSearchEnabled.value }) }
+  catch { /* best-effort; re-synced on next startup */ }
+}
+
+// ── Chat model picker ─────────────────────────────────────────────
+const MODEL_OPTIONS: { key: ChatModelKey; isDefault?: boolean }[] = [
+  { key: 'qwen3.7-max'   },
+  { key: 'qwen3.7-plus', isDefault: true },
+  { key: 'qwen3.6-flash' },
+]
+const localModel = ref<ChatModelKey>(config.value.chatModel)
+watch(() => config.value.chatModel, v => { localModel.value = v })
+
+async function setModel(m: ChatModelKey) {
+  localModel.value = m
+  await updateConfig({ chatModel: m })             // persist + broadcast
+  try { await invoke('qwen_set_chat_model', { model: m }) }  // apply to backend now
+  catch { /* best-effort; re-synced on next startup */ }
+}
+
+// ── Dropdowns (search engine + model) ─────────────────────────────
+const engineDropOpen = ref(false)
+const modelDropOpen = ref(false)
+
+function onEngineOutside() {
+  engineDropOpen.value = false
+  document.removeEventListener('click', onEngineOutside)
+}
+function onModelOutside() {
+  modelDropOpen.value = false
+  document.removeEventListener('click', onModelOutside)
+}
+
+watch(engineDropOpen, open => {
+  if (open) nextTick(() => document.addEventListener('click', onEngineOutside))
+  else      document.removeEventListener('click', onEngineOutside)
+})
+watch(modelDropOpen, open => {
+  if (open) nextTick(() => document.addEventListener('click', onModelOutside))
+  else      document.removeEventListener('click', onModelOutside)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', onEngineOutside)
+  document.removeEventListener('click', onModelOutside)
+})
+
+// ── Chat memory reset ──────────────────────────────────────────────
+// Destructive, so a two-step confirm: first tap arms, second tap (within a few
+// seconds) actually wipes. Avoids depending on a native confirm dialog.
+const confirmingClear = ref(false)
+let clearTimer: ReturnType<typeof setTimeout> | undefined
+
+async function clearMemory() {
+  if (!confirmingClear.value) {
+    confirmingClear.value = true
+    clearTimer = setTimeout(() => { confirmingClear.value = false }, 3000)
+    return
+  }
+  clearTimeout(clearTimer)
+  confirmingClear.value = false
+  try {
+    await invoke('chat_clear_memory')
+    showStatus(t.value.clearMemoryDoneMsg)
+  } catch (e) {
+    console.error('clear memory failed', e)
+  }
+}
+
+// ── Qwen / 百炼 API key ─────────────────────────────────────────────
+// The chat/memory pipeline calls Alibaba Bailian (DashScope). End users supply
+// their own key here; it's applied to the live backend client immediately and
+// persisted on-device (never broadcast to the other window).
+const apiKeyInput = ref('')
+const apiKeyConfigured = ref(false)
+const savingKey = ref(false)
+
+async function refreshApiKeyStatus() {
+  try { apiKeyConfigured.value = await invoke<boolean>('qwen_key_status') }
+  catch { apiKeyConfigured.value = false }
+}
+
+async function saveApiKey() {
+  const key = apiKeyInput.value.trim()
+  if (!key || savingKey.value) return
+  savingKey.value = true
+  try {
+    apiKeyConfigured.value = await invoke<boolean>('qwen_set_api_key', { key })
+    apiKeyInput.value = ''
+    showStatus(t.value.apiKeySavedMsg)
+  } catch (e) {
+    console.error('save api key failed', e)
+  } finally {
+    savingKey.value = false
+  }
+}
+
+// Tutorial: how to obtain a Bailian (DashScope) API key — opens in the browser.
+const API_KEY_HELP_URL = 'https://developer.aliyun.com/article/1714006'
+function openApiKeyHelp() {
+  openUrl(API_KEY_HELP_URL).catch(e => console.error('open help url failed', e))
+}
+
+async function clearApiKey() {
+  if (savingKey.value) return
+  savingKey.value = true
+  try {
+    apiKeyConfigured.value = await invoke<boolean>('qwen_set_api_key', { key: '' })
+    apiKeyInput.value = ''
+    showStatus(t.value.apiKeyClearedMsg)
+  } catch (e) {
+    console.error('clear api key failed', e)
+  } finally {
+    savingKey.value = false
+  }
+}
+
 // ── Window controls ────────────────────────────────────────────────
 
 const win = getCurrentWindow()
@@ -166,6 +310,7 @@ async function closeContent() {
 onMounted(async () => {
   await refresh()
   await refreshAutostart()
+  await refreshApiKeyStatus()
 })
 </script>
 
@@ -290,6 +435,124 @@ onMounted(async () => {
             {{ t[opt.labelKey] }}
           </button>
         </div>
+      </section>
+
+      <!-- Chat model -->
+      <section class="card" :style="{ zIndex: modelDropOpen ? 20 : 1, position: 'relative' }">
+        <h2 class="card-title">
+          <span class="card-icon">🧩</span>{{ t.chatModel }}
+        </h2>
+        <div class="dropdown">
+          <button class="engine-trigger" @click.stop="modelDropOpen = !modelDropOpen">
+            <span>{{ localModel }}<template v-if="localModel === 'qwen3.7-plus'"> ({{ t.modelDefaultTag }})</template></span>
+            <svg class="engine-chevron" :class="{ open: modelDropOpen }" width="10" height="6" viewBox="0 0 10 6" fill="none">
+              <path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+          <div v-if="modelDropOpen" class="engine-menu" @click.stop>
+            <button
+              v-for="opt in MODEL_OPTIONS"
+              :key="opt.key"
+              class="engine-option"
+              :class="{ active: localModel === opt.key }"
+              @click="setModel(opt.key); modelDropOpen = false"
+            >
+              {{ opt.key }}<template v-if="opt.isDefault"> ({{ t.modelDefaultTag }})</template>
+            </button>
+          </div>
+        </div>
+        <p class="card-hint" style="margin: 8px 0 0;">{{ t.chatModelHint }}</p>
+      </section>
+
+      <!-- Search engine + on/off -->
+      <section class="card" :style="{ zIndex: engineDropOpen ? 20 : 1, position: 'relative' }">
+        <h2 class="card-title">
+          <span class="card-icon">🔍</span>{{ t.searchEngine }}
+        </h2>
+        <div class="field-row" style="margin-bottom: 8px;">
+          <label for="search-toggle">{{ t.searchEnabled }}</label>
+          <label class="toggle">
+            <input
+              id="search-toggle"
+              type="checkbox"
+              v-model="localSearchEnabled"
+              @change="toggleSearchEnabled"
+            />
+            <span class="thumb" />
+          </label>
+        </div>
+        <div class="dropdown" :style="localSearchEnabled ? '' : 'opacity: 0.45; pointer-events: none;'">
+          <button class="engine-trigger" @click.stop="engineDropOpen = !engineDropOpen">
+            <span>{{ t.searchEngines[ENGINE_OPTIONS.find(o => o.key === localEngine)!.labelKey] }}</span>
+            <svg class="engine-chevron" :class="{ open: engineDropOpen }" width="10" height="6" viewBox="0 0 10 6" fill="none">
+              <path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+          <div v-if="engineDropOpen" class="engine-menu" @click.stop>
+            <button
+              v-for="opt in ENGINE_OPTIONS"
+              :key="opt.key"
+              class="engine-option"
+              :class="{ active: localEngine === opt.key }"
+              @click="setSearchEngine(opt.key); engineDropOpen = false"
+            >
+              {{ t.searchEngines[opt.labelKey] }}
+            </button>
+          </div>
+        </div>
+        <p class="card-hint" style="margin: 8px 0 0;">{{ t.searchEnabledHint }}</p>
+      </section>
+
+      <!-- Qwen / 百炼 API key -->
+      <section class="card">
+        <h2 class="card-title">
+          <span class="card-icon">🔑</span>{{ t.apiKey }}
+        </h2>
+        <p class="card-hint">{{ t.apiKeyHint }}</p>
+        <button type="button" class="key-help" @click="openApiKeyHelp">{{ t.apiKeyHelp }} ↗</button>
+        <div class="key-row">
+          <input
+            class="key-input"
+            type="password"
+            v-model="apiKeyInput"
+            :placeholder="apiKeyConfigured ? t.apiKeySetPlaceholder : t.apiKeyPlaceholder"
+            autocomplete="off"
+            autocorrect="off"
+            spellcheck="false"
+            @keydown.enter="saveApiKey"
+          />
+          <button
+            class="btn btn-primary key-save"
+            :disabled="savingKey || !apiKeyInput.trim()"
+            @click="saveApiKey"
+          >{{ t.save }}</button>
+        </div>
+        <div class="key-foot">
+          <span class="key-status" :class="{ ok: apiKeyConfigured }">
+            {{ apiKeyConfigured ? t.apiKeyStatusSet : t.apiKeyStatusUnset }}
+          </span>
+          <button
+            v-if="apiKeyConfigured"
+            class="key-clear"
+            :disabled="savingKey"
+            @click="clearApiKey"
+          >{{ t.apiKeyClear }}</button>
+        </div>
+      </section>
+
+      <!-- Chat memory -->
+      <section class="card">
+        <h2 class="card-title">
+          <span class="card-icon">🧠</span>{{ t.chatMemory }}
+        </h2>
+        <p class="card-hint">{{ t.chatMemoryHint }}</p>
+        <button
+          class="btn btn-danger"
+          :class="{ confirming: confirmingClear }"
+          @click="clearMemory"
+        >
+          {{ confirmingClear ? t.clearMemoryConfirm : t.clearMemory }}
+        </button>
       </section>
 
       <!-- System -->
@@ -684,6 +947,30 @@ onMounted(async () => {
 }
 .btn-subtle:hover { background: rgba(255, 255, 255, 0.30); }
 
+/* Destructive button (clear memory) — neutral until armed, red once confirming */
+.btn-danger {
+  background: rgba(255, 255, 255, 0.45);
+  border: 1.5px solid rgba(200, 90, 90, 0.45);
+  color: #a23a3a;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+.btn-danger:hover { background: rgba(220, 120, 120, 0.16); }
+.btn-danger.confirming {
+  background: linear-gradient(135deg, #c85454, #a23a3a);
+  border-color: transparent;
+  color: white;
+  box-shadow: 0 2px 10px rgba(160, 60, 60, 0.34);
+}
+
+/* ── Card hint (small muted description under a card title) ───────── */
+.card-hint {
+  margin: 0 0 9px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: rgba(45, 85, 45, 0.62);
+}
+
 /* ── Status toast ────────────────────────────────────────── */
 .toast {
   margin: 0;
@@ -726,4 +1013,133 @@ onMounted(async () => {
   border-color: transparent;
   color: white;
 }
+
+/* ── API key field ───────────────────────────────────────── */
+.key-help {
+  display: inline-block;
+  margin: -4px 0 9px;
+  padding: 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #4a7a9a;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: color 120ms ease;
+}
+.key-help:hover { color: #2c5f80; text-decoration: underline; }
+.key-row { display: flex; gap: 7px; align-items: center; }
+.key-input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  font-size: 12.5px;
+  border: 1.5px solid rgba(119, 153, 119, 0.40);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.72);
+  color: #1a2e1a;
+  outline: none;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+.key-input:focus {
+  border-color: #779977;
+  box-shadow: 0 0 0 3px rgba(119, 153, 119, 0.18);
+}
+.key-input::placeholder { color: rgba(45, 85, 45, 0.40); }
+.key-save { flex-shrink: 0; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.key-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 7px;
+}
+.key-status { font-size: 11px; font-weight: 600; color: rgba(160, 60, 60, 0.85); }
+.key-status.ok { color: #3a7d3a; }
+.key-clear {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(55, 88, 55, 0.56);
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.key-clear:hover { color: #a23a3a; background: rgba(220, 120, 120, 0.12); }
+
+/* ── Search engine dropdown ───────────────────────────────── */
+.dropdown {
+  position: relative;
+}
+
+.engine-trigger {
+  width: 100%;
+  padding: 7px 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #2c4e2c;
+  border: 1.5px solid rgba(119, 153, 119, 0.40);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.72);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  text-align: left;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+.engine-trigger:hover,
+.engine-trigger:focus-visible {
+  border-color: #779977;
+  box-shadow: 0 0 0 3px rgba(119, 153, 119, 0.18);
+  outline: none;
+}
+
+.engine-chevron {
+  flex-shrink: 0;
+  color: rgba(44, 78, 44, 0.45);
+  transition: transform 180ms ease;
+}
+.engine-chevron.open { transform: rotate(180deg); }
+
+/* Opens upward — avoids being clipped by the scroll container's bottom edge */
+.engine-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 10;
+  background: rgba(240, 248, 240, 0.97);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1.5px solid rgba(119, 153, 119, 0.35);
+  border-radius: 10px;
+  box-shadow:
+    0 -4px 20px rgba(40, 80, 40, 0.12),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.60);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.engine-option {
+  width: 100%;
+  padding: 7px 10px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: #2c4e2c;
+  background: transparent;
+  border: none;
+  border-radius: 7px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 100ms ease, color 100ms ease;
+}
+.engine-option:hover  { background: rgba(119, 153, 119, 0.14); color: #1a3a1a; }
+.engine-option.active { background: rgba(119, 153, 119, 0.22); color: #1a3a1a; font-weight: 700; }
 </style>

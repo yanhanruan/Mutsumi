@@ -1,14 +1,26 @@
 mod app_state;
 #[cfg(windows)]
 mod audio;
+#[cfg(test)]
+mod benchmarks;
 mod card_export;
+mod chat;
 mod cursor;
+// Data layer (SQLite memory store). The full public API lands ahead of its
+// consumers in Phases 1–4 (LLM service, RAG chat, extraction, reflection), so
+// allow dead_code across the module until those pipelines wire it up.
+#[allow(dead_code)]
+mod db;
+mod http;
 mod idle;
 mod late_night;
 #[cfg(windows)]
 mod media;
 mod persistence;
+mod persona;
 mod pomodoro;
+mod search;
+mod services;
 mod state;
 mod tray;
 mod weather;
@@ -29,10 +41,20 @@ async fn hide_pet(app: tauri::AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+  // Load `src-tauri/.env` (auth token + reCAPTCHA for external services) into the
+  // process environment before any service config is read. Absent file is fine.
+  let _ = dotenvy::dotenv();
+
   let shared = SharedState::new();
   let weather_state = weather::WeatherState::new();
   let audio_state   = audio::AudioState(AtomicBool::new(false));
   let media_state   = media::MediaState::new();
+  let fish_audio_state = services::FishAudioState::new(services::fish_audio::config_from_env())
+    .expect("failed to build Fish Audio TTS service");
+  let qwen_state    = services::QwenState::new(services::qwen::config_from_env())
+    .expect("failed to build Qwen LLM client");
+  let search_state  = search::SearchState::new(search::SearchEngine::default())
+    .expect("failed to build search client");
 
   tauri::Builder::default()
     // ── Single-instance guard ─────────────────────────────────────────────
@@ -49,10 +71,17 @@ pub fn run() {
       tauri_plugin_autostart::MacosLauncher::LaunchAgent,
       None,
     ))
+    .plugin(tauri_plugin_dialog::init())
+    .plugin(tauri_plugin_clipboard_manager::init())
+    .plugin(tauri_plugin_opener::init())
     .manage(shared.clone())
     .manage(weather_state)
     .manage(audio_state)
     .manage(media_state)
+    .manage(fish_audio_state)
+    .manage(qwen_state)
+    .manage(search_state)
+    .manage(chat::ChatBuffer::new())
     .invoke_handler(tauri::generate_handler![
       app_state::get_state,
       app_state::pet_click,
@@ -81,6 +110,22 @@ pub fn run() {
       window_ops::set_window_bounds,
       card_export::save_card_image,
       card_export::reveal_in_folder,
+      services::tts_synthesize,
+      services::tts_set_recaptcha,
+      services::qwen_set_api_key,
+      services::qwen_key_status,
+      services::qwen_set_chat_model,
+      chat::chat_send,
+      chat::chat_stream,
+      chat::chat_clear_memory,
+      chat::chat_flush_memory,
+      chat::chat_recent_messages,
+      chat::chat_messages_after,
+      chat::chat_search_history,
+      chat::chat_vision_stream,
+      chat::chat_stage_clipboard_image,
+      search::set_search_engine,
+      search::set_search_enabled,
       hide_pet,
     ])
     .setup(move |app| {
@@ -90,6 +135,34 @@ pub fn run() {
             .level(log::LevelFilter::Info)
             .build(),
         )?;
+      }
+
+      use tauri::Manager;
+
+      // Open the SQLite memory database (dynamic user data). Registered as
+      // managed state; async commands access it via spawn_blocking.
+      match db::Db::open(app.handle()) {
+        Ok(database) => {
+          app.manage(database);
+
+          // Pipeline C: on startup, reflect on any observations that piled up
+          // in previous sessions (runs in the background; no-op if too few).
+          let handle = app.handle().clone();
+          tauri::async_runtime::spawn(async move {
+            chat::reflection::maybe_reflect(&handle, chat::reflection::REFLECTION_STARTUP_MIN).await;
+          });
+        }
+        Err(e) => log::error!("failed to open memory database: {e}"),
+      }
+
+      // Apply a user-set 百炼 (Qwen/DashScope) API key from Settings, overriding
+      // the .env default. End users without a .env rely entirely on this.
+      if let Some(key) = services::load_persisted_qwen_key() {
+        if let Some(qwen) = app.try_state::<services::QwenState>() {
+          if let Err(e) = qwen.set_api_key(&key) {
+            log::warn!("failed to apply persisted Qwen API key: {e}");
+          }
+        }
       }
 
       // Load persisted state (energy/affection + pomodoro durations) if any.

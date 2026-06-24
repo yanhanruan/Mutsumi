@@ -10,7 +10,7 @@
  * - Chat bubble is absolutely positioned above the pet so the pet fills the
  *   entire window.
  */
-import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useAnimator, DEFAULT_ANIMATIONS } from '../composables/useAnimator'
 import { useAudioReaction } from '../composables/useAudioReaction'
 import { useHitTest } from '../composables/useHitTest'
@@ -23,6 +23,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { useAppConfig, CHAR_SIZE_DIMS } from '../composables/useAppConfig'
 import { useWeatherAvailable } from '../composables/useWeatherAvailable'
 import { TAROT_WINDOW_DIMS } from '../config/tarot'
+import { CHAT_WINDOW_DIMS } from '../config/chat'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import ChatBubble from './ChatBubble.vue'
 import PomodoroBadge from './PomodoroBadge.vue'
@@ -30,6 +31,7 @@ import WeatherBadge from './WeatherBadge.vue'
 import MusicBadge from './MusicBadge.vue'
 import BalloonPet from './BalloonPet.vue'
 import TarotCard from './TarotCard.vue'
+import ChatPanel from './ChatPanel.vue'
 import ContextMenu, { type MenuAction, type ContextActionKey } from './ContextMenu.vue'
 
 const imgRef = ref<HTMLImageElement | null>(null)
@@ -64,9 +66,12 @@ const { t, locale } = useI18n()
 const { config } = useAppConfig()
 const { weatherAvailable } = useWeatherAvailable()
 
-// True while the tarot overlay is open (declared before the size watch below,
-// which reads it on its immediate run).
+// True while the tarot / chat overlay is open (declared before the size watch
+// below, which reads them on its immediate run).
 const tarotActive = ref(false)
+const chatActive  = ref(false)
+// Any full-window overlay is open — gates pet interaction + sprite/badge display.
+const overlayOpen = computed(() => tarotActive.value || chatActive.value)
 
 // ── Window show / hide transitions ────────────────────────────────
 // petOpacity drives a CSS opacity transition. It starts at 1, goes to 0 when
@@ -82,7 +87,7 @@ const petOpacity = ref(1)
 watch(
   () => config.value.characterSize,
   size => {
-    if (tarotActive.value) return
+    if (overlayOpen.value) return
     const [w, h] = CHAR_SIZE_DIMS[size]
     getCurrentWindow().setSize(new LogicalSize(w, h))
   },
@@ -92,6 +97,7 @@ watch(
 const bubbleRef  = ref<InstanceType<typeof ChatBubble> | null>(null)
 const contextRef = ref<InstanceType<typeof ContextMenu> | null>(null)
 const tarotRef   = ref<InstanceType<typeof TarotCard> | null>(null)
+const chatRef    = ref<InstanceType<typeof ChatPanel> | null>(null)
 
 // ── Tarot overlay ──────────────────────────────────────────────────
 // Integrated in-window reading (not a separate OS window). On open the main
@@ -158,6 +164,43 @@ async function closeTarot() {
   tarotActive.value = false
 }
 
+// ── Chat overlay ───────────────────────────────────────────────────
+// Same window-grow/restore choreography as the tarot overlay, sized via
+// CHAT_WINDOW_DIMS. The pet sprite + badges hide while chat is open.
+async function openChat() {
+  const win = getCurrentWindow()
+  try { savedPos = await win.outerPosition() } catch { savedPos = null }
+  bubbleRef.value?.hide()
+  chatActive.value = true
+  chatRef.value?.open()          // show the overlay BEFORE growing — it covers the window
+  await nextTick()
+  await nextPaint()
+
+  const [lw, lh] = CHAT_WINDOW_DIMS[config.value.characterSize]
+  const sf  = await win.scaleFactor()
+  const mon = await currentMonitor()
+  const pw  = lw * sf
+  const ph  = lh * sf
+  let x = savedPos?.x ?? 0
+  let y = savedPos?.y ?? 0
+  if (mon) {
+    x = mon.position.x + (mon.size.width  - pw) / 2
+    y = mon.position.y + (mon.size.height - ph) / 2
+  }
+  await setBounds(win, x, y, pw, ph)
+}
+
+async function closeChat() {
+  const win = getCurrentWindow()
+  const [lw, lh] = CHAR_SIZE_DIMS[config.value.characterSize]
+  const sf = await win.scaleFactor()
+  chatRef.value?.dismiss()
+  await nextTick()
+  await nextPaint()
+  await setBounds(win, savedPos?.x ?? 0, savedPos?.y ?? 0, lw * sf, lh * sf)
+  chatActive.value = false
+}
+
 // ── Mouse interaction ──────────────────────────────────────────────
 const DRAG_THRESHOLD = 5
 let pressX = 0
@@ -166,7 +209,7 @@ let pressed = false
 let didDrag = false
 
 function onMouseDown(e: MouseEvent) {
-  if (e.button !== 0 || tarotActive.value) return
+  if (e.button !== 0 || overlayOpen.value) return
   pressX = e.screenX
   pressY = e.screenY
   pressed = true
@@ -192,7 +235,7 @@ async function onMouseMove(e: MouseEvent) {
 }
 
 function onMouseUp(e: MouseEvent) {
-  if (e.button !== 0 || tarotActive.value) return
+  if (e.button !== 0 || overlayOpen.value) return
   if (pressed && !didDrag) {
     // True click — no movement.
     // TODO re-enable click animation:
@@ -213,7 +256,7 @@ function onMouseUp(e: MouseEvent) {
 
 function onContextMenu(e: MouseEvent) {
   e.preventDefault()
-  if (tarotActive.value) return
+  if (overlayOpen.value) return
   contextRef.value?.open(e.clientX, e.clientY)
 }
 
@@ -225,6 +268,10 @@ async function onContextAction(action: MenuAction) {
   }
   if (action === 'tarot') {
     await openTarot()
+    return
+  }
+  if (action === 'chat') {
+    await openChat()
     return
   }
   // Play the pat_head animation immediately (like click — no pending delay).
@@ -243,6 +290,12 @@ let unlistenWillHide: UnlistenFn | null = null
 let unlistenShow: UnlistenFn | null = null
 
 onMounted(async () => {
+  // Sync persisted chat settings to the backend so saved choices survive restarts
+  // (the backend boots from .env defaults until these are applied).
+  void invoke('set_search_engine', { engine: config.value.searchEngine }).catch(() => {})
+  void invoke('set_search_enabled', { enabled: config.value.searchEnabled }).catch(() => {})
+  void invoke('qwen_set_chat_model', { model: config.value.chatModel }).catch(() => {})
+
   // Fade-out: Rust emits "pet-will-hide" before w.hide(); drive the CSS transition.
   unlistenWillHide = await listen('pet-will-hide', () => {
     petOpacity.value = 0
@@ -279,16 +332,17 @@ onUnmounted(() => {
     @mouseup="onMouseUp"
     @contextmenu="onContextMenu"
   >
-    <img v-show="ready && !tarotActive" ref="imgRef" class="frame" draggable="false" />
-    <PomodoroBadge v-if="!tarotActive" />
-    <WeatherBadge v-if="!tarotActive && config.showWeather && weatherAvailable !== false" />
-    <MusicBadge v-if="!tarotActive && config.showMusic" />
+    <img v-show="ready && !overlayOpen" ref="imgRef" class="frame" draggable="false" />
+    <PomodoroBadge v-if="!overlayOpen" />
+    <WeatherBadge v-if="!overlayOpen && config.showWeather && weatherAvailable !== false" />
+    <MusicBadge v-if="!overlayOpen && config.showMusic" />
     <div class="bubble-anchor">
       <ChatBubble ref="bubbleRef" />
     </div>
   </div>
   <ContextMenu ref="contextRef" @action="onContextAction" />
   <TarotCard ref="tarotRef" @close="closeTarot" />
+  <ChatPanel ref="chatRef" @close="closeChat" />
   <BalloonPet />
 </template>
 

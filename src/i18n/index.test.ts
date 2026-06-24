@@ -121,6 +121,7 @@ describe('useI18n', () => {
         expect(t.value.contextResponses[k]).toBeTruthy()
       }
       expect(t.value.contextMenuItems.tarot).toBeTruthy()
+      expect(t.value.contextMenuItems.chat).toBeTruthy()
       expect(t.value.contextMenuItems.hide).toBeTruthy()
     }
   })
@@ -152,16 +153,16 @@ describe('locale bundle completeness', () => {
     }
   })
 
-  it('en contextMenuItems has all 6 actions (including tarot + hide)', () => {
-    expect(Object.keys(en.contextMenuItems)).toHaveLength(6)
+  it('en contextMenuItems has all 7 actions (including tarot + chat + hide)', () => {
+    expect(Object.keys(en.contextMenuItems)).toHaveLength(7)
   })
 
-  it('zh contextMenuItems has all 6 actions (including tarot + hide)', () => {
-    expect(Object.keys(zh.contextMenuItems)).toHaveLength(6)
+  it('zh contextMenuItems has all 7 actions (including tarot + chat + hide)', () => {
+    expect(Object.keys(zh.contextMenuItems)).toHaveLength(7)
   })
 
-  it('ja contextMenuItems has all 6 actions (including tarot + hide)', () => {
-    expect(Object.keys(ja.contextMenuItems)).toHaveLength(6)
+  it('ja contextMenuItems has all 7 actions (including tarot + chat + hide)', () => {
+    expect(Object.keys(ja.contextMenuItems)).toHaveLength(7)
   })
 
   it('all locales have character size labels', () => {

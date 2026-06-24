@@ -9,6 +9,12 @@
   ],
   "permissions": [
     "core:default",
+    "dialog:allow-open",
+    "clipboard-manager:allow-read-image",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [{ "url": "https://developer.aliyun.com/*" }]
+    },
     "core:window:allow-start-dragging",
     "core:window:allow-set-position",
     "core:window:allow-set-size",
@@ -16,6 +22,9 @@
     "core:window:allow-hide",
     "core:window:allow-close",
     "core:window:allow-minimize",
+    "core:window:allow-unminimize",
+    "core:window:allow-is-minimized",
+    "core:window:allow-set-skip-taskbar",
     "core:window:allow-toggle-maximize",
     "core:window:allow-set-ignore-cursor-events",
     "core:tray:default",

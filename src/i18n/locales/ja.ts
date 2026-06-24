@@ -55,6 +55,42 @@ export const ja: Translations = {
   // ── Music controller visibility ───────────────────────────────────
   showMusic: '音楽コントローラーを表示',
 
+  // ── Search engine ─────────────────────────────────────────────────
+  searchEngine: '検索エンジン',
+  searchEngines: {
+    duckduckgo: 'DuckDuckGo',
+    bingCn:     'Bing（中国）',
+    bing:       'Bing',
+    google:     'Google',
+    baidu:      'Baidu',
+  },
+  searchEnabled:     'ウェブ検索',
+  searchEnabledHint: 'オンの時は時事・リアルタイムな質問でネット検索を参照します。オフなら睦の知識と記憶のみで返答します（高速）。',
+
+  // ── チャットモデル ────────────────────────────────────────────────
+  chatModel:       'チャットモデル',
+  chatModelHint:   'チャットを動かすモデルを切り替えます：max は最も高性能、flash は最速、plus は品質と速度のバランス型。',
+  modelDefaultTag: 'デフォルト',
+
+  // ── チャットの記憶リセット ────────────────────────────────────────
+  chatMemory:         'チャットの記憶',
+  chatMemoryHint:     '睦が覚えたあなたのことをすべて忘れ、最初からやり直します。',
+  clearMemory:        '記憶を消去',
+  clearMemoryConfirm: 'もう一度押して確定',
+  clearMemoryDoneMsg: '記憶を消去しました。',
+
+  // ── Qwen / 百錬 (DashScope) API キー ──────────────────────────────
+  apiKey:               'Qwen API キー',
+  apiKeyHint:           'チャット機能を利用するには、阿里雲（Alibaba Cloud）百炼（Bailian）のAPIキー（無料利用枠あり）が必要です。百炼コンソールでAPIキーを作成し、ここに貼り付けてください。APIキーは安全に暗号化され、本端末内にのみ保存されます。設定後、すぐに有効になります。',
+  apiKeyPlaceholder:    'sk-... API キーを貼り付け',
+  apiKeySetPlaceholder: '設定済み · 貼り付けて置き換え',
+  apiKeyStatusSet:      '✓ 設定済み',
+  apiKeyStatusUnset:    '未設定 — チャットは利用できません',
+  apiKeyClear:          'クリア',
+  apiKeySavedMsg:       'API キーを保存しました。',
+  apiKeyClearedMsg:     'API キーをクリアしました。',
+  apiKeyHelp:           'API キーの取得方法は？',
+
   // ── Pomodoro badge ────────────────────────────────────────────────
   pomFocus: '集中',
   pomBreak: '休憩',
@@ -66,6 +102,7 @@ export const ja: Translations = {
     sleep:         'おやすみ',
     fast_learning: '速習モード',
     tarot:         'タロット占い',
+    chat:          'おしゃべり',
     hide:          'アプリを隠す',
   },
 
@@ -112,5 +149,49 @@ export const ja: Translations = {
     today:        '今日のカード',
     history:      '最近',
     empty:        'まだ占いの記録がありません。',
+  },
+
+  // ── Chat overlay UI chrome ────────────────────────────────────────
+  chat: {
+    title:       '睦とおしゃべり',
+    placeholder: '話しかけてみて…',
+    send:        '送信',
+    thinking:    '……',
+    empty:       '聞いているよ。',
+    close:       '閉じる',
+    minimize:    '最小化',
+    error:       '問題が発生しました。',
+    errorNetwork:             '……ネットに繋がらない。接続を確認して？',
+    errorTimeout:            '……時間がかかりすぎ。あとでまた試して。',
+    errorApiKeyMissing:       '……APIキーがまだ未設定だよ。設定から入れて。',
+    errorApiKeyInvalid:       '……このAPIキー、違うみたい。確認して？',
+    errorInsufficientBalance: '……残高か利用枠が足りないみたい。',
+    errorContentFiltered:     '……これには答えられない。',
+    errorRateLimited:         '……早すぎ。ちょっと待って？',
+    errorServer:             '……サーバー側で問題が起きてる。あとで試して。',
+    attachFile:  'ファイルを添付',
+    voiceInput:  '音声入力',
+    voiceListening:  '聞き取り中…クリックで停止',
+    voiceUnsupported: 'この環境では音声入力に対応していません',
+    jumpToLatest:    '最新へ移動',
+    history:         '履歴',
+    historyClose:    'チャットに戻る',
+    searchPlaceholder: 'メッセージを検索…',
+    dateFrom:        '開始',
+    dateTo:          '終了',
+    datePlaceholder: '日付を選択',
+    dateToday:       '今日',
+    dateClear:       'クリア',
+    searchNoResults: '一致するメッセージはありません。',
+    searchHint:      'キーワード検索、または日付で絞り込み。',
+    emoji:           '絵文字',
+    emojiSearch:     '絵文字を検索…',
+    emojiNoResults:  '絵文字が見つかりません。',
+    attachImage:     '画像を送る',
+    imageTooLarge:   '……重すぎ。5MB までにして。🐱',
+    imageBadType:    '画像だけだよ、ふぅ~ 📸',
+    imageTooMany:    '三枚までね~',
+    imageAlt:        '共有された画像',
+    dropHint:        'ここに画像をドロップ',
   },
 }

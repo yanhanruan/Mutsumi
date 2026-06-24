@@ -60,6 +60,43 @@ export interface Translations {
   // ── Music controller visibility ─────────────────────────────────
   showMusic: string
 
+  // ── Search engine (chat search-enhancement) ─────────────────────
+  searchEngine: string
+  searchEngines: {
+    duckduckgo: string
+    bingCn:     string
+    bing:       string
+    google:     string
+    baidu:      string
+  }
+  /** Master on/off toggle for web search. */
+  searchEnabled:     string
+  searchEnabledHint: string
+
+  // ── Chat model ──────────────────────────────────────────────────
+  chatModel:       string
+  chatModelHint:   string
+  modelDefaultTag: string
+
+  // ── Chat memory reset ───────────────────────────────────────────
+  chatMemory:           string
+  chatMemoryHint:       string
+  clearMemory:          string
+  clearMemoryConfirm:   string
+  clearMemoryDoneMsg:   string
+
+  // ── Qwen / 百炼 (DashScope) API key ──────────────────────────────
+  apiKey:               string
+  apiKeyHint:           string
+  apiKeyPlaceholder:    string
+  apiKeySetPlaceholder: string
+  apiKeyStatusSet:      string
+  apiKeyStatusUnset:    string
+  apiKeyClear:          string
+  apiKeySavedMsg:       string
+  apiKeyClearedMsg:     string
+  apiKeyHelp:           string
+
   // ── Pomodoro badge ──────────────────────────────────────────────
   pomFocus:  string
   pomBreak:  string
@@ -72,6 +109,8 @@ export interface Translations {
     fast_learning: string
     /** Opens the in-pet tarot overlay (frontend-only). */
     tarot:         string
+    /** Opens the in-pet chat overlay (frontend-only). */
+    chat:          string
     /** Task 5: hide the main window to tray. */
     hide:          string
   }
@@ -99,6 +138,54 @@ export interface Translations {
     today:        string   // "card of the day" badge
     history:      string   // history toggle / panel heading
     empty:        string   // empty-history placeholder
+  }
+
+  // ── Chat overlay UI chrome ──────────────────────────────────────
+  chat: {
+    title:       string   // panel header
+    placeholder: string   // text-input placeholder
+    send:        string   // send-button title
+    thinking:    string   // status shown while awaiting the first token
+    empty:       string   // empty-conversation hint
+    close:       string   // close-button title
+    minimize:    string   // titlebar minimize-button tooltip
+    error:       string   // generic failure line (fallback for unclassified errors)
+    // ── Classified failure lines (mapped from the Rust ChatError code) ──
+    errorNetwork:             string   // transport down / DNS / connection refused
+    errorTimeout:             string   // request timed out
+    errorApiKeyMissing:       string   // no API key configured
+    errorApiKeyInvalid:       string   // key rejected by the provider (401)
+    errorInsufficientBalance: string   // account out of credit / quota exhausted
+    errorContentFiltered:     string   // input rejected by content moderation
+    errorRateLimited:         string   // throttled — too many requests
+    errorServer:              string   // provider-side 5xx
+    attachFile:  string   // attach-file button tooltip (incomplete feature)
+    voiceInput:  string   // voice-input button tooltip (idle)
+    voiceListening:  string   // voice-input button tooltip while recording
+    voiceUnsupported: string  // voice-input button tooltip when STT unavailable
+    jumpToLatest: string  // "back to present" button (shown when browsing history)
+    // ── History search panel ──
+    history:          string   // history button tooltip + panel title
+    historyClose:     string   // history panel close-button title
+    searchPlaceholder: string  // keyword search input placeholder
+    dateFrom:         string   // date-range "from" label
+    dateTo:           string   // date-range "to" label
+    datePlaceholder:  string   // date-picker trigger placeholder (no date chosen)
+    dateToday:        string   // date-picker "today" action
+    dateClear:        string   // date-picker "clear" action + clear-filters affordance
+    searchNoResults:  string   // empty-results hint
+    searchHint:       string   // initial hint before any query
+    // ── Emoji picker ──
+    emoji:            string   // emoji-button tooltip
+    emojiSearch:      string   // emoji search input placeholder
+    emojiNoResults:   string   // empty emoji-search hint
+    // ── Image input ──
+    attachImage:      string   // attach-image button tooltip
+    imageTooLarge:    string   // in-character alert: a file exceeds 5MB
+    imageBadType:     string   // in-character alert: not an accepted image type
+    imageTooMany:     string   // in-character alert: more than the image cap
+    imageAlt:         string   // <img> alt text for sent images
+    dropHint:         string   // dashed drop-overlay caption
   }
 
   // ── Mini music controller ───────────────────────────────────────

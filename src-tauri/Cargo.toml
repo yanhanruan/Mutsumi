@@ -21,12 +21,30 @@ tauri-build = { version = "2.6.2", features = [] }
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
-tauri = { version = "2.11.2", features = ["tray-icon", "image-png"] }
+tauri = { version = "2.11.2", features = ["protocol-asset", "tray-icon", "image-png"] }
 tauri-plugin-log = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-single-instance = "2"
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "native-tls"] }
+tauri-plugin-dialog = "2"               # native file-open picker (image attach)
+tauri-plugin-clipboard-manager = "2"    # read pasted clipboard images
+tauri-plugin-opener = "2"               # open the "how to get a key" tutorial in the system browser
+# OS credential store for the user's Qwen/百炼 API key (Windows Credential
+# Manager / macOS Keychain / Linux Secret Service) — never plaintext on disk.
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "bmp", "tiff", "webp"] }  # silent local image compression (no HEIC)
+base64 = "0.22"   # data-URL encoding for vision image payloads
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "native-tls", "stream"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+thiserror = "2"
+dotenvy = "0.15"
+rusqlite = { version = "0.32", features = ["bundled"] }
+scraper = "0.20"   # HTML parsing for search-result + page-body scraping
+regex = "1"        # date / keyword detection for search triggering
+tokio = { version = "1", features = ["time", "macros"] }  # search budget + concurrent embed/search (join!)
+
+# Test-only async runtime for the (ignored) live API smoke tests.
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 # ── Release size optimizations ─────────────────────────────────────
 [profile.release]

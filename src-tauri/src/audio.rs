@@ -115,14 +115,14 @@ pub fn spawn(app: AppHandle, stop_flag: Arc<AtomicBool>) {
 
             match tracker.observe(now_playing) {
                 Some(AudioEvent::Started) => {
-                    log::info!("[audio] *** audio-started (poll #{}) ***", poll_count);
+                    // log::info!("[audio] *** audio-started (poll #{}) ***", poll_count);
                     if let Some(s) = app.try_state::<AudioState>() {
                         s.0.store(true, Ordering::Relaxed);
                     }
                     let _ = app.emit("audio-started", ());
                 }
                 Some(AudioEvent::Stopped) => {
-                    log::info!("[audio] *** audio-stopped (poll #{}) ***", poll_count);
+                    // log::info!("[audio] *** audio-stopped (poll #{}) ***", poll_count);
                     if let Some(s) = app.try_state::<AudioState>() {
                         s.0.store(false, Ordering::Relaxed);
                     }
@@ -133,10 +133,10 @@ pub fn spawn(app: AppHandle, stop_flag: Arc<AtomicBool>) {
 
             if poll_count % 20 == 0 {
                 let (play_s, silent_s) = tracker.streaks();
-                log::info!(
-                    "[audio] poll #{}: now={} emitted={} play_streak={} silent_streak={}",
-                    poll_count, now_playing, tracker.emitted_playing(), play_s, silent_s
-                );
+                // log::info!(
+                //     "[audio] poll #{}: now={} emitted={} play_streak={} silent_streak={}",
+                //     poll_count, now_playing, tracker.emitted_playing(), play_s, silent_s
+                // );
             }
 
             thread::sleep(POLL_INTERVAL);

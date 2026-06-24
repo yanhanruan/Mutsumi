@@ -55,6 +55,42 @@ export const en: Translations = {
   // ── Music controller visibility ───────────────────────────────────
   showMusic: 'Show Music Controller',
 
+  // ── Search engine ─────────────────────────────────────────────────
+  searchEngine: 'Search Engine',
+  searchEngines: {
+    duckduckgo: 'DuckDuckGo',
+    bingCn:     'Bing (China)',
+    bing:       'Bing',
+    google:     'Google',
+    baidu:      'Baidu',
+  },
+  searchEnabled:     'Web search',
+  searchEnabledHint: 'When on, current-events / real-time questions are looked up online for grounding; when off, replies use only the model and memory (faster).',
+
+  // ── Chat model ────────────────────────────────────────────────────
+  chatModel:       'Chat model',
+  chatModelHint:   'Switch the model behind chat: max is strongest, flash is fastest, plus balances quality and speed.',
+  modelDefaultTag: 'default',
+
+  // ── Chat memory reset ─────────────────────────────────────────────
+  chatMemory:         'Chat Memory',
+  chatMemoryHint:     'Forget everything Mutsumi has learned about you and start fresh.',
+  clearMemory:        'Clear memory',
+  clearMemoryConfirm: 'Tap again to confirm',
+  clearMemoryDoneMsg: 'Memory cleared.',
+
+  // ── Qwen / Bailian (DashScope) API key ────────────────────────────
+  apiKey:               'Qwen API Key',
+  apiKeyHint:           'The chat feature requires an API Key from Alibaba Cloud Bailian (free quota available). Create an API Key in the Bailian Console and paste it here. It will be securely encrypted and stored only on your local device. The configuration takes effect immediately after being saved.',
+  apiKeyPlaceholder:    'sk-... paste your API key',
+  apiKeySetPlaceholder: 'Configured · paste to replace',
+  apiKeyStatusSet:      '✓ Configured',
+  apiKeyStatusUnset:    'Not set — chat will not work',
+  apiKeyClear:          'Clear',
+  apiKeySavedMsg:       'API key saved.',
+  apiKeyClearedMsg:     'API key cleared.',
+  apiKeyHelp:           'How to get an API key?',
+
   // ── Pomodoro badge ────────────────────────────────────────────────
   pomFocus: 'Focus',
   pomBreak: 'Break',
@@ -66,6 +102,7 @@ export const en: Translations = {
     sleep:         'Sleep',
     fast_learning: 'Fast Learning',
     tarot:         'Tarot Reading',
+    chat:          'Chat',
     hide:          'Hide App',
   },
 
@@ -112,5 +149,49 @@ export const en: Translations = {
     today:        "Today's Card",
     history:      'Recent',
     empty:        'No readings yet.',
+  },
+
+  // ── Chat overlay UI chrome ────────────────────────────────────────
+  chat: {
+    title:       'Chat with Mutsumi',
+    placeholder: 'Say something…',
+    send:        'Send',
+    thinking:    '…',
+    empty:       'She is listening.',
+    close:       'Close',
+    minimize:    'Minimize',
+    error:       'Something went wrong.',
+    errorNetwork:             "…can't reach the network. Check your connection?",
+    errorTimeout:            '…that took too long. Try again in a bit.',
+    errorApiKeyMissing:       '…no API key set yet — add one in Settings.',
+    errorApiKeyInvalid:       '…that API key looks wrong. Double-check it?',
+    errorInsufficientBalance: '…the account is out of credit or quota.',
+    errorContentFiltered:     "…I can't respond to that one.",
+    errorRateLimited:         '…too fast — give it a moment?',
+    errorServer:             '…the server is having trouble. Try again soon.',
+    attachFile:  'Attach file',
+    voiceInput:  'Voice input',
+    voiceListening:  'Listening… click to stop',
+    voiceUnsupported: 'Voice input is not supported in this environment',
+    jumpToLatest:    'Jump to latest',
+    history:         'History',
+    historyClose:    'Back to chat',
+    searchPlaceholder: 'Search messages…',
+    dateFrom:        'From',
+    dateTo:          'To',
+    datePlaceholder: 'Pick a date',
+    dateToday:       'Today',
+    dateClear:       'Clear',
+    searchNoResults: 'No matching messages.',
+    searchHint:      'Search by keyword, or filter by date.',
+    emoji:           'Emoji',
+    emojiSearch:     'Search emoji…',
+    emojiNoResults:  'No emoji found.',
+    attachImage:     'Send an image',
+    imageTooLarge:   '…too big, my paws can\'t lift it. Keep it under 5MB. 🐱',
+    imageBadType:    'Images only, please~ 📸',
+    imageTooMany:    'Three at most, okay~',
+    imageAlt:        'Shared image',
+    dropHint:        'Drop the image here',
   },
 }
