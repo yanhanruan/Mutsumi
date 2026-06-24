@@ -28,6 +28,7 @@ import {
 import { useI18n } from '../i18n'
 import { useTarotJournal, MAX_DRAWS_PER_DAY, type JournalEntry } from '../composables/useTarotJournal'
 import { playDrawSound, playFlipSound } from '../composables/useTarotSound'
+import { useOverlayVisibility } from '../composables/useOverlayVisibility'
 
 const emit = defineEmits<{ close: [] }>()
 
@@ -41,7 +42,9 @@ const { history, drawsToday, getToday, recordDailyIfAbsent, addEntry, refreshDra
 const drawsLeft = computed(() => Math.max(0, MAX_DRAWS_PER_DAY - drawsToday.value))
 
 // ── State ───────────────────────────────────────────────────────────────
-const visible     = ref(false)
+// `visible` + `skipLeave` (and show/dismiss) come from the shared overlay
+// helper so the close-afterimage fix lives in one place (see the composable).
+const { visible, skipLeave, show, dismiss: dismissOverlay } = useOverlayVisibility()
 const card        = ref<TarotCard>(TAROT_DECK[0])
 const reversed    = ref(false)   // true = card drawn inverted (50 % chance)
 const flipped     = ref(false)
@@ -51,7 +54,6 @@ const revealed    = ref(false)
 const drawKey     = ref(0)
 const isToday     = ref(false)   // the shown card is today's recorded card
 const showHistory = ref(false)   // history panel is open
-const skipLeave   = ref(false)   // skip the leave fade on dismiss (see dismiss())
 // When non-null, the card view is showing a past reading opened from history
 // (its timestamp) rather than a live draw — shown as a date chip.
 const viewingDate = ref<number | null>(null)
@@ -255,9 +257,8 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 
 // ── Public API (called by PetWindow) ────────────────────────────────────
 function open(): void {
-  skipLeave.value   = false   // fade the overlay IN on open
+  show()                      // fade the overlay IN on open
   showHistory.value = false
-  visible.value     = true
   refreshDraws()              // re-sync today's quota (handles midnight rollover)
 
   const todays = getToday()
@@ -290,8 +291,7 @@ function requestClose(): void {
  */
 function dismiss(): void {
   if (loadingTimer) { clearTimeout(loadingTimer); loadingTimer = null }
-  skipLeave.value = true
-  visible.value = false
+  dismissOverlay()
 }
 defineExpose({ open, dismiss })
 </script>

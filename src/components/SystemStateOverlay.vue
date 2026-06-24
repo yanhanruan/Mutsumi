@@ -14,6 +14,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import { useI18n } from '../i18n'
+import { useOverlayVisibility } from '../composables/useOverlayVisibility'
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -45,7 +46,9 @@ const emit = defineEmits<{ close: [] }>()
 
 const { t } = useI18n()
 
-const visible = ref(false)
+// Visibility + the "skip leave fade on dismiss" guard that prevents an
+// afterimage when PetWindow shrinks the window back on close.
+const { visible, skipLeave, show, dismiss } = useOverlayVisibility()
 const state = ref<SystemState | null>(null)
 
 const activeTab = ref<'status' | 'hardware'>('status')
@@ -151,22 +154,18 @@ onUnmounted(() => {
 // ── Public API ─────────────────────────────────────────────────────
 function open() {
   activeTab.value = 'status'
-  visible.value = true
+  show()
 }
 
 function requestClose() {
   emit('close')
 }
 
-function dismiss() {
-  visible.value = false
-}
-
 defineExpose({ open, dismiss })
 </script>
 
 <template>
-  <Transition name="fade">
+  <Transition name="fade" :css="!skipLeave">
     <div v-if="visible" class="system-overlay">
       <div class="panel pet-ui-overlay" data-tauri-drag-region>
         <button class="ctrl-btn" @click.stop="requestClose" @mousedown.stop>×</button>
