@@ -56,15 +56,19 @@ Mutsumi 是一个静静住在你屏幕角落的小伙伴。
 
 💬 **和睦聊天**：无论是太阳天还是雨天，睦头都会安静地陪在你身边：
 * 🥒 **小黄瓜**：为了尽可能还原睦头，我们结合剧情内容、角色设定、荣格八维与九型人格分析，对角色进行了长期拆解与建模。通过 Prompt Engineering 与行为约束设计，实现睦头安静而真诚的性格，而不是千篇一律的 AI 回复。
-* 🧠 **长期记忆**：她会记得你们聊过的事情：家里的猫、最近的工作、偶尔提起的小烦恼，甚至是你们之间那些不起眼的小约定。底层基于 RAG 记忆系统实现，本地化轻量存储。
+* 💭 **长期记忆**：她会记得你们聊过的事情：家里的猫、最近的工作、偶尔提起的小烦恼，甚至是你们之间那些不起眼的小约定。底层基于 RAG 记忆系统实现，本地化轻量存储。
 * 🗂️ **连续记录 & 历史检索**：所有对话像微信 / iMessage 一样连成一条时间线并保存在本地；可按关键词或日期翻查，向上滚动自动加载更早的消息，并按时间分组显示。
 * 🔍 **搜索增强**：睦头也会主动了解外面的世界。内置轻量级搜索系统，可以获取最新网络热点、Ave Mujica 相关资讯、天气等实时信息。相比依赖模型原生搜索 Agent，响应更快、成本更低，结果也更聚焦。
 * 🖼️ **图片识别**：睦子米可以看得懂你的照片！她会笨拙但真心地用自己的方式来表达（你做的菜、你的猫、窗外的雨……），陪你度过每一次值得纪念的时刻。
 * 💙 **Emoji 选择器**：内置可搜索的表情面板，支持中 / 英 / 日关键词。
 * 🎙️ **语音输入**：支持语音输入转文本。
 
-<!-- 建议这里放一张聊天窗口的截图 -->
-<p><sub><i>聊天为云端 AI 能力，需要配置通义千问（DashScope）的 API Key 后使用；语音朗读（让睦开口说话）仍在开发中。</i></sub></p>
+<p align="center">
+    <img src="docs/images/chat.avif" height="450" alt="Settings window" />
+    <img src="docs/images/chat-setting.avif" height="450" alt="Settings window" />
+</p>
+
+<p><sub><i>聊天为云端 AI 能力，需要配置通义千问（DashScope）的 API Key 后使用；GPT-SoVITS小睦AI语音仍在开发中。</i></sub></p>
 
 <h3 align="center">🎧 睦子米喜欢跟着节奏摇摆</h3>
 
@@ -107,7 +111,9 @@ Mutsumi 是一个静静住在你屏幕角落的小伙伴。
 
 右键点击系统托盘（右下角）的 Mutsumi 图标，可以自定义：`番茄钟时长` / `角色体型 (小/中/大)` / `天气开关` / `音乐控制器开关` / `界面语言`
 
-<p align="center"><img src="docs/images/setting.avif" width="440" alt="Settings window" /></p>
+<p align="center">
+    <img src="docs/images/setting.avif" width="440" alt="Settings window" />
+</p>
 
 ---
 
@@ -216,7 +222,7 @@ Mutsumi is a quiet little companion living in the corner of your screen. She min
 * 🥒 **Project Cucumber**
   To recreate Mutsumi as faithfully as possible, we conducted extensive character analysis based on her story, official characterization, Jungian cognitive functions, and the Enneagram. Through prompt engineering and behavioral constraints, Mutsumi is designed to respond with the quiet sincerity and reserved personality that define her, rather than sounding like a generic AI assistant.
 
-* 🧠 **Long-Term Memory**
+* 💭 **Long-Term Memory**
   She remembers the things you've talked about: your cat, your work, small worries mentioned in passing, and even the little promises you make together. Powered by a RAG-based memory system with lightweight local storage, your conversations can continue naturally over time.
 
 * 🗂️ **Persistent Chat History & Search**
@@ -234,9 +240,12 @@ Mutsumi is a quiet little companion living in the corner of your screen. She min
 * 🎙️ **Voice Input**
   Speak naturally and have your voice automatically converted into text for a more effortless chatting experience.
 
+<p align="center">
+    <img src="docs/images/chat.avif" height="450" alt="Settings window" />
+    <img src="docs/images/chat-setting.avif" height="450" alt="Settings window" />
+</p>
 
-<!-- A screenshot of the chat window could go here -->
-<p><sub><i>Chat is a cloud AI capability and requires your own Qwen (DashScope) API key; spoken replies (Mutsumi talking back) are still under construction.</i></sub></p>
+<p><sub><i>Chat is a cloud AI capability and requires your own Qwen (DashScope) API key; Mutsumi AI tts is still under construction.</i></sub></p>
 
 <h3 align="center">🎧 Mutsumi Loves Bopping Along to Your Music</h3>
 
