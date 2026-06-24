@@ -3,6 +3,7 @@ mod app_state;
 mod audio;
 mod card_export;
 mod cursor;
+mod hardware;
 mod idle;
 mod late_night;
 mod persistence;
@@ -67,6 +68,7 @@ pub fn run() {
       window_ops::set_window_bounds,
       card_export::save_card_image,
       card_export::reveal_in_folder,
+      hardware::get_hardware_info,
       hide_pet,
     ])
     .setup(move |app| {

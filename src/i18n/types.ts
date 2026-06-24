@@ -120,5 +120,27 @@ export interface Translations {
     discharging: string
     dischargingPlain: string
     pluggedIn:   string
+    /** Tab switching between live status and static hardware specs. */
+    tabStatus:   string
+    tabHardware: string
+    /** Hardware specs page (static CPU/RAM/GPU/storage info). */
+    hw: {
+      loading:    string
+      error:      string
+      cores:      string
+      threads:    string
+      frequency:  string
+      total:      string
+      used:       string
+      available:  string
+      gpu:        string
+      vram:       string
+      storage:    string
+      ssd:        string
+      hdd:        string
+      partitions: string
+      filesystem: string
+      free:       string
+    }
   }
 }

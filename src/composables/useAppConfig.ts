@@ -43,7 +43,10 @@ export const CHAR_SIZE_DIMS: Record<CharacterSize, [number, number]> = {
 
 /**
  * Main-window logical pixel dimensions [width, height] while the system state
- * overlay is open. This matches the logic of TAROT_WINDOW_DIMS to prevent clipping.
+ * overlay is open. This matches the logic of TAROT_WINDOW_DIMS to prevent
+ * clipping. The panel stays the height of the live-status page on both tabs;
+ * the taller Hardware spec sheet scrolls inside that box rather than growing
+ * the panel, so these dimensions only need to fit the status layout.
  */
 export const SYS_WINDOW_DIMS: Record<CharacterSize, [number, number]> = {
   small:  [280, 380],
