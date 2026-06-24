@@ -15,7 +15,7 @@ const yohoUrl = 'https://github.com/yanhanruan'
 const mutsumiHeadUrl = 'https://github.com/qichengwang408-lab'
 const releasesUrl = 'https://github.com/yanhanruan/Mutsumi/releases'
 const sourceUrl = 'https://github.com/yanhanruan/Mutsumi'
-const qqNumber = '1285084596'
+const appVersion = 'v1.3.0'
 
 watch(
   () => config.value.language,
@@ -61,7 +61,7 @@ function closeWindow() { win.close() }
 
       <section class="card">
         <h2 class="card-title">{{ t.aboutVersionInfo }}</h2>
-        <p class="value empty">&nbsp;</p>
+        <p class="value"><span class="strong">{{ appVersion }}</span></p>
       </section>
 
       <section class="card">
@@ -86,17 +86,24 @@ function closeWindow() { win.close() }
 
       <section class="card">
         <h2 class="card-title">{{ t.aboutDeveloper }}</h2>
-        <p class="developer-list">
-          <a :href="yohoUrl" target="_blank" rel="noreferrer">{{ t.aboutDeveloperYoho }}</a>
-          <a :href="mutsumiHeadUrl" target="_blank" rel="noreferrer">{{ t.aboutDeveloperMutsumiHead }}</a>
-        </p>
+        <div class="dev-role-row">
+          <span class="dev-role-label">{{ t.aboutDevRoleDev }}</span>
+          <span class="dev-role-names">
+            <a :href="yohoUrl" target="_blank" rel="noreferrer">{{ t.aboutDeveloperYoho }}</a>
+            <a :href="mutsumiHeadUrl" target="_blank" rel="noreferrer">{{ t.aboutDeveloperMutsumiHead }}</a>
+          </span>
+        </div>
+        <div class="dev-role-row">
+          <span class="dev-role-label">{{ t.aboutDevRolePromo }}</span>
+          <span class="dev-role-names">{{ t.aboutDevPromo }}</span>
+        </div>
       </section>
 
       <section class="card">
-        <h2 class="card-title">{{ t.aboutContact }}</h2>
-        <p class="value">
-          {{ t.aboutContactQqLabel }}: {{ qqNumber }}
-        </p>
+        <h2 class="card-title">{{ t.aboutAcknowledgements }}</h2>
+        <ul class="feature-list">
+          <li v-for="item in t.aboutAckList" :key="item">{{ item }}</li>
+        </ul>
       </section>
 
       <section class="card">
@@ -342,13 +349,28 @@ function closeWindow() { win.close() }
   min-height: 18px;
 }
 
-.developer-list {
+.dev-role-row {
   display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-  margin: 0;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 6px;
   font-size: 12.5px;
   line-height: 1.55;
+}
+
+.dev-role-label {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(45, 85, 45, 0.55);
+  min-width: 44px;
+}
+
+.dev-role-names {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: #2c4e2c;
 }
 
 .link-line {

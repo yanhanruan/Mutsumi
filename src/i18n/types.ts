@@ -33,17 +33,20 @@ export interface Translations {
   aboutAppSummaryBody:    string
   aboutMainFeatures:      string
   aboutFeaturesList:      string[]
-  aboutDeveloper:         string
-  aboutContact:           string
-  aboutCopyright:         string
-  aboutLatestReleaseLead: string
-  aboutSourceCodeLead:    string
-  aboutLatestReleaseLink: string
-  aboutSourceCodeLink:    string
-  aboutDeveloperYoho:     string
+  aboutDeveloper:            string
+  aboutAcknowledgements:     string
+  aboutAckList:              string[]
+  aboutCopyright:            string
+  aboutLatestReleaseLead:    string
+  aboutSourceCodeLead:       string
+  aboutLatestReleaseLink:    string
+  aboutSourceCodeLink:       string
+  aboutDeveloperYoho:        string
   aboutDeveloperMutsumiHead: string
-  aboutContactQqLabel:    string
-  aboutCopyrightMit:      string
+  aboutDevRoleDev:           string
+  aboutDevRolePromo:         string
+  aboutDevPromo:             string
+  aboutCopyrightMit:         string
 
   // ── Character size (Task 3) ─────────────────────────────────────
   characterSize:   string

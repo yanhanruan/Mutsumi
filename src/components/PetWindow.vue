@@ -187,7 +187,7 @@ async function openChat() {
     x = mon.position.x + (mon.size.width  - pw) / 2
     y = mon.position.y + (mon.size.height - ph) / 2
   }
-  await setBounds(win, x, y, pw, ph)
+  await setBounds(x, y, pw, ph)
 }
 
 async function closeChat() {
@@ -197,7 +197,7 @@ async function closeChat() {
   chatRef.value?.dismiss()
   await nextTick()
   await nextPaint()
-  await setBounds(win, savedPos?.x ?? 0, savedPos?.y ?? 0, lw * sf, lh * sf)
+  await setBounds(savedPos?.x ?? 0, savedPos?.y ?? 0, lw * sf, lh * sf)
   chatActive.value = false
 }
 
