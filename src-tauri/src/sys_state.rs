@@ -52,7 +52,7 @@ pub struct SystemState {
 /// Wi-Fi / Bluetooth PAN adapters, etc. Ethernet wins over Wi-Fi when both are
 /// active, matching Windows' usual default-route preference.
 #[cfg(windows)]
-fn detect_network(_networks: &sysinfo::Networks) -> NetworkKind {
+fn detect_network() -> NetworkKind {
     use windows::Win32::NetworkManagement::IpHelper::{
         GetAdaptersAddresses, GAA_FLAG_INCLUDE_GATEWAYS, GAA_FLAG_SKIP_ANYCAST,
         GAA_FLAG_SKIP_DNS_SERVER, GAA_FLAG_SKIP_MULTICAST, IP_ADAPTER_ADDRESSES_LH,
@@ -236,17 +236,27 @@ impl BatteryEstimator {
 
 pub fn spawn(app: AppHandle, stop_flag: Arc<AtomicBool>) {
     tauri::async_runtime::spawn_blocking(move || {
-        use sysinfo::{System, Networks};
-        let mut sys = System::new_all();
-        let mut networks = Networks::new_with_refreshed_list();
+        use sysinfo::System;
+        // This loop only reads global CPU% and memory, so keep a bare `System`
+        // and refresh just those two. `refresh_all()` additionally enumerates
+        // every process (~340 of them) each second — about 4× the cost, for
+        // data this loop never touches. See docs/benchmarks/sys_state-monitor.md.
+        let mut sys = System::new();
+
+        // Windows classifies the link via `GetAdaptersAddresses` (see
+        // `detect_network`) and never reads sysinfo's `Networks`; only the
+        // portable fallback maintains one.
+        #[cfg(not(windows))]
+        let mut networks = sysinfo::Networks::new_with_refreshed_list();
+
         let battery_manager = battery::Manager::new().ok();
         // Derives a stable time estimate from the real charge-rate (see doc).
         let mut battery_est = BatteryEstimator::new();
         let start = Instant::now();
 
         while !stop_flag.load(Ordering::Relaxed) {
-            sys.refresh_all();
-            networks.refresh(true);
+            sys.refresh_cpu_usage();
+            sys.refresh_memory();
             let now = start.elapsed().as_secs_f64();
 
             // CPU Usage
@@ -262,6 +272,11 @@ pub fn spawn(app: AppHandle, stop_flag: Arc<AtomicBool>) {
             };
 
             // Network — distinguish Ethernet / Wi-Fi / other / offline.
+            #[cfg(not(windows))]
+            networks.refresh(true);
+            #[cfg(windows)]
+            let network = detect_network();
+            #[cfg(not(windows))]
             let network = detect_network(&networks);
 
             // Uptime
