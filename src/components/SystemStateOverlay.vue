@@ -48,7 +48,7 @@ const { t } = useI18n()
 
 // Visibility + the "skip leave fade on dismiss" guard that prevents an
 // afterimage when PetWindow shrinks the window back on close.
-const { visible, skipLeave, show, dismiss } = useOverlayVisibility()
+const { visible, skipLeave, show, dismiss: dismissOverlay } = useOverlayVisibility()
 const state = ref<SystemState | null>(null)
 
 const activeTab = ref<'status' | 'hardware'>('status')
@@ -56,7 +56,12 @@ const hardware = ref<HardwareInfo | null>(null)
 const hwLoading = ref(false)
 const hwError = ref(false)
 
+// Brief "loading" mask shown on open — see open() for why.
+const initialLoading = ref(false)
+const INITIAL_LOADING_MS = 1200
+
 let unlisten: UnlistenFn | null = null
+let initialLoadingTimer: ReturnType<typeof setTimeout> | null = null
 
 // ── Helpers ────────────────────────────────────────────────────────
 
@@ -149,16 +154,37 @@ onMounted(async () => {
 
 onUnmounted(() => {
   unlisten?.()
+  if (initialLoadingTimer) clearTimeout(initialLoadingTimer)
 })
 
 // ── Public API ─────────────────────────────────────────────────────
 function open() {
   activeTab.value = 'status'
+  state.value = null
+  // The monitor cold-starts on open, so its first CPU sample reads 0%
+  // (sysinfo needs two samples for a delta). Rather than delaying the backend,
+  // just hold a fixed ~1.2 s "loading" so that first throwaway reading is never
+  // shown. A heuristic, but the value settles well within the window.
+  initialLoading.value = true
+  if (initialLoadingTimer) clearTimeout(initialLoadingTimer)
+  initialLoadingTimer = setTimeout(() => {
+    initialLoading.value = false
+    initialLoadingTimer = null
+  }, INITIAL_LOADING_MS)
+  void invoke('sys_monitor_start') // the 1 Hz monitor runs only while open
   show()
 }
 
 function requestClose() {
   emit('close')
+}
+
+/** Stop the live stream, then tear the overlay down (no leave-fade afterimage). */
+function dismiss() {
+  if (initialLoadingTimer) { clearTimeout(initialLoadingTimer); initialLoadingTimer = null }
+  initialLoading.value = false
+  void invoke('sys_monitor_stop')
+  dismissOverlay()
 }
 
 defineExpose({ open, dismiss })
@@ -192,7 +218,7 @@ defineExpose({ open, dismiss })
 
         <!-- ── Status page ──────────────────────────────────────────── -->
         <div class="page status-page" :class="{ 'page-ghost': activeTab !== 'status' }">
-        <div v-if="!state" class="loading-state">
+        <div v-if="!state || initialLoading" class="loading-state">
           Loading...
         </div>
 

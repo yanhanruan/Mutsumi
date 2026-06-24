@@ -1,9 +1,9 @@
 use serde::Serialize;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, State};
 
 #[derive(Clone, Serialize)]
 #[serde(tag = "type")]
@@ -234,7 +234,39 @@ impl BatteryEstimator {
     }
 }
 
-pub fn spawn(app: AppHandle, stop_flag: Arc<AtomicBool>) {
+/// Holds the stop flag of the currently-running monitor thread, if any.
+///
+/// The 1 Hz monitor is *not* spawned at startup like the other background
+/// loops — it does real work (CPU/mem refresh + a `system-state` emit every
+/// second) only useful while the System State panel is visible. So the
+/// frontend starts it when the panel opens and stops it when the panel closes;
+/// nothing runs in between.
+#[derive(Default)]
+pub struct SysMonitor(Mutex<Option<Arc<AtomicBool>>>);
+
+/// Start the 1 Hz monitor. Idempotent: any thread already running is stopped
+/// first, so repeated opens never leak a second loop.
+#[tauri::command]
+pub fn sys_monitor_start(app: AppHandle, monitor: State<'_, SysMonitor>) {
+    let mut slot = monitor.0.lock().unwrap();
+    if let Some(prev) = slot.take() {
+        prev.store(true, Ordering::Relaxed);
+    }
+    let stop_flag = Arc::new(AtomicBool::new(false));
+    *slot = Some(stop_flag.clone());
+    spawn(app, stop_flag);
+}
+
+/// Stop the monitor; it emits nothing further until `sys_monitor_start` runs
+/// again. Safe to call when nothing is running.
+#[tauri::command]
+pub fn sys_monitor_stop(monitor: State<'_, SysMonitor>) {
+    if let Some(flag) = monitor.0.lock().unwrap().take() {
+        flag.store(true, Ordering::Relaxed);
+    }
+}
+
+fn spawn(app: AppHandle, stop_flag: Arc<AtomicBool>) {
     tauri::async_runtime::spawn_blocking(move || {
         use sysinfo::System;
         // This loop only reads global CPU% and memory, so keep a bare `System`

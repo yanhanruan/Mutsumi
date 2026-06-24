@@ -51,6 +51,7 @@ pub fn run() {
     .manage(shared.clone())
     .manage(weather_state)
     .manage(audio_state)
+    .manage(sys_state::SysMonitor::default())
     .invoke_handler(tauri::generate_handler![
       app_state::get_state,
       app_state::pet_click,
@@ -69,6 +70,8 @@ pub fn run() {
       card_export::save_card_image,
       card_export::reveal_in_folder,
       hardware::get_hardware_info,
+      sys_state::sys_monitor_start,
+      sys_state::sys_monitor_stop,
       hide_pet,
     ])
     .setup(move |app| {
@@ -121,12 +124,9 @@ pub fn run() {
         idle::spawn(app.handle().clone(), stop_flag);
       }
 
-      // System state monitor
-      {
-        let stop_flag = Arc::new(AtomicBool::new(false));
-        let _ = &stop_flag;
-        sys_state::spawn(app.handle().clone(), stop_flag);
-      }
+      // System state monitor is NOT started here: it runs only while the
+      // System State panel is open (sys_monitor_start / _stop commands), so it
+      // costs nothing when closed.
 
       // Pet state + pomodoro ticker (also drives late-night reminder).
       app_state::spawn_ticker(app.handle().clone(), shared.clone());
