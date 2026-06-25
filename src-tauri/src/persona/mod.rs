@@ -128,9 +128,30 @@ pub fn base_system_prompt() -> String {
     )
 }
 
+/// Benchmark helper: the base prompt with the [`WORLD_FACTS`] roster block
+/// optionally omitted, to A/B its effect on own-world factual grounding (see
+/// `benchmarks.rs::bench_world_facts_grounding`). `true` reproduces
+/// [`base_system_prompt`] exactly.
+#[cfg(test)]
+pub fn base_system_prompt_variant(include_world_facts: bool) -> String {
+    if include_world_facts {
+        base_system_prompt()
+    } else {
+        format!(
+            "{ROLEPLAY_RULES}\n\n---\n\n{CHARACTER_ANALYSIS}\n\n---\n\n{SOUL}\n\n---\n\n{FINAL_DIRECTIVE}"
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn variant_toggles_only_the_roster_block() {
+        assert!(base_system_prompt_variant(true).contains("乐队成员速查"));
+        assert!(!base_system_prompt_variant(false).contains("乐队成员速查"));
+    }
 
     #[test]
     fn base_prompt_includes_rules_and_docs() {

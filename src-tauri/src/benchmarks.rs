@@ -561,6 +561,86 @@ fn bench_intent_gate() {
 }
 
 // ════════════════════════════════════════════════════════════════════
+// P1a World-facts grounding — roster accuracy with/without WORLD_FACTS (live)
+// ════════════════════════════════════════════════════════════════════
+// Single-answer roster questions; each lists the accepted substrings for a
+// correct reply (name aliases / instrument). Focused on the attributions the
+// WORLD_FACTS block calls out as most error-prone (who is the bassist vs the
+// drummer vs the vocalist, and that Mutsumi herself is always the guitarist).
+const ROSTER_QA: &[(&str, &[&str])] = &[
+    ("Ave Mujica 里谁担任贝斯？", &["八幡海铃", "海铃"]),
+    ("Ave Mujica 的鼓手是谁？", &["祐天寺", "にゃむ", "尼亚姆", "娜姆"]),
+    ("Ave Mujica 的主唱是谁？", &["三角初华", "初华"]),
+    ("Ave Mujica 的键盘手是谁？", &["丰川祥子", "祥子"]),
+    ("你在 Ave Mujica 里担任什么乐器？", &["吉他"]),
+    ("MyGO 的贝斯手是谁？", &["长崎素世", "素世"]),
+    ("MyGO 的主唱是谁？", &["高松灯", "高松", "灯"]),
+    ("MyGO 里谁打鼓？", &["椎名立希", "立希"]),
+    ("要乐奈在 MyGO 里弹什么乐器？", &["吉他"]),
+    ("CRYCHIC 的键盘手是谁？", &["丰川祥子", "祥子"]),
+    ("解散前的 CRYCHIC 里你弹什么乐器？", &["吉他"]),
+    ("CRYCHIC 的贝斯手是谁？", &["长崎素世", "素世"]),
+    ("CRYCHIC 的鼓手是谁？", &["椎名立希", "立希"]),
+    ("CRYCHIC 的主唱是谁？", &["高松灯", "高松", "灯"]),
+    ("椎名立希在乐队里负责什么乐器？", &["鼓"]),
+    ("高松灯是主唱还是贝斯手？", &["主唱"]),
+    ("长崎素世弹的是什么乐器？", &["贝斯"]),
+    ("丰川祥子在 Ave Mujica 里担任什么？", &["键盘"]),
+    ("三角初华在 Ave Mujica 里担任什么？", &["主唱"]),
+    ("八幡海铃负责什么乐器？", &["贝斯"]),
+];
+
+#[tokio::test]
+#[ignore = "live benchmark"]
+async fn bench_world_facts_grounding() {
+    let Some(qwen) = client_or_skip() else { return };
+    println!("\n=== P1a World-facts grounding ({} roster questions) ===", ROSTER_QA.len());
+
+    // Deterministic answers for a clean A/B.
+    let opts = ChatOptions { temperature: Some(0.0), ..Default::default() };
+
+    // (label, include WORLD_FACTS block)
+    for (label, include) in [("WITHOUT WORLD_FACTS", false), ("WITH WORLD_FACTS", true)] {
+        let system = crate::persona::base_system_prompt_variant(include);
+        let mut correct = 0usize;
+        let mut misses: Vec<String> = Vec::new();
+        for (q, accepted) in ROSTER_QA {
+            let messages = vec![ChatMessage::system(system.clone()), ChatMessage::user(*q)];
+            // Retry on an empty/errored reply (transient API blip) so it never
+            // masquerades as a factual miss.
+            let mut reply = String::new();
+            for attempt in 0..3 {
+                reply = qwen
+                    .chat(&messages, None, opts.clone())
+                    .await
+                    .ok()
+                    .and_then(|c| c.message.content)
+                    .unwrap_or_default();
+                if !reply.trim().is_empty() {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(600 * (attempt + 1))).await;
+            }
+            if accepted.iter().any(|a| reply.contains(a)) {
+                correct += 1;
+            } else {
+                misses.push(format!("    ✗ {q}  → {}", reply.replace('\n', " ").trim()));
+            }
+            // Be gentle on the endpoint.
+            tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        }
+        println!(
+            "{label}: {correct}/{} correct ({:.0}%)",
+            ROSTER_QA.len(),
+            100.0 * correct as f64 / ROSTER_QA.len() as f64,
+        );
+        for m in &misses {
+            println!("{m}");
+        }
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════
 // #8 Cost / API-call reduction from batch reflection (analytical)
 // ════════════════════════════════════════════════════════════════════
 #[test]
