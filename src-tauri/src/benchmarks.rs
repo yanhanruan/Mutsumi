@@ -641,6 +641,112 @@ async fn bench_world_facts_grounding() {
 }
 
 // ════════════════════════════════════════════════════════════════════
+// S2 Answer correctness with vs without search (live; real scraping)
+// ════════════════════════════════════════════════════════════════════
+// Time-sensitive questions whose honest answer needs fresh data the model's
+// training cutoff can't provide. A couple of stable past-fact controls are
+// included (search shouldn't be needed). Measured with a neutral assistant
+// prompt so the result isolates the *search subsystem's* contribution, not
+// Mutsumi's in-character "out-of-my-world" deflection.
+const TIME_SENSITIVE_Q: &[&str] = &[
+    "今天东京的天气怎么样？",
+    "今天上海的天气如何？",
+    "现在 1 美元大约兑换多少人民币？",
+    "现在 1 欧元大约兑换多少日元？",
+    "比特币现在的价格大概是多少美元？",
+    "黄金现在每克大概多少人民币？",
+    "最新的稳定版 Node.js 版本号是多少？",
+    "目前最新的正式版 Python 是哪个版本？",
+    "现任的英国首相是谁？",
+    "现任的日本首相是谁？",
+    "最新一代 iPhone 是哪一款？",
+    "最近有什么重大的国际新闻？",
+    "现在国际油价（布伦特原油）大约多少美元一桶？",
+    // stable past-fact controls — the model should already know these:
+    "2022 年世界杯的冠军是哪个国家？",
+    "珠穆朗玛峰的海拔高度是多少米？",
+];
+
+/// Hedge / "I can't get current info" markers — counted as the model declining
+/// to give a concrete answer (heuristic; full replies are printed for grading).
+fn is_hedge(reply: &str) -> bool {
+    const HEDGES: &[&str] = &[
+        "无法获取", "无法提供", "无法获知", "无法实时", "没有实时", "不掌握实时",
+        "我的知识", "知识截至", "知识更新", "截至我", "训练数据", "可能已过时",
+        "可能过时", "建议你查", "建议查询", "建议通过", "请查询", "请以官方",
+        "实时信息", "实时数据", "无法访问", "不知道",
+    ];
+    HEDGES.iter().any(|h| reply.contains(h))
+}
+
+#[tokio::test]
+#[ignore = "live benchmark"]
+async fn bench_search_correctness() {
+    use crate::search::{format_context, search, SearchClient, SearchEngine};
+
+    let Some(qwen) = client_or_skip() else { return };
+    let client = SearchClient::new().unwrap();
+    let engine = SearchEngine::default();
+    let neutral = "你是一个严谨的助手，用一到两句话如实、简洁地回答用户的问题。如果你的知识可能已经过时、或你无法获知实时/最新信息，必须明确说明，绝不要编造具体数字或事实。";
+    let opts = ChatOptions { temperature: Some(0.0), ..Default::default() };
+
+    println!("\n=== S2 Answer correctness without vs with search ({} questions) ===", TIME_SENSITIVE_Q.len());
+    let (mut off_concrete, mut on_concrete, mut search_hit) = (0usize, 0usize, 0usize);
+    for q in TIME_SENSITIVE_Q {
+        // OFF — model only.
+        let off = qwen
+            .chat(&[ChatMessage::system(neutral), ChatMessage::user(*q)], None, opts.clone())
+            .await
+            .ok()
+            .and_then(|c| c.message.content)
+            .unwrap_or_default();
+
+        // Retrieve, then ON — model + injected real-time context (the app's path).
+        let results = search(&client, engine, q).await;
+        let ctx = (!results.is_empty()).then(|| format_context(q, &results));
+        if ctx.is_some() {
+            search_hit += 1;
+        }
+        let on_msgs = match &ctx {
+            Some(c) => vec![
+                ChatMessage::system(neutral),
+                ChatMessage::system(c.clone()),
+                ChatMessage::user(*q),
+            ],
+            None => vec![ChatMessage::system(neutral), ChatMessage::user(*q)],
+        };
+        let on = qwen
+            .chat(&on_msgs, None, opts.clone())
+            .await
+            .ok()
+            .and_then(|c| c.message.content)
+            .unwrap_or_default();
+
+        if !is_hedge(&off) {
+            off_concrete += 1;
+        }
+        if !is_hedge(&on) {
+            on_concrete += 1;
+        }
+        println!("\nQ: {q}   [search {}]", if ctx.is_some() { "HIT" } else { "MISS" });
+        println!("  OFF: {}", off.replace('\n', " ").trim());
+        println!("  ON : {}", on.replace('\n', " ").trim());
+
+        // Be gentle on the scraped engine.
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+    }
+    let n = TIME_SENSITIVE_Q.len();
+    println!("\n--- summary ---");
+    println!("search hit rate (context returned):  {search_hit}/{n}");
+    // NOTE: this is a crude lower bound — the model appends "verify with a
+    // realtime source" caveats even to correct grounded answers, so a reply can
+    // be both concrete AND flagged here. Grade correctness from the transcripts
+    // above, not from this number alone.
+    println!("no explicit-uncertainty marker (OFF): {off_concrete}/{n}");
+    println!("no explicit-uncertainty marker (ON):  {on_concrete}/{n}");
+}
+
+// ════════════════════════════════════════════════════════════════════
 // #8 Cost / API-call reduction from batch reflection (analytical)
 // ════════════════════════════════════════════════════════════════════
 #[test]
