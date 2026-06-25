@@ -128,19 +128,29 @@ pub fn base_system_prompt() -> String {
     )
 }
 
-/// Benchmark helper: the base prompt with the [`WORLD_FACTS`] roster block
-/// optionally omitted, to A/B its effect on own-world factual grounding (see
-/// `benchmarks.rs::bench_world_facts_grounding`). `true` reproduces
-/// [`base_system_prompt`] exactly.
+/// Benchmark helper: assemble the system prompt from selectable parts, to A/B the
+/// [`WORLD_FACTS`] block's contribution to own-world factual grounding (see
+/// `benchmarks.rs::bench_world_facts_grounding`).
+///
+/// Crucially, the **character docs themselves contain the band rosters**, so a
+/// fair control must drop them too — otherwise "without WORLD_FACTS" still leaks
+/// the facts via `character_analysis.md` / `soul.md`. With both flags `true` this
+/// reproduces [`base_system_prompt`]. The role-play framing and the final directive
+/// are always present (they set "you are Mutsumi" but list no roster), so they are
+/// constant across conditions and never confound the A/B.
 #[cfg(test)]
-pub fn base_system_prompt_variant(include_world_facts: bool) -> String {
-    if include_world_facts {
-        base_system_prompt()
+pub fn ab_prompt(include_character_docs: bool, include_world_facts: bool) -> String {
+    let docs = if include_character_docs {
+        format!("\n\n---\n\n{CHARACTER_ANALYSIS}\n\n---\n\n{SOUL}")
     } else {
-        format!(
-            "{ROLEPLAY_RULES}\n\n---\n\n{CHARACTER_ANALYSIS}\n\n---\n\n{SOUL}\n\n---\n\n{FINAL_DIRECTIVE}"
-        )
-    }
+        String::new()
+    };
+    let wf = if include_world_facts {
+        format!("\n\n---\n\n{WORLD_FACTS}")
+    } else {
+        String::new()
+    };
+    format!("{ROLEPLAY_RULES}{docs}{wf}\n\n---\n\n{FINAL_DIRECTIVE}")
 }
 
 #[cfg(test)]
@@ -148,9 +158,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn variant_toggles_only_the_roster_block() {
-        assert!(base_system_prompt_variant(true).contains("乐队成员速查"));
-        assert!(!base_system_prompt_variant(false).contains("乐队成员速查"));
+    fn ab_prompt_toggles_docs_and_world_facts_independently() {
+        // Control: neither the character docs nor the roster block leak any facts.
+        let control = ab_prompt(false, false);
+        assert!(!control.contains("乐队成员速查")); // no WORLD_FACTS
+        assert!(!control.contains("让吉他唱歌")); // no character-doc content
+        assert!(control.contains("角色扮演指令")); // role framing still present
+
+        // Treatment differs from control by exactly the WORLD_FACTS block.
+        let treatment = ab_prompt(false, true);
+        assert!(treatment.contains("乐队成员速查"));
+        assert!(!treatment.contains("让吉他唱歌"));
+
+        // Full prompt reproduces the shipped base prompt's key markers.
+        let full = ab_prompt(true, true);
+        assert!(full.contains("乐队成员速查") && full.contains("让吉他唱歌"));
     }
 
     #[test]

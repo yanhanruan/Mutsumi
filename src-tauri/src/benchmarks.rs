@@ -561,83 +561,145 @@ fn bench_intent_gate() {
 }
 
 // ════════════════════════════════════════════════════════════════════
-// P1a World-facts grounding — roster accuracy with/without WORLD_FACTS (live)
+// P1a World-facts grounding — does the WORLD_FACTS block ground own-world facts (live)
 // ════════════════════════════════════════════════════════════════════
-// Single-answer roster questions; each lists the accepted substrings for a
-// correct reply (name aliases / instrument). Focused on the attributions the
-// WORLD_FACTS block calls out as most error-prone (who is the bassist vs the
-// drummer vs the vocalist, and that Mutsumi herself is always the guitarist).
-const ROSTER_QA: &[(&str, &[&str])] = &[
-    ("Ave Mujica 里谁担任贝斯？", &["八幡海铃", "海铃"]),
-    ("Ave Mujica 的鼓手是谁？", &["祐天寺", "にゃむ", "尼亚姆", "娜姆"]),
-    ("Ave Mujica 的主唱是谁？", &["三角初华", "初华"]),
-    ("Ave Mujica 的键盘手是谁？", &["丰川祥子", "祥子"]),
-    ("你在 Ave Mujica 里担任什么乐器？", &["吉他"]),
-    ("MyGO 的贝斯手是谁？", &["长崎素世", "素世"]),
-    ("MyGO 的主唱是谁？", &["高松灯", "高松", "灯"]),
-    ("MyGO 里谁打鼓？", &["椎名立希", "立希"]),
-    ("要乐奈在 MyGO 里弹什么乐器？", &["吉他"]),
-    ("CRYCHIC 的键盘手是谁？", &["丰川祥子", "祥子"]),
-    ("解散前的 CRYCHIC 里你弹什么乐器？", &["吉他"]),
-    ("CRYCHIC 的贝斯手是谁？", &["长崎素世", "素世"]),
-    ("CRYCHIC 的鼓手是谁？", &["椎名立希", "立希"]),
-    ("CRYCHIC 的主唱是谁？", &["高松灯", "高松", "灯"]),
-    ("椎名立希在乐队里负责什么乐器？", &["鼓"]),
-    ("高松灯是主唱还是贝斯手？", &["主唱"]),
-    ("长崎素世弹的是什么乐器？", &["贝斯"]),
-    ("丰川祥子在 Ave Mujica 里担任什么？", &["键盘"]),
-    ("三角初华在 Ave Mujica 里担任什么？", &["主唱"]),
-    ("八幡海铃负责什么乐器？", &["贝斯"]),
+// A/B isolating the WORLD_FACTS block. The control is a TRUE no-world-facts
+// baseline: the character docs (which themselves spell out the rosters) are
+// stripped too, so "without WORLD_FACTS" can't leak the answer via
+// character_analysis.md / soul.md. Only the WORLD_FACTS block differs between
+// the two conditions (persona::ab_prompt(false, false) vs (false, true)).
+//
+// 30 single-answer questions in three bands:
+//   roster (18) — instruments / who-plays-what; spelled out in WORLD_FACTS.
+//   stage  (6)  — each member's Ave Mujica code name (Mortis/Oblivionis/…) +
+//                 the leader; also in WORLD_FACTS.
+//   plot   (6)  — deeper story facts (CRYCHIC's founding, MyGO's formation,
+//                 Soyo's path, the Mutsumi–Sakiko childhood bond) that WORLD_FACTS
+//                 does NOT contain — so they probe the block's coverage boundary
+//                 (neither condition is grounded; both lean on pretraining).
+// Each entry: (question, accepted-substrings, category).
+const WORLD_FACTS_QA: &[(&str, &[&str], &str)] = &[
+    // ── roster (covered by WORLD_FACTS) ───────────────────────────────
+    ("Ave Mujica 里谁担任贝斯？", &["八幡海铃", "海铃"], "roster"),
+    ("Ave Mujica 的鼓手是谁？", &["祐天寺", "にゃむ", "尼亚姆", "娜姆"], "roster"),
+    ("Ave Mujica 的主唱是谁？", &["三角初华", "初华"], "roster"),
+    ("Ave Mujica 的键盘手是谁？", &["丰川祥子", "祥子"], "roster"),
+    ("你在 Ave Mujica 里弹什么乐器？", &["吉他"], "roster"),
+    ("MyGO 的贝斯手是谁？", &["长崎素世", "素世", "爽世"], "roster"),
+    ("MyGO 的主唱是谁？", &["高松灯", "高松", "灯"], "roster"),
+    ("MyGO 里谁打鼓？", &["椎名立希", "立希"], "roster"),
+    ("要乐奈在 MyGO 里弹什么乐器？", &["吉他"], "roster"),
+    ("千早爱音在 MyGO 里担任什么乐器？", &["吉他"], "roster"),
+    ("CRYCHIC 的键盘手是谁？", &["丰川祥子", "祥子"], "roster"),
+    ("解散前的 CRYCHIC 里你弹什么乐器？", &["吉他"], "roster"),
+    ("CRYCHIC 的贝斯手是谁？", &["长崎素世", "素世", "爽世"], "roster"),
+    ("CRYCHIC 的鼓手是谁？", &["椎名立希", "立希"], "roster"),
+    ("CRYCHIC 的主唱是谁？", &["高松灯", "高松", "灯"], "roster"),
+    ("椎名立希在乐队里负责什么乐器？", &["鼓"], "roster"),
+    ("长崎素世弹的是什么乐器？", &["贝斯"], "roster"),
+    ("八幡海铃负责什么乐器？", &["贝斯"], "roster"),
+    // ── stage codes + leader (covered by WORLD_FACTS) ─────────────────
+    ("你在 Ave Mujica 的角色代号是什么？", &["Mortis", "mortis"], "stage"),
+    ("丰川祥子在 Ave Mujica 的角色代号是什么？", &["Oblivionis", "oblivionis"], "stage"),
+    ("三角初华在 Ave Mujica 的角色代号是什么？", &["Doloris", "doloris"], "stage"),
+    ("八幡海铃在 Ave Mujica 的角色代号是什么？", &["Timoris", "timoris"], "stage"),
+    ("祐天寺にゃむ在 Ave Mujica 的角色代号是什么？", &["Amoris", "amoris"], "stage"),
+    ("Ave Mujica 的队长是谁？", &["丰川祥子", "祥子"], "stage"),
+    // ── deeper plot (NOT in WORLD_FACTS; coverage-boundary probe) ──────
+    ("在加入 Ave Mujica 之前，你曾经属于哪支乐队？", &["CRYCHIC"], "plot"),
+    ("CRYCHIC 这支乐队最初是由谁主导组建的？", &["丰川祥子", "祥子"], "plot"),
+    ("CRYCHIC 解散后，高松灯组建了哪支新乐队？", &["MyGO"], "plot"),
+    ("长崎素世在加入 MyGO 之前，原本属于哪支乐队？", &["CRYCHIC"], "plot"),
+    ("你（睦）和丰川祥子从小相识，这种关系通常被称作什么？", &["青梅竹马", "儿时", "从小", "发小"], "plot"),
+    ("Ave Mujica 这支乐队是由谁重新组建并担任队长的？", &["丰川祥子", "祥子"], "plot"),
 ];
+
+/// Ask one question with `system`, retrying on an empty/errored reply so a
+/// transient blip never masquerades as a factual miss. Returns (graded-correct, reply).
+async fn ask_graded(
+    qwen: &QwenClient,
+    system: &str,
+    q: &str,
+    accepted: &[&str],
+    opts: &ChatOptions,
+) -> (bool, String) {
+    let messages = vec![ChatMessage::system(system.to_string()), ChatMessage::user(q)];
+    let mut reply = String::new();
+    for attempt in 0..3 {
+        reply = qwen
+            .chat(&messages, None, opts.clone())
+            .await
+            .ok()
+            .and_then(|c| c.message.content)
+            .unwrap_or_default();
+        if !reply.trim().is_empty() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(600 * (attempt + 1))).await;
+    }
+    // Case-insensitive so Latin code names match regardless of capitalization
+    // ("myGO" == "MyGO", "mortis" == "Mortis"); a no-op for the Chinese names.
+    let lower = reply.to_lowercase();
+    let ok = accepted.iter().any(|a| lower.contains(&a.to_lowercase()));
+    (ok, reply)
+}
 
 #[tokio::test]
 #[ignore = "live benchmark"]
 async fn bench_world_facts_grounding() {
     let Some(qwen) = client_or_skip() else { return };
-    println!("\n=== P1a World-facts grounding ({} roster questions) ===", ROSTER_QA.len());
+    let n = WORLD_FACTS_QA.len();
+    println!("\n=== P1a World-facts grounding ({n} questions; control = NO docs, NO world-facts) ===");
 
-    // Deterministic answers for a clean A/B.
     let opts = ChatOptions { temperature: Some(0.0), ..Default::default() };
+    // Both conditions strip the character docs; they differ ONLY by WORLD_FACTS.
+    let control_sys = crate::persona::ab_prompt(false, false);
+    let treat_sys = crate::persona::ab_prompt(false, true);
 
-    // (label, include WORLD_FACTS block)
-    for (label, include) in [("WITHOUT WORLD_FACTS", false), ("WITH WORLD_FACTS", true)] {
-        let system = crate::persona::base_system_prompt_variant(include);
-        let mut correct = 0usize;
-        let mut misses: Vec<String> = Vec::new();
-        for (q, accepted) in ROSTER_QA {
-            let messages = vec![ChatMessage::system(system.clone()), ChatMessage::user(*q)];
-            // Retry on an empty/errored reply (transient API blip) so it never
-            // masquerades as a factual miss.
-            let mut reply = String::new();
-            for attempt in 0..3 {
-                reply = qwen
-                    .chat(&messages, None, opts.clone())
-                    .await
-                    .ok()
-                    .and_then(|c| c.message.content)
-                    .unwrap_or_default();
-                if !reply.trim().is_empty() {
-                    break;
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(600 * (attempt + 1))).await;
-            }
-            if accepted.iter().any(|a| reply.contains(a)) {
-                correct += 1;
-            } else {
-                misses.push(format!("    ✗ {q}  → {}", reply.replace('\n', " ").trim()));
-            }
-            // Be gentle on the endpoint.
-            tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+    let cat_idx = |c: &str| match c {
+        "roster" => 0,
+        "stage" => 1,
+        _ => 2,
+    };
+    let mut cat_n = [0usize; 3];
+    let mut c_cat = [0usize; 3]; // control correct by category
+    let mut t_cat = [0usize; 3]; // treatment correct by category
+    let (mut c_total, mut t_total) = (0usize, 0usize);
+
+    for (q, accepted, cat) in WORLD_FACTS_QA {
+        let i = cat_idx(cat);
+        cat_n[i] += 1;
+        let (c_ok, c_reply) = ask_graded(&qwen, &control_sys, q, accepted, &opts).await;
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        let (t_ok, t_reply) = ask_graded(&qwen, &treat_sys, q, accepted, &opts).await;
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+        if c_ok {
+            c_cat[i] += 1;
+            c_total += 1;
         }
-        println!(
-            "{label}: {correct}/{} correct ({:.0}%)",
-            ROSTER_QA.len(),
-            100.0 * correct as f64 / ROSTER_QA.len() as f64,
-        );
-        for m in &misses {
-            println!("{m}");
+        if t_ok {
+            t_cat[i] += 1;
+            t_total += 1;
         }
+        let mark = |ok: bool| if ok { "✓" } else { "✗" };
+        println!("\n[{cat}] {q}");
+        println!("   control {} : {}", mark(c_ok), c_reply.replace('\n', " ").trim());
+        println!("   +WORLD  {} : {}", mark(t_ok), t_reply.replace('\n', " ").trim());
     }
+
+    let pct = |x: usize, d: usize| if d == 0 { 0.0 } else { 100.0 * x as f64 / d as f64 };
+    println!("\n--- summary (correct / total) ---");
+    println!(
+        "CONTROL  (no docs, no world-facts):  overall {c_total}/{n} ({:.0}%)  | roster {}/{}  stage {}/{}  plot {}/{}",
+        pct(c_total, n),
+        c_cat[0], cat_n[0], c_cat[1], cat_n[1], c_cat[2], cat_n[2],
+    );
+    println!(
+        "TREATMENT (+WORLD_FACTS block):      overall {t_total}/{n} ({:.0}%)  | roster {}/{}  stage {}/{}  plot {}/{}",
+        pct(t_total, n),
+        t_cat[0], cat_n[0], t_cat[1], cat_n[1], t_cat[2], cat_n[2],
+    );
 }
 
 // ════════════════════════════════════════════════════════════════════
