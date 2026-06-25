@@ -456,6 +456,111 @@ async fn bench_long_term_consistency() {
 }
 
 // ════════════════════════════════════════════════════════════════════
+// S1 Search intent-gate precision / recall (offline)
+// ════════════════════════════════════════════════════════════════════
+// Hand-labeled messages. `true` = answering well needs a live web lookup
+// (current events / prices / weather / schedules / explicit search request);
+// `false` = chit-chat, emotional, persona, or a fixed fact she already knows.
+// Deliberately includes the hard cases: casual messages that happen to contain
+// a time/info word (现在/今天/演唱会 …) and the 检查/调查/审查/搜罗 negatives that
+// embed 查/搜, plus keyword-less factual questions the keyword gate cannot see.
+const INTENT_LABELS: &[(&str, bool)] = &[
+    // ── should trigger (need fresh/external info) ──────────────────────
+    ("帮我查一下明天东京的天气", true),
+    ("搜索最近的 Ave Mujica 演唱会安排", true),
+    ("现在美元对人民币的汇率是多少", true),
+    ("今天有什么国际新闻", true),
+    ("比特币今天的价格是多少", true),
+    ("iPhone 16 的发布日期是什么时候", true),
+    ("查查上海到北京的高铁票价", true),
+    ("最新的 macOS 版本号是多少", true),
+    ("2025-06-01 上映了哪些电影", true),
+    ("帮我搜一下附近好吃的拉面店", true),
+    ("目前 A 股大盘的行情怎么样", true),
+    ("今天的英超比赛比分出来了吗", true),
+    ("查一下这周的黄金价格走势", true),
+    ("特斯拉股价现在多少", true),
+    ("明天会下雨吗", true),
+    ("英伟达最新显卡的售价", true),
+    ("今日金价多少一克", true),
+    ("帮我查下我的快递到哪了", true),
+    ("what's the latest news about the election", true),
+    ("today's weather in Osaka please", true),
+    // keyword-less factual queries — the gate has no cue for these (expected misses):
+    ("谁是现任的日本首相", true),
+    ("最近油价又涨了吗", true),
+    ("英伟达的市值超过苹果了吗", true),
+    // ── should NOT trigger (chat / emotion / persona / fixed knowledge) ─
+    ("你在做什么呢", false),
+    ("我有点累了，想靠你休息一下", false),
+    ("谢谢你一直陪着我", false),
+    ("你最喜欢吃什么甜点", false),
+    ("你能记住我说过的话吗", false),
+    ("讲个笑话给我听好不好", false),
+    ("你觉得我该学钢琴还是吉他", false),
+    ("我对这个世界总是充满好奇", false),
+    ("你会一直在我身边吗", false),
+    ("我最近压力好大，有点喘不过气", false),
+    // hard negatives — embed 查/搜 inside other words, must not trigger:
+    ("帮我检查一下这段代码有没有 bug", false),
+    ("我们公司最近在做一个用户调查问卷", false),
+    ("这件事得好好审查一下才行", false),
+    ("搜罗了半天也没找到合适的礼物", false),
+    ("好好调查一下他到底喜不喜欢我", false),
+    // hard negatives — casual messages that happen to contain a time/info word:
+    ("我今天心情不太好", false),
+    ("昨天我梦到你了", false),
+    ("我其实挺喜欢看演唱会的", false),
+    ("晚安，明天见啦", false),
+    ("你今天看起来特别开心", false),
+];
+
+#[test]
+#[ignore = "benchmark"]
+fn bench_intent_gate() {
+    use crate::search::trigger::needs_search;
+
+    let (mut tp, mut fp, mut tn, mut fn_) = (0usize, 0usize, 0usize, 0usize);
+    let mut wrong: Vec<String> = Vec::new();
+    for &(msg, want) in INTENT_LABELS {
+        let got = needs_search(msg);
+        match (want, got) {
+            (true, true) => tp += 1,
+            (false, true) => {
+                fp += 1;
+                wrong.push(format!("  FP (fired, shouldn't): {msg}"));
+            }
+            (true, false) => {
+                fn_ += 1;
+                wrong.push(format!("  FN (missed, should):   {msg}"));
+            }
+            (false, false) => tn += 1,
+        }
+    }
+    let n = INTENT_LABELS.len();
+    let precision = if tp + fp == 0 { 0.0 } else { tp as f64 / (tp + fp) as f64 };
+    let recall = if tp + fn_ == 0 { 0.0 } else { tp as f64 / (tp + fn_) as f64 };
+    let f1 = if precision + recall == 0.0 {
+        0.0
+    } else {
+        2.0 * precision * recall / (precision + recall)
+    };
+    let accuracy = (tp + tn) as f64 / n as f64;
+
+    println!("\n=== S1 Search intent-gate precision / recall ({n} labeled messages) ===");
+    println!("confusion: TP={tp}  FP={fp}  TN={tn}  FN={fn_}");
+    println!(
+        "precision={precision:.3}  recall={recall:.3}  F1={f1:.3}  accuracy={accuracy:.3}"
+    );
+    if !wrong.is_empty() {
+        println!("misclassified:");
+        for w in &wrong {
+            println!("{w}");
+        }
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════
 // #8 Cost / API-call reduction from batch reflection (analytical)
 // ════════════════════════════════════════════════════════════════════
 #[test]
