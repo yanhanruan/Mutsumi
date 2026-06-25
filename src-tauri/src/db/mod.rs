@@ -12,6 +12,7 @@
 //! Storage path: `<app_data_dir>/mutsumi.db` (mirrors `persistence::state_path`).
 
 pub mod history;
+pub mod index;
 pub mod memory;
 pub mod state;
 pub mod vector;
@@ -23,8 +24,11 @@ use std::sync::Mutex;
 use rusqlite::Connection;
 use tauri::{AppHandle, Manager};
 
-/// Managed handle to the SQLite connection.
-pub struct Db(pub Mutex<Connection>);
+/// Managed handle to the SQLite connection (`.0`) plus the in-memory embedding
+/// index (`.1`) that serves the retrieval hot path. The index is self-validating
+/// (see [`index::MemoryIndexCache`]), so callers just use it — no manual
+/// invalidation on writes.
+pub struct Db(pub Mutex<Connection>, pub index::MemoryIndexCache);
 
 impl Db {
     /// Open (creating if needed) the app database, apply pragmas + migrations.
@@ -34,7 +38,10 @@ impl Db {
             .app_data_dir()
             .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
         std::fs::create_dir_all(&dir).ok();
-        Ok(Db(Mutex::new(open_conn(&dir.join("mutsumi.db"))?)))
+        Ok(Db(
+            Mutex::new(open_conn(&dir.join("mutsumi.db"))?),
+            index::MemoryIndexCache::default(),
+        ))
     }
 }
 

@@ -152,31 +152,51 @@ fn client_or_skip() -> Option<QwenClient> {
 #[test]
 #[ignore = "benchmark"]
 fn bench_retrieval_latency() {
+    use crate::db::index::MemoryIndexCache;
+
     const ITERS: usize = 100;
-    println!("\n=== #1 Retrieval latency (in-Rust cosine; {DIM}-dim; full search() incl. top-K touch) ===");
-    for &n in &[1000usize, 5000, 10000] {
-        let path = temp_db(&format!("lat{n}"));
-        let conn = open_conn(&path).unwrap();
-        seed_random(&conn, n);
+    let w = RetrievalWeights::default();
 
-        // Warm the OS page cache.
-        let _ = memory::search(&conn, &random_embedding(7), 6, RetrievalWeights::default(), now());
-
+    // Time `ITERS` queries through `run` and print a p50/p95/mean/max line.
+    fn report(label: &str, n: usize, mut run: impl FnMut(&[f32])) {
+        // Warm-up (page cache for brute force; first index build for the cache).
+        run(&random_embedding(7));
         let mut times = Vec::with_capacity(ITERS);
         for it in 0..ITERS {
             let q = random_embedding(1_000 + it as u64);
             let t = Instant::now();
-            let _ = memory::search(&conn, &q, 6, RetrievalWeights::default(), now()).unwrap();
+            run(&q);
             times.push(t.elapsed().as_secs_f64() * 1000.0);
         }
         times.sort_by(|a, b| a.partial_cmp(b).unwrap());
         println!(
-            "N={n:>6}: p50={:>7.2}ms  p95={:>7.2}ms  mean={:>7.2}ms  max={:>7.2}ms",
+            "  {label:<22} N={n:>6}: p50={:>7.2}ms  p95={:>7.2}ms  mean={:>7.2}ms  max={:>7.2}ms",
             percentile(&times, 50.0),
             percentile(&times, 95.0),
             mean(&times),
             times.last().copied().unwrap_or(0.0),
         );
+    }
+
+    println!("\n=== #1 Retrieval latency ({DIM}-dim; full search() incl. top-K fetch + touch) ===");
+    println!("(before = brute-force scan+decode every query; after = cached SIMD index)");
+    for &n in &[1000usize, 5000, 10000] {
+        let path = temp_db(&format!("lat{n}"));
+        let conn = open_conn(&path).unwrap();
+        seed_random(&conn, n);
+
+        // Before: the original brute-force path (re-decodes all BLOBs each query).
+        report("before (brute-force)", n, |q| {
+            let _ = memory::search(&conn, q, 6, w, now()).unwrap();
+        });
+
+        // After: the in-RAM SIMD index. Built once on the first (warm-up) call;
+        // every subsequent query is served from cache (fingerprint is stable).
+        let cache = MemoryIndexCache::default();
+        report("after  (cached SIMD)", n, |q| {
+            let _ = cache.search(&conn, q, 6, w, now()).unwrap();
+        });
+
         drop(conn);
         cleanup(&path);
     }

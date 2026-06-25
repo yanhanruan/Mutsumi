@@ -60,6 +60,11 @@ of BLOBs per query), a SIMD/`opt-level=3` hot path for cosine, or adopting
 `sqlite-vec`/ANN would each cut this substantially. Pruning/down-weighting
 reflected raw observations also keeps N bounded.
 
+> **✅ Done (R1).** The first two recommendations are now implemented: an in-RAM
+> embedding cache + AVX2/FMA SIMD cosine + a covering-index freshness check. Retrieval
+> is now **flat ~20 ms p50 / ~38 ms p95 from 1k to 10k** (p95 @10k ~8× faster). Full
+> before/after methodology in [`retrieval-optimization.md`](retrieval-optimization.md).
+
 ## #2 Database size & binary footprint
 
 DB file size after `wal_checkpoint(TRUNCATE)`, 1024-dim f32 embedding BLOBs:
@@ -210,7 +215,7 @@ dramatically fewer tokens than naive per-item processing.
 
 | # | Claim | Result | Verdict |
 |---|---|---|---|
-| 1 | millisecond retrieval | 41 ms p95 @1k; 417 ms @10k | ⚠️ fast ≤~2k, linear beyond |
+| 1 | millisecond retrieval | brute: 41 ms p95 @1k → 417 ms @10k; **optimized (R1): ~38 ms p95 flat to 10k** | ✅ (optimized) |
 | 2 | lightweight, zero-ops | ~4.6 KB/mem; bundled SQLite; no service | ✅ |
 | 3 | high accuracy | Recall@5 1.00, MRR 1.00 | ✅ (easy set) |
 | 4 | efficient reflection | 20→2 insights, ~4.7 s, ~714 tok | ✅ |
