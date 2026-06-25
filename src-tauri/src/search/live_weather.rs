@@ -55,13 +55,48 @@ pub struct WeatherBrief {
 /// Detect a weather question and extract its location, or `None` if the message
 /// isn't a weather query / no location can be isolated. Pure — unit-tested.
 pub fn parse_weather_query(msg: &str) -> Option<String> {
-    // BUG (v1.3.0): weather questions were never routed to a structured source —
-    // they fell through to search-engine scraping, which behind anti-bot
-    // defences returns blank / HTTP-202 challenge pages, so small cities like
-    // 福安 looked "unsupported". The v1.3.1 fix implements this extraction so the
-    // query is answered from wttr.in instead. (Stub kept until the fix commit.)
-    let _ = msg;
-    None
+    let lower = msg.to_lowercase();
+    let is_weather = WEATHER_MARKERS
+        .iter()
+        .any(|m| if m.is_ascii() { lower.contains(m) } else { msg.contains(m) });
+    if !is_weather {
+        return None;
+    }
+
+    // Punctuation → spaces (keep alphanumerics — including CJK — and the
+    // apostrophe in contractions like "what's").
+    let spaced: String = msg
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '\'' { c } else { ' ' })
+        .collect();
+
+    // Strip CJK noise as substrings, longest first so multi-char verbs are
+    // removed before any single-char piece.
+    let mut cjk = NOISE_CJK.to_vec();
+    cjk.sort_by_key(|w| std::cmp::Reverse(w.chars().count()));
+    let mut s = spaced;
+    for w in cjk {
+        s = s.replace(w, " ");
+    }
+
+    // Drop ASCII noise tokens (whole-word, case-insensitive); keep original case.
+    let city = s
+        .split_whitespace()
+        .filter(|tok| !NOISE_ASCII.contains(&tok.to_lowercase().as_str()))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let city = city.trim();
+
+    // Reject empties, over-long noise, and anything a marker survived in (which
+    // means extraction failed) — the caller then falls back to generic search.
+    if city.is_empty()
+        || city.chars().count() > 20
+        || WEATHER_MARKERS.iter().any(|m| city.to_lowercase().contains(m))
+    {
+        None
+    } else {
+        Some(city.to_string())
+    }
 }
 
 // ── wttr.in `format=j1` deserialisers ───────────────────────────────
@@ -272,14 +307,25 @@ mod tests {
     async fn live_wttr_smoke() {
         // The cities that previously appeared "unsupported" via search scraping —
         // county-level CN cities + an international one — must all resolve from
-        // the structured source. Spaced out to stay polite.
+        // the structured source. wttr.in rate-limits bursts (unlike real usage,
+        // which is one request per turn), so space requests out and retry a miss
+        // once before failing.
         let http = reqwest::Client::builder().build().unwrap();
-        for q in ["今天福安天气几度", "宁德天气", "嵊州天气", "邛崃天气", "London weather"] {
+        let cities = ["今天福安天气几度", "宁德天气", "嵊州天气", "邛崃天气", "London weather"];
+        let mut misses = Vec::new();
+        for q in cities {
             let city = parse_weather_query(q).expect("should be a weather query");
-            let ctx = fetch_weather_context(&http, q, &city).await;
+            let mut ctx = fetch_weather_context(&http, q, &city).await;
+            if ctx.is_none() {
+                tokio::time::sleep(Duration::from_secs(3)).await;
+                ctx = fetch_weather_context(&http, q, &city).await;
+            }
             println!("{q} -> [{city}] -> {}", if ctx.is_some() { "ok" } else { "MISS" });
-            assert!(ctx.is_some(), "no structured weather for {q} ({city})");
-            tokio::time::sleep(Duration::from_millis(800)).await;
+            if ctx.is_none() {
+                misses.push(q);
+            }
+            tokio::time::sleep(Duration::from_millis(1500)).await;
         }
+        assert!(misses.is_empty(), "no structured weather for: {misses:?}");
     }
 }
