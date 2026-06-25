@@ -11,6 +11,7 @@ mod cursor;
 // allow dead_code across the module until those pipelines wire it up.
 #[allow(dead_code)]
 mod db;
+mod hardware;
 mod http;
 mod idle;
 mod late_night;
@@ -25,6 +26,7 @@ mod state;
 mod tray;
 mod weather;
 mod window_ops;
+mod sys_state;
 
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -82,6 +84,7 @@ pub fn run() {
     .manage(qwen_state)
     .manage(search_state)
     .manage(chat::ChatBuffer::new())
+    .manage(sys_state::SysMonitor::default())
     .invoke_handler(tauri::generate_handler![
       app_state::get_state,
       app_state::pet_click,
@@ -126,6 +129,9 @@ pub fn run() {
       chat::chat_stage_clipboard_image,
       search::set_search_engine,
       search::set_search_enabled,
+      hardware::get_hardware_info,
+      sys_state::sys_monitor_start,
+      sys_state::sys_monitor_stop,
       hide_pet,
     ])
     .setup(move |app| {
@@ -211,6 +217,10 @@ pub fn run() {
       //   let _ = &stop_flag;
       //   idle::spawn(app.handle().clone(), stop_flag);
       // }
+
+      // System state monitor is NOT started here: it runs only while the
+      // System State panel is open (sys_monitor_start / _stop commands), so it
+      // costs nothing when closed.
 
       // Pet state + pomodoro ticker (also drives late-night reminder).
       app_state::spawn_ticker(app.handle().clone(), shared.clone());

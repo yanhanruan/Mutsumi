@@ -20,7 +20,7 @@ import { MUTSUMI_ALL_QUOTES } from '../data/mutsumiQuotes'
 import { getCurrentWindow, currentMonitor } from '@tauri-apps/api/window'
 import { LogicalSize } from '@tauri-apps/api/dpi'
 import { invoke } from '@tauri-apps/api/core'
-import { useAppConfig, CHAR_SIZE_DIMS } from '../composables/useAppConfig'
+import { useAppConfig, CHAR_SIZE_DIMS, SYS_WINDOW_DIMS } from '../composables/useAppConfig'
 import { useWeatherAvailable } from '../composables/useWeatherAvailable'
 import { TAROT_WINDOW_DIMS } from '../config/tarot'
 import { CHAT_WINDOW_DIMS } from '../config/chat'
@@ -32,6 +32,7 @@ import MusicBadge from './MusicBadge.vue'
 import BalloonPet from './BalloonPet.vue'
 import TarotCard from './TarotCard.vue'
 import ChatPanel from './ChatPanel.vue'
+import SystemStateOverlay from './SystemStateOverlay.vue'
 import ContextMenu, { type MenuAction, type ContextActionKey } from './ContextMenu.vue'
 
 const imgRef = ref<HTMLImageElement | null>(null)
@@ -48,9 +49,18 @@ const {
 } = useAnimator(DEFAULT_ANIMATIONS, imgRef)
 useAudioReaction(queueAnim, currentName, getPending, cancelPending)
 usePetStatus(setIdleVariant)
+// True while a full-window overlay (tarot card / chat / system state panel) is
+// open. Declared before useHitTest (which reads them) and the size watch below.
+const tarotActive = ref(false)
+const chatActive  = ref(false)
+const sysStateActive = ref(false)
+// Any full-window overlay is open — gates pet interaction + sprite/badge display.
+const overlayOpen = computed(() => tarotActive.value || chatActive.value || sysStateActive.value)
+
 // Per-pixel click-through: transparent regions of the pet pass clicks
-// through to whatever is behind the window.
-useHitTest(getCurrentImage)
+// through to whatever is behind the window. While an overlay is open, only the
+// overlay's panel is interactive; the area around it stays click-through.
+useHitTest(getCurrentImage, () => overlayOpen.value)
 
 // TODO re-enable click animation — see onMouseUp:
 // Animations that must not be interrupted by a click (bubble still shows).
@@ -65,13 +75,6 @@ useHitTest(getCurrentImage)
 const { t, locale } = useI18n()
 const { config } = useAppConfig()
 const { weatherAvailable } = useWeatherAvailable()
-
-// True while the tarot / chat overlay is open (declared before the size watch
-// below, which reads them on its immediate run).
-const tarotActive = ref(false)
-const chatActive  = ref(false)
-// Any full-window overlay is open — gates pet interaction + sprite/badge display.
-const overlayOpen = computed(() => tarotActive.value || chatActive.value)
 
 // ── Window show / hide transitions ────────────────────────────────
 // petOpacity drives a CSS opacity transition. It starts at 1, goes to 0 when
@@ -98,6 +101,7 @@ const bubbleRef  = ref<InstanceType<typeof ChatBubble> | null>(null)
 const contextRef = ref<InstanceType<typeof ContextMenu> | null>(null)
 const tarotRef   = ref<InstanceType<typeof TarotCard> | null>(null)
 const chatRef    = ref<InstanceType<typeof ChatPanel> | null>(null)
+const sysStateRef = ref<InstanceType<typeof SystemStateOverlay> | null>(null)
 
 // ── Tarot overlay ──────────────────────────────────────────────────
 // Integrated in-window reading (not a separate OS window). On open the main
@@ -201,6 +205,42 @@ async function closeChat() {
   chatActive.value = false
 }
 
+// ── System State overlay ───────────────────────────────────────────
+// Same choreography as above, sized via SYS_WINDOW_DIMS.
+async function openSysState() {
+  const win = getCurrentWindow()
+  try { savedPos = await win.outerPosition() } catch { savedPos = null }
+  bubbleRef.value?.hide()
+  sysStateActive.value = true
+  sysStateRef.value?.open()
+  await nextTick()
+  await nextPaint()
+
+  const [lw, lh] = SYS_WINDOW_DIMS[config.value.characterSize]
+  const sf  = await win.scaleFactor()
+  const mon = await currentMonitor()
+  const pw  = lw * sf
+  const ph  = lh * sf
+  let x = savedPos?.x ?? 0
+  let y = savedPos?.y ?? 0
+  if (mon) {
+    x = mon.position.x + (mon.size.width  - pw) / 2
+    y = mon.position.y + (mon.size.height - ph) / 2
+  }
+  await setBounds(x, y, pw, ph)
+}
+
+async function closeSysState() {
+  const win = getCurrentWindow()
+  const [lw, lh] = CHAR_SIZE_DIMS[config.value.characterSize]
+  const sf = await win.scaleFactor()
+  sysStateRef.value?.dismiss()
+  await nextTick()
+  await nextPaint()
+  await setBounds(savedPos?.x ?? 0, savedPos?.y ?? 0, lw * sf, lh * sf)
+  sysStateActive.value = false
+}
+
 // ── Mouse interaction ──────────────────────────────────────────────
 const DRAG_THRESHOLD = 5
 let pressX = 0
@@ -274,6 +314,10 @@ async function onContextAction(action: MenuAction) {
     await openChat()
     return
   }
+  if (action === 'sys_state') {
+    await openSysState()
+    return
+  }
   // Play the pat_head animation immediately (like click — no pending delay).
   if (action === 'pat_head') {
     setAnim('pat_head')
@@ -343,6 +387,7 @@ onUnmounted(() => {
   <ContextMenu ref="contextRef" @action="onContextAction" />
   <TarotCard ref="tarotRef" @close="closeTarot" />
   <ChatPanel ref="chatRef" @close="closeChat" />
+  <SystemStateOverlay ref="sysStateRef" @close="closeSysState" />
   <BalloonPet />
 </template>
 

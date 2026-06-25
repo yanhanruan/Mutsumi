@@ -41,6 +41,8 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 scraper = "0.20"   # HTML parsing for search-result + page-body scraping
 regex = "1"        # date / keyword detection for search triggering
 tokio = { version = "1", features = ["time", "macros"] }  # search budget + concurrent embed/search (join!)
+sysinfo = "0.36.1"   # CPU / memory / network sampling for the System State panel
+battery = "0.7.8"    # battery level + charge-rate time estimate
 
 # Test-only async runtime for the (ignored) live API smoke tests.
 [dev-dependencies]
@@ -57,11 +59,18 @@ panic         = "abort" # no unwinding tables/machinery (~50 KB saved)
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61", features = [
     "Win32_Foundation",
+    "Win32_Graphics_Dxgi",
     "Win32_Media_Audio",
     "Win32_Media_Audio_Endpoints",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_NetworkManagement_Ndis",
+    "Win32_Networking_WinSock",
+    "Win32_Storage_FileSystem",
     "Win32_System_Com",
     "Win32_System_Com_StructuredStorage",
     "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_IO",
+    "Win32_System_Ioctl",
     "Win32_System_Power",
     "Win32_System_SystemInformation",
     "Win32_System_Variant",

@@ -48,6 +48,8 @@ Mutsumi 是一个静静住在你屏幕角落的小伙伴。
 
 🍅 **极客番茄钟 & 天气**：内置轻量级专注/休息计时器，并在角落安静地展示实时天气。
 
+🖥️ **系统状态一览**：右键菜单中的「系统状态」面板，实时显示 CPU / 内存 / 网络 / 开机时长 / 电量，并附带一页硬件规格速览（CPU、内存、显卡显存、磁盘分区）。
+
 🎮 **丰富的互动菜单**：右键点击她，即可呼出互动面板：
 * ✋ **摸摸头**：召唤哈基米摸摸头
 * 🍨 **喂抹茶芭菲**：抹茶芭菲最喜欢了！
@@ -208,6 +210,9 @@ Mutsumi is a quiet little companion living in the corner of your screen. She min
 
 🍅 **Built-in Pomodoro Timer & Weather**
  Stay focused with a lightweight Pomodoro timer and keep an eye on the current weather, conveniently displayed in the corner of your screen.
+
+🖥️ **System State at a Glance**
+ The "System Status" panel (right-click menu) shows live CPU / memory / network / uptime / battery, plus a one-page hardware spec sheet (CPU, RAM, GPU VRAM, disk partitions).
 
 🎮 **Fun Interactive Menu**
  Right-click her to open a menu full of interactions:

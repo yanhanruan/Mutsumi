@@ -89,7 +89,17 @@ export function isOverUiOverlay(els: Element[]): boolean {
   return false
 }
 
-export function useHitTest(getCurrentImage: () => HTMLImageElement | null) {
+export function useHitTest(
+  getCurrentImage: () => HTMLImageElement | null,
+  /**
+   * Optional predicate: true while a full-window overlay (tarot card, system
+   * state panel) is open. In that mode the pet sprite is hidden, so sampling
+   * its stale last frame would leave random "ghost" pixels interactive. Skip
+   * the alpha sampling entirely — only the overlay's own `pet-ui-overlay`
+   * elements (e.g. the panel) are interactive; everything else is click-through.
+   */
+  isOverlayActive?: () => boolean,
+) {
   const canvas = document.createElement('canvas')
   const ctx    = canvas.getContext('2d', { willReadFrequently: true })!
   let unlisten: UnlistenFn | null = null
@@ -180,8 +190,17 @@ export function useHitTest(getCurrentImage: () => HTMLImageElement | null) {
     const cssX = pos.x / dpr
     const cssY = pos.y / dpr
 
+    const overUi = isOverUiOverlay(document.elementsFromPoint(cssX, cssY))
+
+    // Overlay mode: only the overlay's own UI is interactive; the transparent
+    // area around it is click-through (don't sample the hidden pet sprite).
+    if (isOverlayActive?.()) {
+      void setIgnore(!overUi)
+      return
+    }
+
     // UI overlays take priority — never click-through over them.
-    if (isOverUiOverlay(document.elementsFromPoint(cssX, cssY))) {
+    if (overUi) {
       void setIgnore(false)
       return
     }
