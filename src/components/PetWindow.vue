@@ -31,6 +31,7 @@ import PomodoroBadge from './PomodoroBadge.vue'
 import WeatherBadge from './WeatherBadge.vue'
 import MusicBadge from './MusicBadge.vue'
 import BalloonPet from './BalloonPet.vue'
+import SleepZzz from './SleepZzz.vue'
 import TarotCard from './TarotCard.vue'
 import ChatPanel from './ChatPanel.vue'
 import SystemStateOverlay from './SystemStateOverlay.vue'
@@ -441,6 +442,9 @@ onUnmounted(() => {
       :style="{ opacity: spriteOpacity }"
       draggable="false"
     />
+    <Transition name="zzz-fade">
+      <SleepZzz v-if="sleeping && !overlayOpen" />
+    </Transition>
     <PomodoroBadge v-if="!overlayOpen" />
     <WeatherBadge v-if="!overlayOpen && config.showWeather && weatherAvailable !== false" />
     <MusicBadge v-if="!overlayOpen && config.showMusic" />
@@ -483,5 +487,15 @@ onUnmounted(() => {
   display: flex;
   justify-content: center;
   pointer-events: none;
+}
+/* Gentle fade for the whole zzz group as she drifts off / wakes up, so the
+   loop doesn't pop in or get cut mid-drift. */
+.zzz-fade-enter-active,
+.zzz-fade-leave-active {
+  transition: opacity 320ms ease;
+}
+.zzz-fade-enter-from,
+.zzz-fade-leave-to {
+  opacity: 0;
 }
 </style>
