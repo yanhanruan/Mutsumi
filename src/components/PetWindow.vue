@@ -249,16 +249,30 @@ async function closeSysState() {
 // `sleeping` (from useAnimator) is the single source of truth. Entering sleep
 // also nudges the backend pet state (energy restores while resting) and shows
 // the rest-state bubble; waking just returns to the idle variant.
-function sleepPet() {
+//
+// The sprite is faded out before the animation swaps and faded back in after,
+// so the idle→sleep (and sleep→idle) transition dips through transparent
+// instead of hard-cutting between two unrelated poses.
+const SLEEP_FADE_MS = 220
+const spriteOpacity = ref(1)
+const wait = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
+
+async function sleepPet() {
   if (sleeping.value) return
+  spriteOpacity.value = 0
+  await wait(SLEEP_FADE_MS)
   enterSleep()
   void invoke('pet_context_action', { action: 'sleep' })
+  spriteOpacity.value = 1
   bubbleRef.value?.show(t.value.contextResponses.sleep)
 }
 
-function wakePet() {
+async function wakePet() {
   if (!sleeping.value) return
+  spriteOpacity.value = 0
+  await wait(SLEEP_FADE_MS)
   exitSleep()
+  spriteOpacity.value = 1
 }
 
 function toggleSleep() {
@@ -414,7 +428,13 @@ onUnmounted(() => {
     @mouseup="onMouseUp"
     @contextmenu="onContextMenu"
   >
-    <img v-show="ready && !overlayOpen" ref="imgRef" class="frame" draggable="false" />
+    <img
+      v-show="ready && !overlayOpen"
+      ref="imgRef"
+      class="frame"
+      :style="{ opacity: spriteOpacity }"
+      draggable="false"
+    />
     <PomodoroBadge v-if="!overlayOpen" />
     <WeatherBadge v-if="!overlayOpen && config.showWeather && weatherAvailable !== false" />
     <MusicBadge v-if="!overlayOpen && config.showMusic" />
@@ -445,6 +465,9 @@ onUnmounted(() => {
   display: block;
   pointer-events: none;
   -webkit-user-drag: none;
+  /* Soft dip-to-transparent crossfade when entering/leaving sleep. Kept in
+     sync with SLEEP_FADE_MS in the script. */
+  transition: opacity 220ms ease;
 }
 .bubble-anchor {
   position: absolute;
