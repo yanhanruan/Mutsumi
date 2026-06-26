@@ -157,6 +157,51 @@ export const en: Translations = {
 
   lateNightReminder: "You shouldn't stay up so late!",
 
+  // ── Sleep-talking ─────────────────────────────────────────────────
+  sleepTalk: [
+    'Zzz…',
+    'mn… five more minutes…',
+    '…matcha… parfait…',
+    'mmm… so warm…',
+    '…don\'t go… zzz…',
+    '…nn… sleepy…',
+    // ── Saki (Sakiko) ──
+    '…Saki… let\'s play together again…',
+    '…as long as it\'s a band with you, Saki…',
+    '…your keyboard sounds lovely, Saki…',
+    '…I\'m right here, Saki…',
+    '…it\'ll be okay… Saki…',
+    '…let\'s walk to school, Saki…',
+    // ── Rana ──
+    '…Rana… the cat\'s so soft…',
+    '…your guitar is singing, Rana…',
+    '…play that song again, Rana…',
+    '…let\'s go see the cats, Rana…',
+    '…you found me, Rana…',
+    '…you\'re such an interesting girl, Rana…',
+    // ── Soyo ──
+    '…Soyo… thank you for staying…',
+    '…I grew the cucumbers for everyone…',
+    '…you didn\'t give up on me, Soyo…',
+    '…we can start again, Soyo…',
+    '…you tried so hard, Soyo…',
+    '…let\'s walk home together, Soyo…',
+    // ── Tomorin (Tomori) ──
+    '…Tomorin… your words shine…',
+    '…let\'s watch the stars, Tomorin…',
+    '…your song reaches everyone…',
+    '…the planetarium was beautiful…',
+    '…sing for us, Tomori…',
+    '…thank you for the song, Tomorin…',
+    // ── Mortis ──
+    '…Mortis… thank you for protecting me…',
+    '…we can rest now, Mortis…',
+    '…goodnight… sweet dreams…',
+    '…the daisies are blooming, Mortis…',
+    '…you can rest too now, Mortis…',
+    '…We\'ll never have to be apart again, Mortis…',
+  ],
+
   // ── Tarot overlay UI chrome ───────────────────────────────────────
   tarot: {
     interpreting: 'Interpreting the stars…',

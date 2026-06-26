@@ -325,15 +325,21 @@ function onMouseUp(e: MouseEvent) {
   if (e.button !== 0 || overlayOpen.value) return
   if (pressed && !didDrag) {
     // True click — no movement.
-    // TODO re-enable click animation:
-    // Suppress the click animation while in music mode so it doesn't
-    // interrupt headphones/music playback. The bubble still shows.
-    // if (!NO_CLICK_INTERRUPT.has(currentName.value)) {
-    //   setAnim('click')   // immediate switch — no pending-anim delay
-    // }
-    void invoke('pet_click')
-    const quote = MUTSUMI_ALL_QUOTES[Math.floor(Math.random() * MUTSUMI_ALL_QUOTES.length)]
-    bubbleRef.value?.show(quote[locale.value])
+    if (sleeping.value) {
+      // Asleep: she stays asleep and just mumbles. No pet_click, no waking.
+      const lines = t.value.sleepTalk
+      bubbleRef.value?.show(lines[Math.floor(Math.random() * lines.length)])
+    } else {
+      // TODO re-enable click animation:
+      // Suppress the click animation while in music mode so it doesn't
+      // interrupt headphones/music playback. The bubble still shows.
+      // if (!NO_CLICK_INTERRUPT.has(currentName.value)) {
+      //   setAnim('click')   // immediate switch — no pending-anim delay
+      // }
+      void invoke('pet_click')
+      const quote = MUTSUMI_ALL_QUOTES[Math.floor(Math.random() * MUTSUMI_ALL_QUOTES.length)]
+      bubbleRef.value?.show(quote[locale.value])
+    }
   }
   pressed = false
   didDrag = false

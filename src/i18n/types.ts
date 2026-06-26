@@ -217,6 +217,10 @@ export interface Translations {
   // ── Late-night reminder ─────────────────────────────────────────
   lateNightReminder: string
 
+  // ── Sleep-talking ───────────────────────────────────────────────
+  /** Random murmurs shown when she's poked while asleep (she stays asleep). */
+  sleepTalk: string[]
+
   // ── System State Overlay ────────────────────────────────────────
   sys: {
     title:       string
