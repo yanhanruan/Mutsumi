@@ -11,8 +11,9 @@
  *   entire window.
  */
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { useAnimator, DEFAULT_ANIMATIONS } from '../composables/useAnimator'
+import { useAnimator, DEFAULT_ANIMATIONS, IDLE_VARIANTS } from '../composables/useAnimator'
 import { useAudioReaction } from '../composables/useAudioReaction'
+import { useMidnightAutoSleep } from '../composables/useMidnightAutoSleep'
 import { useHitTest } from '../composables/useHitTest'
 import { usePetStatus } from '../composables/usePetStatus'
 import { useI18n } from '../i18n'
@@ -264,6 +265,14 @@ function toggleSleep() {
   if (sleeping.value) wakePet()
   else                sleepPet()
 }
+
+// Auto-sleep at midnight, but only when she's genuinely idle (not already
+// asleep, no overlay open, not mid music/click/pat animation).
+useMidnightAutoSleep({
+  canSleep: () =>
+    !sleeping.value && !overlayOpen.value && IDLE_VARIANTS.has(currentName.value),
+  sleep: sleepPet,
+})
 
 // ── Mouse interaction ──────────────────────────────────────────────
 const DRAG_THRESHOLD = 5
