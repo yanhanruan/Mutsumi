@@ -109,6 +109,8 @@ export interface Translations {
     pat_head:      string
     feed:          string
     sleep:         string
+    /** Shown in place of `sleep` while she is already asleep (toggle to wake). */
+    wake:          string
     fast_learning: string
     /** Opens the in-pet tarot overlay (frontend-only). */
     tarot:         string

@@ -153,16 +153,17 @@ describe('locale bundle completeness', () => {
     }
   })
 
-  it('en contextMenuItems has all 7 actions (including tarot + chat + hide)', () => {
-    expect(Object.keys(en.contextMenuItems)).toHaveLength(7)
+  // 9 keys: pat_head, feed, sleep, wake, fast_learning, tarot, chat, sys_state, hide.
+  it('en contextMenuItems has all 9 action labels (incl. sys_state + wake)', () => {
+    expect(Object.keys(en.contextMenuItems)).toHaveLength(9)
   })
 
-  it('zh contextMenuItems has all 7 actions (including tarot + chat + hide)', () => {
-    expect(Object.keys(zh.contextMenuItems)).toHaveLength(7)
+  it('zh contextMenuItems has all 9 action labels (incl. sys_state + wake)', () => {
+    expect(Object.keys(zh.contextMenuItems)).toHaveLength(9)
   })
 
-  it('ja contextMenuItems has all 7 actions (including tarot + chat + hide)', () => {
-    expect(Object.keys(ja.contextMenuItems)).toHaveLength(7)
+  it('ja contextMenuItems has all 9 action labels (incl. sys_state + wake)', () => {
+    expect(Object.keys(ja.contextMenuItems)).toHaveLength(9)
   })
 
   it('all locales have character size labels', () => {

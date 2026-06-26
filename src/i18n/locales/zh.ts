@@ -120,6 +120,7 @@ export const zh: Translations = {
     pat_head:      '摸头',
     feed:          '投喂抹茶芭菲',
     sleep:         '睡觉',
+    wake:          '叫醒',
     fast_learning: '快速学习',
     tarot:         '塔罗占卜',
     chat:          '聊天',

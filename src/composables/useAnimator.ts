@@ -39,6 +39,7 @@ export type AnimationName =
   | 'idle_low_energy'    // low energy only  (placeholder — swap dir when assets arrive)
   | 'idle_low_affection' // low affection only
   | 'idle_exhausted'     // both low
+  | 'sleep'              // max-priority rest state (assets in progress)
   | 'click'
   | 'pat_head'
   | 'headphones_on'
@@ -127,6 +128,14 @@ export const DEFAULT_ANIMATIONS: Record<AnimationName, AnimationDef> = {
   idle_low_affection: { dir: 'idle',           count: 426, fps: 24, loop: true  },
   idle_exhausted:     { dir: 'idle',           count: 426, fps: 24, loop: true  },
   // ─────────────────────────────────────────────────────────────────────
+  // ── Sleep (assets in progress) ──────────────────────────────────────────
+  // The sleeping animation is not authored yet. Drop the frame sequence into
+  // `public/assets/sleep/` (frame_001.webp … frame_NNN.webp) and bump `count`
+  // to the real frame total. Until then `count: 1` keeps preload to a single
+  // (currently-missing) request; paintFrame skips frames that failed to load,
+  // so entering sleep simply holds the last visible pose instead of flashing a
+  // broken image. `loop: true` so the rest state plays indefinitely.
+  sleep:               { dir: 'sleep',          count: 1,   fps: 12, loop: true  },
   click:               { dir: 'click_matched',  count: 156, fps: 24, loop: false },
   pat_head:            { dir: 'pat_head',       count: 192, fps: 24, loop: false },
   headphones_on:       { dir: 'headphones_on',  count: 185, fps: 24, loop: false },
@@ -159,6 +168,11 @@ export function useAnimator(
   // Current state
   const currentName = ref<AnimationName>('idle')
   const ready       = ref(false)
+  // Max-priority rest state. While true, ordinary animation requests
+  // (audio reaction, click, idle-variant) are ignored — only exitSleep()
+  // can leave it. See enterSleep / exitSleep and the guards on setAnim /
+  // queueAnim below.
+  const sleeping    = ref(false)
 
   // Internal state (not reactive — touched 60+ times/sec)
   let frameIx     = 0
@@ -171,8 +185,13 @@ export function useAnimator(
   // ── Direct DOM paint (hot path) ────────────────────────────────
   // Writing .src directly on the element is invisible to Vue's scheduler —
   // no proxy trap, no dependency tracking, no queued re-render.
+  //
+  // Frames that failed to load report naturalWidth === 0; we skip painting
+  // them so a missing asset never replaces a good frame with the browser's
+  // broken-image glyph. This is what lets the not-yet-authored `sleep`
+  // animation degrade gracefully (it just holds the last drawn pose).
   function paintFrame(img: HTMLImageElement): void {
-    if (imgRef?.value) imgRef.value.src = img.src
+    if (imgRef?.value && img.naturalWidth > 0) imgRef.value.src = img.src
   }
 
   // ── Preload ────────────────────────────────────────────────────
@@ -230,7 +249,10 @@ export function useAnimator(
   }
 
   // ── State machine ─────────────────────────────────────────────
-  function setAnim(name: AnimationName) {
+  // Unconditional switch. Used internally by the tick loop and by the sleep
+  // transitions, which must be able to set animations the public setAnim guard
+  // would otherwise block.
+  function applyAnim(name: AnimationName) {
     const def = loaded.value[name]
     if (!def) return                 // not loaded yet — silently ignore
     currentName.value = name
@@ -240,11 +262,45 @@ export function useAnimator(
   }
 
   /**
+   * Public animation switch. No-op while sleeping so clicks, pat-head, and
+   * other ad-hoc requests cannot interrupt the rest state. Use exitSleep()
+   * to leave sleep.
+   */
+  function setAnim(name: AnimationName) {
+    if (sleeping.value) return
+    applyAnim(name)
+  }
+
+  /**
    * Queue an animation to start at the natural end of the current loop.
-   * Mirrors `_pending_anim` from the Python original.
+   * Mirrors `_pending_anim` from the Python original. Ignored while sleeping —
+   * the audio reaction must not schedule headphones/music behind the sleep loop.
    */
   function queueAnim(name: AnimationName) {
+    if (sleeping.value) return
     pendingAnim = name
+  }
+
+  // ── Sleep (max-priority rest state) ───────────────────────────
+  /**
+   * Enter the rest state. Drops any pending animation and switches to the
+   * sleep loop immediately. Once set, only exitSleep() can leave it — see the
+   * guards on setAnim / queueAnim. Safe to call when already sleeping.
+   */
+  function enterSleep() {
+    sleeping.value = true
+    pendingAnim = null
+    applyAnim('sleep')
+  }
+
+  /**
+   * Leave the rest state and fall back to the current idle variant. Safe to
+   * call when not sleeping.
+   */
+  function exitSleep() {
+    sleeping.value = false
+    pendingAnim = null
+    applyAnim(idleAnimName)
   }
 
   /** Read the currently-pending animation (if any). */
@@ -322,9 +378,10 @@ export function useAnimator(
 
     frameIx++
     if (frameIx >= def.frames.length) {
-      // End of animation — pick next.
+      // End of animation — pick next. Use applyAnim (not setAnim) so the sleep
+      // loop can re-arm itself; setAnim is gated while sleeping.
       const nxt = nextAnimAfterEnd()
-      setAnim(nxt)
+      applyAnim(nxt)
     } else {
       paintFrame(def.frames[frameIx])  // direct DOM write, no Vue overhead
     }
@@ -344,8 +401,11 @@ export function useAnimator(
   return {
     currentName,
     ready,
+    sleeping,
     queueAnim,
     setAnim,
+    enterSleep,
+    exitSleep,
     getPending,
     cancelPending,
     getCurrentImage,

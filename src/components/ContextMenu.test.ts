@@ -36,8 +36,8 @@ vi.mock('../composables/useAppConfig', () => ({
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
-function mountMenu() {
-  return mount(ContextMenu, { attachTo: document.body })
+function mountMenu(props: { sleeping?: boolean } = {}) {
+  return mount(ContextMenu, { attachTo: document.body, props })
 }
 
 /** Advance fake timers AND flush Vue's microtask queue. */
@@ -98,11 +98,11 @@ describe('ContextMenu (vertical glass bubble panel)', () => {
 
   // ── Bubble count & structure ─────────────────────────────────────────
 
-  it('renders exactly 7 bubbles', async () => {
+  it('renders exactly 8 bubbles', async () => {
     const w = mountMenu()
     await w.vm.open()
-    expect(w.findAll('.bubble-wrap')).toHaveLength(7)
-    expect(w.findAll('.bubble')).toHaveLength(7)
+    expect(w.findAll('.bubble-wrap')).toHaveLength(8)
+    expect(w.findAll('.bubble')).toHaveLength(8)
     w.unmount()
   })
 
@@ -110,7 +110,7 @@ describe('ContextMenu (vertical glass bubble panel)', () => {
     const w = mountMenu()
     await w.vm.open()
     const icons = w.findAll('.bubble-icon').map(el => el.text().trim())
-    expect(icons).toHaveLength(7)
+    expect(icons).toHaveLength(8)
     icons.forEach(icon => expect(icon.length).toBeGreaterThan(0))
     w.unmount()
   })
@@ -146,6 +146,7 @@ describe('ContextMenu (vertical glass bubble panel)', () => {
       'Sleep',
       'Fast Learning',
       'Tarot Reading',
+      'System Status',
       'Chat',
       'Hide App',
     ]
@@ -157,6 +158,25 @@ describe('ContextMenu (vertical glass bubble panel)', () => {
       expect(tip.text()).toBe(expectedLabels[i])
       await wraps[i].trigger('mouseleave')
     }
+    w.unmount()
+  })
+
+  it('relabels the sleep bubble to "Wake Up" with a ☀️ icon while sleeping', async () => {
+    const w = mountMenu({ sleeping: true })
+    await w.vm.open()
+    // Sleep is the 3rd bubble (index 2).
+    const wrap = w.findAll('.bubble-wrap')[2]
+    expect(wrap.find('.bubble-icon').text().trim()).toBe('☀️')
+    await wrap.trigger('mouseenter')
+    expect(w.find('.bubble-tip').text()).toBe('Wake Up')
+    w.unmount()
+  })
+
+  it('still emits the "sleep" action from the wake bubble while sleeping', async () => {
+    const w = mountMenu({ sleeping: true })
+    await w.vm.open()
+    await w.findAll('.bubble')[2].trigger('click')
+    expect(w.emitted('action')![0]).toEqual(['sleep'])
     w.unmount()
   })
 
@@ -172,7 +192,7 @@ describe('ContextMenu (vertical glass bubble panel)', () => {
   })
 
   it('emits the correct action for each bubble', async () => {
-    const expected: MenuAction[] = ['pat_head', 'feed', 'sleep', 'fast_learning', 'tarot', 'chat', 'hide']
+    const expected: MenuAction[] = ['pat_head', 'feed', 'sleep', 'fast_learning', 'tarot', 'sys_state', 'chat', 'hide']
     for (let i = 0; i < expected.length; i++) {
       const w = mountMenu()
       await w.vm.open()
@@ -231,7 +251,7 @@ describe('ContextMenu (vertical glass bubble panel)', () => {
     const w = mountMenu()
     await w.vm.open()
     const wraps = w.findAll('.bubble-wrap')
-    expect(wraps).toHaveLength(7)
+    expect(wraps).toHaveLength(8)
     wraps.forEach(wrap => {
       expect(wrap.classes()).toContain('pet-ui-overlay')
     })
@@ -309,10 +329,10 @@ describe('ContextMenu (vertical glass bubble panel)', () => {
 
   // ── Style modifiers ──────────────────────────────────────────────────
 
-  it('hide bubble (index 6) carries the .bubble--hide class', async () => {
+  it('hide bubble (index 7) carries the .bubble--hide class', async () => {
     const w = mountMenu()
     await w.vm.open()
-    const hideBubble = w.findAll('.bubble').at(6)
+    const hideBubble = w.findAll('.bubble').at(7)
     expect(hideBubble?.classes()).toContain('bubble--hide')
     w.unmount()
   })
@@ -321,7 +341,7 @@ describe('ContextMenu (vertical glass bubble panel)', () => {
     const w = mountMenu()
     await w.vm.open()
     const bubbles = w.findAll('.bubble')
-    bubbles.slice(0, 6).forEach(b => {
+    bubbles.slice(0, 7).forEach(b => {
       expect(b.classes()).not.toContain('bubble--hide')
     })
     w.unmount()

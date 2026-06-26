@@ -120,6 +120,7 @@ export const ja: Translations = {
     pat_head:      'なでなで',
     feed:          '抹茶パフェをあげる',
     sleep:         'おやすみ',
+    wake:          'おこす',
     fast_learning: '速習モード',
     tarot:         'タロット占い',
     chat:          'おしゃべり',

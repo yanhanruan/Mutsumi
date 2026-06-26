@@ -40,8 +40,11 @@ const imgRef = ref<HTMLImageElement | null>(null)
 const {
   currentName,
   ready,
+  sleeping,
   queueAnim,
   setAnim,
+  enterSleep,
+  exitSleep,
   getPending,
   cancelPending,
   getCurrentImage,
@@ -241,6 +244,27 @@ async function closeSysState() {
   sysStateActive.value = false
 }
 
+// ── Sleep mode ─────────────────────────────────────────────────────
+// `sleeping` (from useAnimator) is the single source of truth. Entering sleep
+// also nudges the backend pet state (energy restores while resting) and shows
+// the rest-state bubble; waking just returns to the idle variant.
+function sleepPet() {
+  if (sleeping.value) return
+  enterSleep()
+  void invoke('pet_context_action', { action: 'sleep' })
+  bubbleRef.value?.show(t.value.contextResponses.sleep)
+}
+
+function wakePet() {
+  if (!sleeping.value) return
+  exitSleep()
+}
+
+function toggleSleep() {
+  if (sleeping.value) wakePet()
+  else                sleepPet()
+}
+
 // ── Mouse interaction ──────────────────────────────────────────────
 const DRAG_THRESHOLD = 5
 let pressX = 0
@@ -318,6 +342,11 @@ async function onContextAction(action: MenuAction) {
     await openSysState()
     return
   }
+  // Sleep toggles the max-priority rest state (enter ↔ back to idle).
+  if (action === 'sleep') {
+    toggleSleep()
+    return
+  }
   // Play the pat_head animation immediately (like click — no pending delay).
   if (action === 'pat_head') {
     setAnim('pat_head')
@@ -384,7 +413,7 @@ onUnmounted(() => {
       <ChatBubble ref="bubbleRef" />
     </div>
   </div>
-  <ContextMenu ref="contextRef" @action="onContextAction" />
+  <ContextMenu ref="contextRef" :sleeping="sleeping" @action="onContextAction" />
   <TarotCard ref="tarotRef" @close="closeTarot" />
   <ChatPanel ref="chatRef" @close="closeChat" />
   <SystemStateOverlay ref="sysStateRef" @close="closeSysState" />

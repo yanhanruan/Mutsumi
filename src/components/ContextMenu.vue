@@ -36,6 +36,7 @@ const BUBBLE_DEFS: BubbleDef[] = [
 
 const { t } = useI18n()
 const { config } = useAppConfig()
+const props = withDefaults(defineProps<{ sleeping?: boolean }>(), { sleeping: false })
 const emit = defineEmits<{ action: [action: MenuAction] }>()
 
 // ── Size scaling ─────────────────────────────────────────────────────
@@ -58,10 +59,13 @@ const hoveredAction = ref<MenuAction | null>(null)
 const skipLeave     = ref(false)
 
 const items = computed(() =>
-  BUBBLE_DEFS.map(b => ({
-    ...b,
-    label: t.value.contextMenuItems[b.action],
-  }))
+  BUBBLE_DEFS.map(b => {
+    // While she's asleep the sleep bubble becomes a "wake up" toggle.
+    if (b.action === 'sleep' && props.sleeping) {
+      return { ...b, icon: '☀️', label: t.value.contextMenuItems.wake }
+    }
+    return { ...b, label: t.value.contextMenuItems[b.action] }
+  })
 )
 
 // ── Public API ───────────────────────────────────────────────────────

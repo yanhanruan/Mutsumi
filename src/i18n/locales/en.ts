@@ -120,6 +120,7 @@ export const en: Translations = {
     pat_head:      'Pat Head',
     feed:          'Feed Matcha Parfait',
     sleep:         'Sleep',
+    wake:          'Wake Up',
     fast_learning: 'Fast Learning',
     tarot:         'Tarot Reading',
     chat:          'Chat',
