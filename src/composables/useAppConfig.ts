@@ -29,6 +29,8 @@ export interface AppConfig {
   showWeather:   boolean
   /** Show the mini music controller (Lottie speakers badge + transport panel). */
   showMusic:     boolean
+  /** Show the drifting "zzz" effect while she sleeps. */
+  showZzz:       boolean
   /**
    * Manually-chosen UI language. `null` (the default) means "follow the
    * system" — the app uses navigator.language detection. Setting a locale
@@ -77,6 +79,7 @@ const DEFAULT_CONFIG: AppConfig = {
   characterSize: 'medium',
   showWeather:   true,
   showMusic:     true,
+  showZzz:       true,
   language:      null,          // null → follow system locale
   searchEngine:  'duckduckgo',  // fast + scrape-friendly default (matches Rust)
   searchEnabled: true,          // web search on by default (matches prior behavior)

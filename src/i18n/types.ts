@@ -63,6 +63,9 @@ export interface Translations {
   // ── Music controller visibility ─────────────────────────────────
   showMusic: string
 
+  // ── Sleep "zzz" effect visibility ───────────────────────────────
+  showZzz: string
+
   // ── Search engine (chat search-enhancement) ─────────────────────
   searchEngine: string
   searchEngines: {

@@ -75,6 +75,9 @@ export const en: Translations = {
   // ── Music controller visibility ───────────────────────────────────
   showMusic: 'Show Music Controller',
 
+  // ── Sleep "zzz" effect visibility ─────────────────────────────────
+  showZzz: 'Show Sleep "zzz"',
+
   // ── Search engine ─────────────────────────────────────────────────
   searchEngine: 'Search Engine',
   searchEngines: {

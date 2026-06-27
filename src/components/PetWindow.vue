@@ -443,7 +443,7 @@ onUnmounted(() => {
       draggable="false"
     />
     <Transition name="zzz-fade">
-      <SleepZzz v-if="sleeping && !overlayOpen" />
+      <SleepZzz v-if="sleeping && !overlayOpen && config.showZzz" />
     </Transition>
     <PomodoroBadge v-if="!overlayOpen" />
     <WeatherBadge v-if="!overlayOpen && config.showWeather && weatherAvailable !== false" />

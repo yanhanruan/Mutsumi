@@ -75,6 +75,9 @@ export const ja: Translations = {
   // ── Music controller visibility ───────────────────────────────────
   showMusic: '音楽コントローラーを表示',
 
+  // ── Sleep "zzz" effect visibility ─────────────────────────────────
+  showZzz: '寝るときの zzz を表示',
+
   // ── Search engine ─────────────────────────────────────────────────
   searchEngine: '検索エンジン',
   searchEngines: {

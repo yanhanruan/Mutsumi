@@ -75,6 +75,9 @@ export const zh: Translations = {
   // ── Music controller visibility ───────────────────────────────────
   showMusic: '显示音乐控制器',
 
+  // ── Sleep "zzz" effect visibility ─────────────────────────────────
+  showZzz: '显示睡眠 zzz 效果',
+
   // ── Search engine ─────────────────────────────────────────────────
   searchEngine: '搜索引擎',
   searchEngines: {

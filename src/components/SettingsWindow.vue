@@ -104,6 +104,15 @@ async function toggleMusic() {
   await updateConfig({ showMusic: localShowMusic.value })
 }
 
+// ── Sleep "zzz" effect visibility ─────────────────────────────────
+const localShowZzz = ref<boolean>(config.value.showZzz)
+
+watch(() => config.value.showZzz, v => { localShowZzz.value = v })
+
+async function toggleZzz() {
+  await updateConfig({ showZzz: localShowZzz.value })
+}
+
 // ── Search engine (chat search-enhancement) ───────────────────────
 type EngineLabelKey = 'duckduckgo' | 'bingCn' | 'bing' | 'google' | 'baidu'
 const ENGINE_OPTIONS: { key: SearchEngineKey; labelKey: EngineLabelKey }[] = [
@@ -601,6 +610,20 @@ onMounted(async () => {
               type="checkbox"
               v-model="localShowMusic"
               @change="toggleMusic"
+            />
+            <span class="thumb" />
+          </label>
+        </div>
+
+        <!-- Sleep "zzz" effect visibility -->
+        <div class="field-row" style="margin-top: 6px;">
+          <label for="zzz-toggle">{{ t.showZzz }}</label>
+          <label class="toggle">
+            <input
+              id="zzz-toggle"
+              type="checkbox"
+              v-model="localShowZzz"
+              @change="toggleZzz"
             />
             <span class="thumb" />
           </label>
