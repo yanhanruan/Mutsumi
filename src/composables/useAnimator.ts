@@ -32,6 +32,24 @@ export interface AnimationDef {
    * without changing the tick loop.
    */
   buildSequence?: (frames: HTMLImageElement[]) => HTMLImageElement[]
+  /**
+   * Anchored-hold ping-pong playback. When set, the clip does NOT run straight
+   * through: it drifts between the given `anchors`, freezing on each for a
+   * random [holdMinMs, holdMaxMs] before continuing to the next, and reverses
+   * direction at the first/last anchor — an endless, restful ping-pong:
+   *   anchors[0] → … → anchors[n-1] → … → anchors[0] → …
+   * Used by `sleep` (a small shift between long holds). Mutually exclusive with
+   * buildSequence.
+   */
+  holdCycle?: HoldCycle
+}
+
+/** Config for anchored-hold ping-pong playback (see AnimationDef.holdCycle). */
+export interface HoldCycle {
+  /** 1-based frame numbers, ascending. First/last are the turn-around points. */
+  anchors:   number[]
+  holdMinMs: number
+  holdMaxMs: number
 }
 
 export type AnimationName =
@@ -58,6 +76,38 @@ interface LoadedAnimation {
   frames:    HTMLImageElement[]
   fps:       number
   loop:      boolean
+  holdCycle?: ResolvedHoldCycle
+}
+
+/** A HoldCycle resolved to 0-based frame indices, computed once at preload. */
+export interface ResolvedHoldCycle {
+  anchors:   ReadonlySet<number>   // 0-based frame indices to hold on
+  first:     number                // lowest anchor index (reverses to fwd here)
+  last:      number                // highest anchor index (reverses to rev here)
+  holdMinMs: number
+  holdMaxMs: number
+}
+
+/** Uniform random number in [min, max). `rng` is injectable for tests. */
+export function randBetween(min: number, max: number, rng: () => number = Math.random): number {
+  return min + rng() * (max - min)
+}
+
+/**
+ * Convert a HoldCycle (1-based anchors) to ResolvedHoldCycle (0-based), dropping
+ * out-of-range anchors. Returns undefined when there is nothing usable to hold on.
+ */
+export function resolveHoldCycle(hc: HoldCycle | undefined, frameCount: number): ResolvedHoldCycle | undefined {
+  if (!hc) return undefined
+  const zero = hc.anchors.map(a => a - 1).filter(i => i >= 0 && i < frameCount)
+  if (zero.length === 0) return undefined
+  return {
+    anchors:   new Set(zero),
+    first:     Math.min(...zero),
+    last:      Math.max(...zero),
+    holdMinMs: hc.holdMinMs,
+    holdMaxMs: hc.holdMaxMs,
+  }
 }
 
 // ── Generic ping-pong sequence builder ─────────────────────────────
@@ -128,14 +178,13 @@ export const DEFAULT_ANIMATIONS: Record<AnimationName, AnimationDef> = {
   idle_low_affection: { dir: 'idle',           count: 426, fps: 24, loop: true  },
   idle_exhausted:     { dir: 'idle',           count: 426, fps: 24, loop: true  },
   // ─────────────────────────────────────────────────────────────────────
-  // ── Sleep (assets in progress) ──────────────────────────────────────────
-  // The sleeping animation is not authored yet. Drop the frame sequence into
-  // `public/assets/sleep/` (frame_001.webp … frame_NNN.webp) and bump `count`
-  // to the real frame total. Until then `count: 1` keeps preload to a single
-  // (currently-missing) request; paintFrame skips frames that failed to load,
-  // so entering sleep simply holds the last visible pose instead of flashing a
-  // broken image. `loop: true` so the rest state plays indefinitely.
-  sleep:               { dir: 'sleep',          count: 1,   fps: 12, loop: true  },
+  // ── Sleep ───────────────────────────────────────────────────────────────
+  // Anchored-hold ping-pong: drift 1→68→133→144→192 then back, resting on each
+  // anchor for ~5 min (+ a little jitter) before the next small shift. `loop` is
+  // moot under holdCycle (it never runs to the end) but kept true for safety.
+  sleep:               { dir: 'sleep',          count: 192, fps: 24, loop: true,
+                         holdCycle: { anchors: [1, 68, 133, 144, 192],
+                                      holdMinMs: 5 * 60_000, holdMaxMs: 5 * 60_000 + 45_000 } },
   click:               { dir: 'click_matched',  count: 156, fps: 24, loop: false },
   pat_head:            { dir: 'pat_head',       count: 192, fps: 24, loop: false },
   headphones_on:       { dir: 'headphones_on',  count: 185, fps: 24, loop: false },
@@ -195,6 +244,11 @@ export function useAnimator(
   let pendingAnim: AnimationName | null = null
   let lastFrameT  = 0
   let rafId       = 0
+  // Anchored-hold playback (holdCycle animations, e.g. sleep):
+  //   holdUntil > t → frozen on the current anchor until then.
+  //   holdDir       → ping-pong direction (+1 forward / -1 reverse).
+  let holdUntil   = 0
+  let holdDir     = 1
   // Which idle-variant to play. Updated by setIdleVariant() from pet-status events.
   let idleAnimName: AnimationName = 'idle'
 
@@ -259,7 +313,10 @@ export function useAnimator(
         .filter(([name]) => name !== 'idle')
         .map(async ([name, def]) => {
           const frames = await preloadAnim(def)
-          loaded.value = { ...loaded.value, [name]: { frames, fps: def.fps, loop: def.loop } }
+          loaded.value = { ...loaded.value, [name]: {
+            frames, fps: def.fps, loop: def.loop,
+            holdCycle: resolveHoldCycle(def.holdCycle, frames.length),
+          } }
         }),
     ])
   }
@@ -273,7 +330,12 @@ export function useAnimator(
     if (!def) return                 // not loaded yet — silently ignore
     currentName.value = name
     frameIx = 0
-    lastFrameT = performance.now()
+    const now = performance.now()
+    lastFrameT = now
+    // Arm anchored-hold playback: frame 0 is the first anchor, so start by
+    // resting there. Cleared (holdUntil = 0) for ordinary animations.
+    holdDir   = 1
+    holdUntil = def.holdCycle ? now + randBetween(def.holdCycle.holdMinMs, def.holdCycle.holdMaxMs) : 0
     paintFrame(def.frames[0])        // direct DOM write — no reactive overhead
   }
 
@@ -387,12 +449,45 @@ export function useAnimator(
     }
   }
 
+  // ── Anchored-hold ping-pong (holdCycle animations) ────────────
+  // Steps one frame per interval in the current direction; when it lands on an
+  // anchor it reverses at the ends and freezes for a random hold. Holds the
+  // clock while frozen so resuming never fires a catch-up burst.
+  function tickHoldCycle(def: LoadedAnimation, hc: ResolvedHoldCycle, t: number): void {
+    if (holdUntil > 0) {
+      if (t < holdUntil) { lastFrameT = t; return }   // still resting on the anchor
+      holdUntil = 0
+      lastFrameT = t
+      return                                          // resume stepping next tick
+    }
+
+    const interval = 1000 / def.fps
+    const elapsed  = t - lastFrameT
+    if (elapsed < interval) return
+    if (elapsed > interval * 2) lastFrameT = t
+    else                        lastFrameT += interval
+
+    frameIx += holdDir
+    if (frameIx < 0)                       frameIx = 0
+    else if (frameIx >= def.frames.length) frameIx = def.frames.length - 1
+    paintFrame(def.frames[frameIx])
+
+    if (hc.anchors.has(frameIx)) {
+      // Reverse at the turn-around anchors, then rest here.
+      if (frameIx >= hc.last)       holdDir = -1
+      else if (frameIx <= hc.first) holdDir = 1
+      holdUntil = t + randBetween(hc.holdMinMs, hc.holdMaxMs)
+    }
+  }
+
   // ── RAF loop ──────────────────────────────────────────────────
   function tick(t: number) {
     rafId = requestAnimationFrame(tick)
 
     const def = loaded.value[currentName.value]
     if (!def) return
+
+    if (def.holdCycle) { tickHoldCycle(def, def.holdCycle, t); return }
 
     const interval = 1000 / def.fps
     const elapsed  = t - lastFrameT
