@@ -15,14 +15,15 @@
 <p align="center">
   <a href="#mutsumi--桌面陪伴宠物-中文"><b>中文</b></a> | <a href="#mutsumi--desktop-companion-english"><b>English</b></a>
 </p>
-
 <table align="center">
   <tr>
     <td align="center"><img src="docs/images/idle.avif"    width="200" alt="Mutsumi idle" /><br/><sub>🌿 静静陪伴 · just hanging out</sub></td>
     <td align="center"><img src="docs/images/headpat.avif" width="200" alt="Head pat" /><br/><sub>✋ 摸摸头 · head pat</sub></td>
     <td align="center"><img src="docs/images/tarot.avif"   width="200" alt="Tarot reading" /><br/><sub>🔮 塔罗占卜 · tarot reading</sub></td>
+    <td align="center"><img src="docs/images/sleeping.avif"   width="200" alt="Nap time" /><br/><sub>💤 小惬中 · Nap time</sub></td>
   </tr>
 </table>
+
 
 ---
 
