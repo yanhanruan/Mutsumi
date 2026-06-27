@@ -264,18 +264,16 @@ async fn build_messages(
         let conn = db.0.lock().map_err(db_err)?;
         // User-facts and Mutsumi's own memories are retrieved separately so both
         // surface (a turn about the user's job won't crowd out her promises).
-        let memories =
-            memory::search_subject(&conn, &query_embedding, MemorySubject::User, MEMORY_TOP_K, weights, ts)
-                .map_err(db_err)?;
-        let self_memories = memory::search_subject(
-            &conn,
-            &query_embedding,
-            MemorySubject::Mutsumi,
-            SELF_MEMORY_TOP_K,
-            weights,
-            ts,
-        )
-        .map_err(db_err)?;
+        // Served from the in-RAM embedding index (db.1) — the two scans below would
+        // otherwise each decode every embedding BLOB from disk.
+        let memories = db
+            .1
+            .search_subject(&conn, &query_embedding, MemorySubject::User, MEMORY_TOP_K, weights, ts)
+            .map_err(db_err)?;
+        let self_memories = db
+            .1
+            .search_subject(&conn, &query_embedding, MemorySubject::Mutsumi, SELF_MEMORY_TOP_K, weights, ts)
+            .map_err(db_err)?;
         let relationship = state::get_relationship(&conn).map_err(db_err)?;
         let profile = state::all_profile(&conn).map_err(db_err)?;
         (memories, self_memories, relationship, profile)

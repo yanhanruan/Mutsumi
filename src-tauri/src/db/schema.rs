@@ -8,7 +8,7 @@
 use rusqlite::Connection;
 
 /// The schema version this build expects. Equals the number of migration steps.
-pub const SCHEMA_VERSION: i32 = 5;
+pub const SCHEMA_VERSION: i32 = 6;
 
 /// V1 — the initial three-table design from the blueprint.
 const V1: &str = r#"
@@ -97,6 +97,16 @@ ALTER TABLE chat_messages ADD COLUMN kind TEXT NOT NULL DEFAULT 'text';
 ALTER TABLE chat_messages ADD COLUMN image_path TEXT;
 "#;
 
+/// V6 — covering index for the retrieval cache's freshness check.
+///   The in-memory embedding index ([`crate::db::index`]) validates itself each
+///   query with `SELECT COUNT(*), MAX(updated_at) FROM memories WHERE
+///   superseded = 0`. Indexing `(superseded, updated_at)` lets SQLite answer that
+///   straight from the index pages instead of scanning every (multi-KB-BLOB) row,
+///   so the freshness check stays sub-millisecond as the store grows.
+const V6: &str = r#"
+CREATE INDEX IF NOT EXISTS idx_memories_active ON memories(superseded, updated_at);
+"#;
+
 /// Apply all migrations newer than the connection's stored `user_version`.
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     let current: i32 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
@@ -115,6 +125,9 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     }
     if current < 5 {
         conn.execute_batch(V5)?;
+    }
+    if current < 6 {
+        conn.execute_batch(V6)?;
     }
 
     if current < SCHEMA_VERSION {
@@ -163,6 +176,36 @@ mod tests {
         let chat_cols = columns(&conn, "chat_messages");
         assert!(chat_cols.iter().any(|c| c == "kind")); // V5
         assert!(chat_cols.iter().any(|c| c == "image_path")); // V5
+        let v: i32 = conn
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(v, SCHEMA_VERSION);
+    }
+
+    fn index_exists(conn: &Connection, name: &str) -> bool {
+        conn.query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?1",
+            [name],
+            |_| Ok(()),
+        )
+        .optional()
+        .unwrap()
+        .is_some()
+    }
+
+    #[test]
+    fn v5_to_v6_adds_active_index() {
+        // A pre-V6 database (simulated through V5) gains the covering index.
+        let conn = Connection::open_in_memory().unwrap();
+        for step in [V1, V2, V3, V4, V5] {
+            conn.execute_batch(step).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 5).unwrap();
+        assert!(!index_exists(&conn, "idx_memories_active"));
+
+        migrate(&conn).unwrap();
+
+        assert!(index_exists(&conn, "idx_memories_active"));
         let v: i32 = conn
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();

@@ -152,31 +152,51 @@ fn client_or_skip() -> Option<QwenClient> {
 #[test]
 #[ignore = "benchmark"]
 fn bench_retrieval_latency() {
+    use crate::db::index::MemoryIndexCache;
+
     const ITERS: usize = 100;
-    println!("\n=== #1 Retrieval latency (in-Rust cosine; {DIM}-dim; full search() incl. top-K touch) ===");
-    for &n in &[1000usize, 5000, 10000] {
-        let path = temp_db(&format!("lat{n}"));
-        let conn = open_conn(&path).unwrap();
-        seed_random(&conn, n);
+    let w = RetrievalWeights::default();
 
-        // Warm the OS page cache.
-        let _ = memory::search(&conn, &random_embedding(7), 6, RetrievalWeights::default(), now());
-
+    // Time `ITERS` queries through `run` and print a p50/p95/mean/max line.
+    fn report(label: &str, n: usize, mut run: impl FnMut(&[f32])) {
+        // Warm-up (page cache for brute force; first index build for the cache).
+        run(&random_embedding(7));
         let mut times = Vec::with_capacity(ITERS);
         for it in 0..ITERS {
             let q = random_embedding(1_000 + it as u64);
             let t = Instant::now();
-            let _ = memory::search(&conn, &q, 6, RetrievalWeights::default(), now()).unwrap();
+            run(&q);
             times.push(t.elapsed().as_secs_f64() * 1000.0);
         }
         times.sort_by(|a, b| a.partial_cmp(b).unwrap());
         println!(
-            "N={n:>6}: p50={:>7.2}ms  p95={:>7.2}ms  mean={:>7.2}ms  max={:>7.2}ms",
+            "  {label:<22} N={n:>6}: p50={:>7.2}ms  p95={:>7.2}ms  mean={:>7.2}ms  max={:>7.2}ms",
             percentile(&times, 50.0),
             percentile(&times, 95.0),
             mean(&times),
             times.last().copied().unwrap_or(0.0),
         );
+    }
+
+    println!("\n=== #1 Retrieval latency ({DIM}-dim; full search() incl. top-K fetch + touch) ===");
+    println!("(before = brute-force scan+decode every query; after = cached SIMD index)");
+    for &n in &[1000usize, 5000, 10000] {
+        let path = temp_db(&format!("lat{n}"));
+        let conn = open_conn(&path).unwrap();
+        seed_random(&conn, n);
+
+        // Before: the original brute-force path (re-decodes all BLOBs each query).
+        report("before (brute-force)", n, |q| {
+            let _ = memory::search(&conn, q, 6, w, now()).unwrap();
+        });
+
+        // After: the in-RAM SIMD index. Built once on the first (warm-up) call;
+        // every subsequent query is served from cache (fingerprint is stable).
+        let cache = MemoryIndexCache::default();
+        report("after  (cached SIMD)", n, |q| {
+            let _ = cache.search(&conn, q, 6, w, now()).unwrap();
+        });
+
         drop(conn);
         cleanup(&path);
     }
@@ -433,6 +453,359 @@ async fn bench_long_term_consistency() {
         hits,
         trials,
     );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// S1 Search intent-gate precision / recall (offline)
+// ════════════════════════════════════════════════════════════════════
+// Hand-labeled messages. `true` = answering well needs a live web lookup
+// (current events / prices / weather / schedules / explicit search request);
+// `false` = chit-chat, emotional, persona, or a fixed fact she already knows.
+// Deliberately includes the hard cases: casual messages that happen to contain
+// a time/info word (现在/今天/演唱会 …) and the 检查/调查/审查/搜罗 negatives that
+// embed 查/搜, plus keyword-less factual questions the keyword gate cannot see.
+const INTENT_LABELS: &[(&str, bool)] = &[
+    // ── should trigger (need fresh/external info) ──────────────────────
+    ("帮我查一下明天东京的天气", true),
+    ("搜索最近的 Ave Mujica 演唱会安排", true),
+    ("现在美元对人民币的汇率是多少", true),
+    ("今天有什么国际新闻", true),
+    ("比特币今天的价格是多少", true),
+    ("iPhone 16 的发布日期是什么时候", true),
+    ("查查上海到北京的高铁票价", true),
+    ("最新的 macOS 版本号是多少", true),
+    ("2025-06-01 上映了哪些电影", true),
+    ("帮我搜一下附近好吃的拉面店", true),
+    ("目前 A 股大盘的行情怎么样", true),
+    ("今天的英超比赛比分出来了吗", true),
+    ("查一下这周的黄金价格走势", true),
+    ("特斯拉股价现在多少", true),
+    ("明天会下雨吗", true),
+    ("英伟达最新显卡的售价", true),
+    ("今日金价多少一克", true),
+    ("帮我查下我的快递到哪了", true),
+    ("what's the latest news about the election", true),
+    ("today's weather in Osaka please", true),
+    // keyword-less factual queries — the gate has no cue for these (expected misses):
+    ("谁是现任的日本首相", true),
+    ("最近油价又涨了吗", true),
+    ("英伟达的市值超过苹果了吗", true),
+    // ── should NOT trigger (chat / emotion / persona / fixed knowledge) ─
+    ("你在做什么呢", false),
+    ("我有点累了，想靠你休息一下", false),
+    ("谢谢你一直陪着我", false),
+    ("你最喜欢吃什么甜点", false),
+    ("你能记住我说过的话吗", false),
+    ("讲个笑话给我听好不好", false),
+    ("你觉得我该学钢琴还是吉他", false),
+    ("我对这个世界总是充满好奇", false),
+    ("你会一直在我身边吗", false),
+    ("我最近压力好大，有点喘不过气", false),
+    // hard negatives — embed 查/搜 inside other words, must not trigger:
+    ("帮我检查一下这段代码有没有 bug", false),
+    ("我们公司最近在做一个用户调查问卷", false),
+    ("这件事得好好审查一下才行", false),
+    ("搜罗了半天也没找到合适的礼物", false),
+    ("好好调查一下他到底喜不喜欢我", false),
+    // hard negatives — casual messages that happen to contain a time/info word:
+    ("我今天心情不太好", false),
+    ("昨天我梦到你了", false),
+    ("我其实挺喜欢看演唱会的", false),
+    ("晚安，明天见啦", false),
+    ("你今天看起来特别开心", false),
+];
+
+#[test]
+#[ignore = "benchmark"]
+fn bench_intent_gate() {
+    use crate::search::trigger::needs_search;
+
+    let (mut tp, mut fp, mut tn, mut fn_) = (0usize, 0usize, 0usize, 0usize);
+    let mut wrong: Vec<String> = Vec::new();
+    for &(msg, want) in INTENT_LABELS {
+        let got = needs_search(msg);
+        match (want, got) {
+            (true, true) => tp += 1,
+            (false, true) => {
+                fp += 1;
+                wrong.push(format!("  FP (fired, shouldn't): {msg}"));
+            }
+            (true, false) => {
+                fn_ += 1;
+                wrong.push(format!("  FN (missed, should):   {msg}"));
+            }
+            (false, false) => tn += 1,
+        }
+    }
+    let n = INTENT_LABELS.len();
+    let precision = if tp + fp == 0 { 0.0 } else { tp as f64 / (tp + fp) as f64 };
+    let recall = if tp + fn_ == 0 { 0.0 } else { tp as f64 / (tp + fn_) as f64 };
+    let f1 = if precision + recall == 0.0 {
+        0.0
+    } else {
+        2.0 * precision * recall / (precision + recall)
+    };
+    let accuracy = (tp + tn) as f64 / n as f64;
+
+    println!("\n=== S1 Search intent-gate precision / recall ({n} labeled messages) ===");
+    println!("confusion: TP={tp}  FP={fp}  TN={tn}  FN={fn_}");
+    println!(
+        "precision={precision:.3}  recall={recall:.3}  F1={f1:.3}  accuracy={accuracy:.3}"
+    );
+    if !wrong.is_empty() {
+        println!("misclassified:");
+        for w in &wrong {
+            println!("{w}");
+        }
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════
+// P1a World-facts grounding — does the WORLD_FACTS block ground own-world facts (live)
+// ════════════════════════════════════════════════════════════════════
+// A/B isolating the WORLD_FACTS block. The control is a TRUE no-world-facts
+// baseline: the character docs (which themselves spell out the rosters) are
+// stripped too, so "without WORLD_FACTS" can't leak the answer via
+// character_analysis.md / soul.md. Only the WORLD_FACTS block differs between
+// the two conditions (persona::ab_prompt(false, false) vs (false, true)).
+//
+// 30 single-answer questions in three bands:
+//   roster (18) — instruments / who-plays-what; spelled out in WORLD_FACTS.
+//   stage  (6)  — each member's Ave Mujica code name (Mortis/Oblivionis/…) +
+//                 the leader; also in WORLD_FACTS.
+//   plot   (6)  — deeper story facts (CRYCHIC's founding, MyGO's formation,
+//                 Soyo's path, the Mutsumi–Sakiko childhood bond) that WORLD_FACTS
+//                 does NOT contain — so they probe the block's coverage boundary
+//                 (neither condition is grounded; both lean on pretraining).
+// Each entry: (question, accepted-substrings, category).
+const WORLD_FACTS_QA: &[(&str, &[&str], &str)] = &[
+    // ── roster (covered by WORLD_FACTS) ───────────────────────────────
+    ("Ave Mujica 里谁担任贝斯？", &["八幡海铃", "海铃"], "roster"),
+    ("Ave Mujica 的鼓手是谁？", &["祐天寺", "にゃむ", "尼亚姆", "娜姆"], "roster"),
+    ("Ave Mujica 的主唱是谁？", &["三角初华", "初华"], "roster"),
+    ("Ave Mujica 的键盘手是谁？", &["丰川祥子", "祥子"], "roster"),
+    ("你在 Ave Mujica 里弹什么乐器？", &["吉他"], "roster"),
+    ("MyGO 的贝斯手是谁？", &["长崎素世", "素世", "爽世"], "roster"),
+    ("MyGO 的主唱是谁？", &["高松灯", "高松", "灯"], "roster"),
+    ("MyGO 里谁打鼓？", &["椎名立希", "立希"], "roster"),
+    ("要乐奈在 MyGO 里弹什么乐器？", &["吉他"], "roster"),
+    ("千早爱音在 MyGO 里担任什么乐器？", &["吉他"], "roster"),
+    ("CRYCHIC 的键盘手是谁？", &["丰川祥子", "祥子"], "roster"),
+    ("解散前的 CRYCHIC 里你弹什么乐器？", &["吉他"], "roster"),
+    ("CRYCHIC 的贝斯手是谁？", &["长崎素世", "素世", "爽世"], "roster"),
+    ("CRYCHIC 的鼓手是谁？", &["椎名立希", "立希"], "roster"),
+    ("CRYCHIC 的主唱是谁？", &["高松灯", "高松", "灯"], "roster"),
+    ("椎名立希在乐队里负责什么乐器？", &["鼓"], "roster"),
+    ("长崎素世弹的是什么乐器？", &["贝斯"], "roster"),
+    ("八幡海铃负责什么乐器？", &["贝斯"], "roster"),
+    // ── stage codes + leader (covered by WORLD_FACTS) ─────────────────
+    ("你在 Ave Mujica 的角色代号是什么？", &["Mortis", "mortis"], "stage"),
+    ("丰川祥子在 Ave Mujica 的角色代号是什么？", &["Oblivionis", "oblivionis"], "stage"),
+    ("三角初华在 Ave Mujica 的角色代号是什么？", &["Doloris", "doloris"], "stage"),
+    ("八幡海铃在 Ave Mujica 的角色代号是什么？", &["Timoris", "timoris"], "stage"),
+    ("祐天寺にゃむ在 Ave Mujica 的角色代号是什么？", &["Amoris", "amoris"], "stage"),
+    ("Ave Mujica 的队长是谁？", &["丰川祥子", "祥子"], "stage"),
+    // ── deeper plot (NOT in WORLD_FACTS; coverage-boundary probe) ──────
+    ("在加入 Ave Mujica 之前，你曾经属于哪支乐队？", &["CRYCHIC"], "plot"),
+    ("CRYCHIC 这支乐队最初是由谁主导组建的？", &["丰川祥子", "祥子"], "plot"),
+    ("CRYCHIC 解散后，高松灯组建了哪支新乐队？", &["MyGO"], "plot"),
+    ("长崎素世在加入 MyGO 之前，原本属于哪支乐队？", &["CRYCHIC"], "plot"),
+    ("你（睦）和丰川祥子从小相识，这种关系通常被称作什么？", &["青梅竹马", "儿时", "从小", "发小"], "plot"),
+    ("Ave Mujica 这支乐队是由谁重新组建并担任队长的？", &["丰川祥子", "祥子"], "plot"),
+];
+
+/// Ask one question with `system`, retrying on an empty/errored reply so a
+/// transient blip never masquerades as a factual miss. Returns (graded-correct, reply).
+async fn ask_graded(
+    qwen: &QwenClient,
+    system: &str,
+    q: &str,
+    accepted: &[&str],
+    opts: &ChatOptions,
+) -> (bool, String) {
+    let messages = vec![ChatMessage::system(system.to_string()), ChatMessage::user(q)];
+    let mut reply = String::new();
+    for attempt in 0..3 {
+        reply = qwen
+            .chat(&messages, None, opts.clone())
+            .await
+            .ok()
+            .and_then(|c| c.message.content)
+            .unwrap_or_default();
+        if !reply.trim().is_empty() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(600 * (attempt + 1))).await;
+    }
+    // Case-insensitive so Latin code names match regardless of capitalization
+    // ("myGO" == "MyGO", "mortis" == "Mortis"); a no-op for the Chinese names.
+    let lower = reply.to_lowercase();
+    let ok = accepted.iter().any(|a| lower.contains(&a.to_lowercase()));
+    (ok, reply)
+}
+
+#[tokio::test]
+#[ignore = "live benchmark"]
+async fn bench_world_facts_grounding() {
+    let Some(qwen) = client_or_skip() else { return };
+    let n = WORLD_FACTS_QA.len();
+    println!("\n=== P1a World-facts grounding ({n} questions; control = NO docs, NO world-facts) ===");
+
+    let opts = ChatOptions { temperature: Some(0.0), ..Default::default() };
+    // Both conditions strip the character docs; they differ ONLY by WORLD_FACTS.
+    let control_sys = crate::persona::ab_prompt(false, false);
+    let treat_sys = crate::persona::ab_prompt(false, true);
+
+    let cat_idx = |c: &str| match c {
+        "roster" => 0,
+        "stage" => 1,
+        _ => 2,
+    };
+    let mut cat_n = [0usize; 3];
+    let mut c_cat = [0usize; 3]; // control correct by category
+    let mut t_cat = [0usize; 3]; // treatment correct by category
+    let (mut c_total, mut t_total) = (0usize, 0usize);
+
+    for (q, accepted, cat) in WORLD_FACTS_QA {
+        let i = cat_idx(cat);
+        cat_n[i] += 1;
+        let (c_ok, c_reply) = ask_graded(&qwen, &control_sys, q, accepted, &opts).await;
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        let (t_ok, t_reply) = ask_graded(&qwen, &treat_sys, q, accepted, &opts).await;
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+        if c_ok {
+            c_cat[i] += 1;
+            c_total += 1;
+        }
+        if t_ok {
+            t_cat[i] += 1;
+            t_total += 1;
+        }
+        let mark = |ok: bool| if ok { "✓" } else { "✗" };
+        println!("\n[{cat}] {q}");
+        println!("   control {} : {}", mark(c_ok), c_reply.replace('\n', " ").trim());
+        println!("   +WORLD  {} : {}", mark(t_ok), t_reply.replace('\n', " ").trim());
+    }
+
+    let pct = |x: usize, d: usize| if d == 0 { 0.0 } else { 100.0 * x as f64 / d as f64 };
+    println!("\n--- summary (correct / total) ---");
+    println!(
+        "CONTROL  (no docs, no world-facts):  overall {c_total}/{n} ({:.0}%)  | roster {}/{}  stage {}/{}  plot {}/{}",
+        pct(c_total, n),
+        c_cat[0], cat_n[0], c_cat[1], cat_n[1], c_cat[2], cat_n[2],
+    );
+    println!(
+        "TREATMENT (+WORLD_FACTS block):      overall {t_total}/{n} ({:.0}%)  | roster {}/{}  stage {}/{}  plot {}/{}",
+        pct(t_total, n),
+        t_cat[0], cat_n[0], t_cat[1], cat_n[1], t_cat[2], cat_n[2],
+    );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// S2 Answer correctness with vs without search (live; real scraping)
+// ════════════════════════════════════════════════════════════════════
+// Time-sensitive questions whose honest answer needs fresh data the model's
+// training cutoff can't provide. A couple of stable past-fact controls are
+// included (search shouldn't be needed). Measured with a neutral assistant
+// prompt so the result isolates the *search subsystem's* contribution, not
+// Mutsumi's in-character "out-of-my-world" deflection.
+const TIME_SENSITIVE_Q: &[&str] = &[
+    "今天东京的天气怎么样？",
+    "今天上海的天气如何？",
+    "现在 1 美元大约兑换多少人民币？",
+    "现在 1 欧元大约兑换多少日元？",
+    "比特币现在的价格大概是多少美元？",
+    "黄金现在每克大概多少人民币？",
+    "最新的稳定版 Node.js 版本号是多少？",
+    "目前最新的正式版 Python 是哪个版本？",
+    "现任的英国首相是谁？",
+    "现任的日本首相是谁？",
+    "最新一代 iPhone 是哪一款？",
+    "最近有什么重大的国际新闻？",
+    "现在国际油价（布伦特原油）大约多少美元一桶？",
+    // stable past-fact controls — the model should already know these:
+    "2022 年世界杯的冠军是哪个国家？",
+    "珠穆朗玛峰的海拔高度是多少米？",
+];
+
+/// Hedge / "I can't get current info" markers — counted as the model declining
+/// to give a concrete answer (heuristic; full replies are printed for grading).
+fn is_hedge(reply: &str) -> bool {
+    const HEDGES: &[&str] = &[
+        "无法获取", "无法提供", "无法获知", "无法实时", "没有实时", "不掌握实时",
+        "我的知识", "知识截至", "知识更新", "截至我", "训练数据", "可能已过时",
+        "可能过时", "建议你查", "建议查询", "建议通过", "请查询", "请以官方",
+        "实时信息", "实时数据", "无法访问", "不知道",
+    ];
+    HEDGES.iter().any(|h| reply.contains(h))
+}
+
+#[tokio::test]
+#[ignore = "live benchmark"]
+async fn bench_search_correctness() {
+    use crate::search::{format_context, search, SearchClient, SearchEngine};
+
+    let Some(qwen) = client_or_skip() else { return };
+    let client = SearchClient::new().unwrap();
+    let engine = SearchEngine::default();
+    let neutral = "你是一个严谨的助手，用一到两句话如实、简洁地回答用户的问题。如果你的知识可能已经过时、或你无法获知实时/最新信息，必须明确说明，绝不要编造具体数字或事实。";
+    let opts = ChatOptions { temperature: Some(0.0), ..Default::default() };
+
+    println!("\n=== S2 Answer correctness without vs with search ({} questions) ===", TIME_SENSITIVE_Q.len());
+    let (mut off_concrete, mut on_concrete, mut search_hit) = (0usize, 0usize, 0usize);
+    for q in TIME_SENSITIVE_Q {
+        // OFF — model only.
+        let off = qwen
+            .chat(&[ChatMessage::system(neutral), ChatMessage::user(*q)], None, opts.clone())
+            .await
+            .ok()
+            .and_then(|c| c.message.content)
+            .unwrap_or_default();
+
+        // Retrieve, then ON — model + injected real-time context (the app's path).
+        let results = search(&client, engine, q).await;
+        let ctx = (!results.is_empty()).then(|| format_context(q, &results));
+        if ctx.is_some() {
+            search_hit += 1;
+        }
+        let on_msgs = match &ctx {
+            Some(c) => vec![
+                ChatMessage::system(neutral),
+                ChatMessage::system(c.clone()),
+                ChatMessage::user(*q),
+            ],
+            None => vec![ChatMessage::system(neutral), ChatMessage::user(*q)],
+        };
+        let on = qwen
+            .chat(&on_msgs, None, opts.clone())
+            .await
+            .ok()
+            .and_then(|c| c.message.content)
+            .unwrap_or_default();
+
+        if !is_hedge(&off) {
+            off_concrete += 1;
+        }
+        if !is_hedge(&on) {
+            on_concrete += 1;
+        }
+        println!("\nQ: {q}   [search {}]", if ctx.is_some() { "HIT" } else { "MISS" });
+        println!("  OFF: {}", off.replace('\n', " ").trim());
+        println!("  ON : {}", on.replace('\n', " ").trim());
+
+        // Be gentle on the scraped engine.
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+    }
+    let n = TIME_SENSITIVE_Q.len();
+    println!("\n--- summary ---");
+    println!("search hit rate (context returned):  {search_hit}/{n}");
+    // NOTE: this is a crude lower bound — the model appends "verify with a
+    // realtime source" caveats even to correct grounded answers, so a reply can
+    // be both concrete AND flagged here. Grade correctness from the transcripts
+    // above, not from this number alone.
+    println!("no explicit-uncertainty marker (OFF): {off_concrete}/{n}");
+    println!("no explicit-uncertainty marker (ON):  {on_concrete}/{n}");
 }
 
 // ════════════════════════════════════════════════════════════════════
