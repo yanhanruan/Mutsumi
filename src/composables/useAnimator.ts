@@ -149,6 +149,17 @@ export const DEFAULT_ANIMATIONS: Record<AnimationName, AnimationDef> = {
                          buildSequence: f => buildPingPongSequence(f, 105, 161, odd(13)) },
 }
 
+// ── Sleep crossfade ─────────────────────────────────────────────────
+/**
+ * Duration of the idle↔sleep sprite crossfade, in ms. enterSleep/exitSleep
+ * dip `spriteOpacity` to 0, swap the frame set, then raise it back to 1. The
+ * matching CSS `transition: opacity` lives on the <img> in PetWindow — keep
+ * the two values in sync.
+ */
+export const SLEEP_FADE_MS = 220
+
+const waitMs = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
+
 // ── Composable ─────────────────────────────────────────────────────
 
 /**
@@ -173,6 +184,11 @@ export function useAnimator(
   // can leave it. See enterSleep / exitSleep and the guards on setAnim /
   // queueAnim below.
   const sleeping    = ref(false)
+  // Sprite opacity, driving the idle↔sleep crossfade. The animator owns this
+  // transition since it owns the <img>'s frame swaps; PetWindow just binds it.
+  // Written only on sleep enter/exit (not the hot path), so plain reactivity
+  // is fine.
+  const spriteOpacity = ref(1)
 
   // Internal state (not reactive — touched 60+ times/sec)
   let frameIx     = 0
@@ -283,24 +299,34 @@ export function useAnimator(
 
   // ── Sleep (max-priority rest state) ───────────────────────────
   /**
-   * Enter the rest state. Drops any pending animation and switches to the
-   * sleep loop immediately. Once set, only exitSleep() can leave it — see the
-   * guards on setAnim / queueAnim. Safe to call when already sleeping.
+   * Enter the rest state. Fades the sprite out, swaps to the sleep loop, then
+   * fades back in — so the idle→sleep switch dips through transparent instead
+   * of hard-cutting. Drops any pending animation. Once set, only exitSleep()
+   * can leave it — see the guards on setAnim / queueAnim. No-op if already
+   * sleeping.
    */
-  function enterSleep() {
+  async function enterSleep() {
+    if (sleeping.value) return
+    spriteOpacity.value = 0
+    await waitMs(SLEEP_FADE_MS)
     sleeping.value = true
     pendingAnim = null
     applyAnim('sleep')
+    spriteOpacity.value = 1
   }
 
   /**
-   * Leave the rest state and fall back to the current idle variant. Safe to
-   * call when not sleeping.
+   * Leave the rest state and fall back to the current idle variant, with the
+   * same dip-to-transparent crossfade. No-op if not sleeping.
    */
-  function exitSleep() {
+  async function exitSleep() {
+    if (!sleeping.value) return
+    spriteOpacity.value = 0
+    await waitMs(SLEEP_FADE_MS)
     sleeping.value = false
     pendingAnim = null
     applyAnim(idleAnimName)
+    spriteOpacity.value = 1
   }
 
   /** Read the currently-pending animation (if any). */
@@ -402,6 +428,7 @@ export function useAnimator(
     currentName,
     ready,
     sleeping,
+    spriteOpacity,
     queueAnim,
     setAnim,
     enterSleep,

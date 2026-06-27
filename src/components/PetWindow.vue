@@ -43,6 +43,7 @@ const {
   currentName,
   ready,
   sleeping,
+  spriteOpacity,
   queueAnim,
   setAnim,
   enterSleep,
@@ -247,33 +248,19 @@ async function closeSysState() {
 }
 
 // ── Sleep mode ─────────────────────────────────────────────────────
-// `sleeping` (from useAnimator) is the single source of truth. Entering sleep
-// also nudges the backend pet state (energy restores while resting) and shows
-// the rest-state bubble; waking just returns to the idle variant.
-//
-// The sprite is faded out before the animation swaps and faded back in after,
-// so the idle→sleep (and sleep→idle) transition dips through transparent
-// instead of hard-cutting between two unrelated poses.
-const SLEEP_FADE_MS = 220
-const spriteOpacity = ref(1)
-const wait = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
-
+// `sleeping` (from useAnimator) is the single source of truth. The animator
+// owns the idle↔sleep frame swap and its crossfade (enterSleep/exitSleep);
+// PetWindow only layers the app-level reactions: a backend energy nudge and
+// the rest-state bubble on the way in.
 async function sleepPet() {
   if (sleeping.value) return
-  spriteOpacity.value = 0
-  await wait(SLEEP_FADE_MS)
-  enterSleep()
+  await enterSleep()
   void invoke('pet_context_action', { action: 'sleep' })
-  spriteOpacity.value = 1
   bubbleRef.value?.show(t.value.contextResponses.sleep)
 }
 
 async function wakePet() {
-  if (!sleeping.value) return
-  spriteOpacity.value = 0
-  await wait(SLEEP_FADE_MS)
-  exitSleep()
-  spriteOpacity.value = 1
+  await exitSleep()
 }
 
 function toggleSleep() {
@@ -475,8 +462,9 @@ onUnmounted(() => {
   display: block;
   pointer-events: none;
   -webkit-user-drag: none;
-  /* Soft dip-to-transparent crossfade when entering/leaving sleep. Kept in
-     sync with SLEEP_FADE_MS in the script. */
+  /* Soft dip-to-transparent crossfade when entering/leaving sleep, driven by
+     the animator's spriteOpacity. Keep in sync with SLEEP_FADE_MS in
+     useAnimator.ts. */
   transition: opacity 220ms ease;
 }
 .bubble-anchor {

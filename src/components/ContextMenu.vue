@@ -8,6 +8,7 @@
  */
 import { ref, computed, watch, nextTick } from 'vue'
 import { useI18n } from '../i18n'
+import type { Translations } from '../i18n/types'
 import { useAppConfig } from '../composables/useAppConfig'
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -16,15 +17,25 @@ export type ContextActionKey = 'pat_head' | 'feed' | 'sleep' | 'fast_learning'
 /** 'tarot', 'chat' and 'hide' are frontend-only actions (no backend command). */
 export type MenuAction = ContextActionKey | 'tarot' | 'sys_state' | 'chat' | 'hide'
 
+type MenuLabelKey = keyof Translations['contextMenuItems']
+
 interface BubbleDef {
   action: MenuAction
   icon:   string
+  /**
+   * Alternate icon + label shown while the pet is asleep, turning the bubble
+   * into a toggle. Today only `sleep` uses it (💤/Sleep → ☀️/Wake Up); kept
+   * as data so any future toggle bubble can opt in without touching render
+   * logic.
+   */
+  sleepingIcon?:     string
+  sleepingLabelKey?: MenuLabelKey
 }
 
 const BUBBLE_DEFS: BubbleDef[] = [
   { action: 'pat_head',      icon: '✋' },
   { action: 'feed',          icon: '🍵' },
-  { action: 'sleep',         icon: '💤' },
+  { action: 'sleep',         icon: '💤', sleepingIcon: '☀️', sleepingLabelKey: 'wake' },
   { action: 'fast_learning', icon: '📚' },
   { action: 'tarot',         icon: '🔮' },
   { action: 'sys_state',     icon: '🖥️' },
@@ -60,11 +71,14 @@ const skipLeave     = ref(false)
 
 const items = computed(() =>
   BUBBLE_DEFS.map(b => {
-    // While she's asleep the sleep bubble becomes a "wake up" toggle.
-    if (b.action === 'sleep' && props.sleeping) {
-      return { ...b, icon: '☀️', label: t.value.contextMenuItems.wake }
+    // A bubble with a sleeping-state alternate flips icon + label while asleep.
+    const asleep   = props.sleeping && !!b.sleepingIcon
+    const labelKey: MenuLabelKey = asleep && b.sleepingLabelKey ? b.sleepingLabelKey : b.action
+    return {
+      action: b.action,
+      icon:   asleep ? b.sleepingIcon! : b.icon,
+      label:  t.value.contextMenuItems[labelKey],
     }
-    return { ...b, label: t.value.contextMenuItems[b.action] }
   })
 )
 
