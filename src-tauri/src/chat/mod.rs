@@ -35,7 +35,7 @@ use crate::db::memory::{self, MemorySubject, RetrievalWeights};
 use crate::db::{now, state, Db};
 use crate::http::ApiError;
 use crate::persona;
-use crate::search::{self, trigger, SearchState};
+use crate::search::{self, live_weather, trigger, SearchState};
 use crate::services::qwen::{ChatMessage, ChatOptions, QwenClient};
 use crate::services::QwenState;
 
@@ -241,17 +241,32 @@ async fn build_messages(
     // flaky engine can never stall the turn — on timeout we just proceed
     // without web context.
     let search_fut = async {
-        if search.enabled() && trigger::needs_search(message) {
-            let results = tokio::time::timeout(
+        if !search.enabled() || !trigger::needs_search(message) {
+            return None;
+        }
+        // Weather questions are answered from a structured weather service, not
+        // by scraping a search engine: SERPs are JS-rendered SPAs behind anti-bot
+        // defences, so the static client gets blank / HTTP-202 challenge pages —
+        // the v1.3.0 "city not supported" bug. Generic search is the fallback.
+        if let Some(city) = live_weather::parse_weather_query(message) {
+            let weather = tokio::time::timeout(
                 SEARCH_BUDGET,
-                search::search(&search.client, search.engine(), message),
+                live_weather::fetch_weather_context(search.client.http(), message, &city),
             )
             .await
-            .unwrap_or_default();
-            (!results.is_empty()).then(|| search::format_context(message, &results))
-        } else {
-            None
+            .ok()
+            .flatten();
+            if weather.is_some() {
+                return weather;
+            }
         }
+        let results = tokio::time::timeout(
+            SEARCH_BUDGET,
+            search::search(&search.client, search.engine(), message),
+        )
+        .await
+        .unwrap_or_default();
+        (!results.is_empty()).then(|| search::format_context(message, &results))
     };
 
     let (search_context, embed_result) = tokio::join!(search_fut, qwen.embed(message));

@@ -41,7 +41,7 @@ Mutsumi 是一个静静住在你屏幕角落的小伙伴。
 
 🎧 **全局音频感知（无需配置）**：当你开始播放音乐或看视频时，她会立刻戴上耳机跟着节奏晃动；声音停止，她会摘下耳机恢复平静。
 
-🎵 **迷你音乐控制器**：右下角常驻一个会随音乐律动的音响小图标。悬停即可展开控制面板——播放 / 暂停、上一首 / 下一首、快进 / 快退 10 秒、重播、系统音量与静音，并显示当前曲目、歌手和播放进度，点击或拖动进度条即可跳转到任意位置。当多个应用同时在播放时，还能切换音源并自动跟随最新的播放会话。基于 Windows 系统媒体控件（SMTC），能控制任何正在播放的应用：Spotify、网易云音乐、浏览器等。可在设置中随时开关。
+🎵 **迷你音乐控制器**：右下角常驻一个会随音乐律动的音响小图标。悬停即可展开控制面板——播放 / 暂停、上一首 / 下一首、快进 / 快退 10 秒、重播、系统音量与静音，并显示当前曲目、歌手和播放进度，点击或拖动进度条即可跳转到任意位置。当多个应用同时在播放时，还能切换音源并自动跟随最新的播放会话。基于 Windows 系统媒体控件（SMTC），能控制任何正在播放的应用：Spotify、网易云音乐、浏览器等（建议下载最新版本）。可在设置中随时开关。
 
 <p align="center"><img src="docs/images/music-controller.avif" width="100%" alt="music controller" /></p>
 
@@ -203,7 +203,7 @@ Mutsumi is a quiet little companion living in the corner of your screen. She min
  Start playing music or a video, and she'll instantly put on her headphones and groove along to the beat. When the audio stops, she'll take them off and quietly return to idle.
 
 🎵 **Mini Music Controller**
- A little speaker icon sits in the bottom-right corner and pulses along with your audio. Hover to expand a control panel — play/pause, previous/next, skip ±10s, replay, plus system volume and mute — alongside the current track, artist, and a progress bar you can click or drag to seek. When multiple apps are playing at once, switch between sources or let it auto-follow whichever one is most active. Built on Windows System Media Transport Controls (SMTC), so it drives anything that's playing: Spotify, NetEase Cloud Music, browser media, and more. Toggle it anytime from Settings.
+ A little speaker icon sits in the bottom-right corner and pulses along with your audio. Hover to expand a control panel — play/pause, previous/next, skip ±10s, replay, plus system volume and mute — alongside the current track, artist, and a progress bar you can click or drag to seek. When multiple apps are playing at once, switch between sources or let it auto-follow whichever one is most active. Built on Windows System Media Transport Controls (SMTC), so it drives anything that's playing: Spotify, NetEase Cloud Music, browser media, and more (Update to the latest version). Toggle it anytime from Settings.
 
 <p align="center"><img src="docs/images/music-controller.avif" width="100%" alt="music controller" /></p>
 
@@ -235,7 +235,7 @@ Mutsumi is a quiet little companion living in the corner of your screen. She min
   All conversations are stored locally and organized into a continuous timeline, similar to WeChat, iMessage, or other modern messaging apps. Browse past chats by keyword or date, automatically load older messages as you scroll, and view conversations grouped by time.
 
 * 🔍 **Enhanced Search**
-  Mutsumi can keep up with the world outside, too. A built-in lightweight search system allows her to access real-time information such as trending topics, Ave Mujica news, weather updates, and more. Compared with relying solely on an LLM's built-in search agent, this approach is faster, more cost-efficient, and more focused.
+  Mutsumi can keep up with the world outside, too. A built-in lightweight search system allows her to access real-time information such as trending topics, Ave Mujica news, weather updates (explicit search required), and more. Compared with relying solely on an LLM's built-in search agent, this approach is faster, more cost-efficient, and more focused.
 
 * 🖼️ **Image Understanding**
   Mutsumi can understand the photos you share. Whether it's a meal you cooked, your cat, or the rain outside your window, she'll respond in her own sincere and sometimes awkward way, helping you preserve the moments that matter.
