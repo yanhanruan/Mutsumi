@@ -229,7 +229,7 @@ Mutsumi is a quiet little companion living in the corner of your screen. She min
   All conversations are stored locally and organized into a continuous timeline, similar to WeChat, iMessage, or other modern messaging apps. Browse past chats by keyword or date, automatically load older messages as you scroll, and view conversations grouped by time.
 
 * 🔍 **Enhanced Search**
-  Mutsumi can keep up with the world outside, too. A built-in lightweight search system allows her to access real-time information such as trending topics, Ave Mujica news, weather updates, and more. Compared with relying solely on an LLM's built-in search agent, this approach is faster, more cost-efficient, and more focused.
+  Mutsumi can keep up with the world outside, too. A built-in lightweight search system allows her to access real-time information such as trending topics, Ave Mujica news, weather updates (explicit search required), and more. Compared with relying solely on an LLM's built-in search agent, this approach is faster, more cost-efficient, and more focused.
 
 * 🖼️ **Image Understanding**
   Mutsumi can understand the photos you share. Whether it's a meal you cooked, your cat, or the rain outside your window, she'll respond in her own sincere and sometimes awkward way, helping you preserve the moments that matter.
