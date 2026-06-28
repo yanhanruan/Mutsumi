@@ -15,7 +15,7 @@ const yohoUrl = 'https://github.com/yanhanruan'
 const mutsumiHeadUrl = 'https://github.com/qichengwang408-lab'
 const releasesUrl = 'https://github.com/yanhanruan/Mutsumi/releases'
 const sourceUrl = 'https://github.com/yanhanruan/Mutsumi'
-const appVersion = 'v1.3.1'
+const appVersion = 'v1.4.0'
 
 watch(
   () => config.value.language,
