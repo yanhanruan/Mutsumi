@@ -210,13 +210,12 @@ pub fn run() {
         cursor::spawn(app.handle().clone(), stop_flag);
       }
 
-      // TODO complete balloon implementation and re-enable this:
       // System idle monitor — emits `toggle-balloon-mode` events.
-      // {
-      //   let stop_flag = Arc::new(AtomicBool::new(false));
-      //   let _ = &stop_flag;
-      //   idle::spawn(app.handle().clone(), stop_flag);
-      // }
+      {
+        let stop_flag = Arc::new(AtomicBool::new(false));
+        let _ = &stop_flag;
+        idle::spawn(app.handle().clone(), stop_flag);
+      }
 
       // System state monitor is NOT started here: it runs only while the
       // System State panel is open (sys_monitor_start / _stop commands), so it
