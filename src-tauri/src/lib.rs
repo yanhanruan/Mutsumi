@@ -11,6 +11,7 @@ mod cursor;
 // allow dead_code across the module until those pipelines wire it up.
 #[allow(dead_code)]
 mod db;
+mod flight;
 mod hardware;
 mod http;
 mod idle;

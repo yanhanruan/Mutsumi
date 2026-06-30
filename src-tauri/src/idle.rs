@@ -98,6 +98,7 @@ fn run_loop(app: AppHandle, stop_flag: Arc<AtomicBool>) {
         if actual > overshoot_threshold {
             if last_active {
                 last_active = false;
+                crate::flight::set_active(&app, false);
                 let _ = app.emit("toggle-balloon-mode", BalloonModePayload { active: false });
             }
             continue;
@@ -110,6 +111,9 @@ fn run_loop(app: AppHandle, stop_flag: Arc<AtomicBool>) {
 
         if want_active != last_active {
             last_active = want_active;
+            // Start/stop the Rust-side window flight controller (flight.rs)
+            // alongside the frontend sprite toggle.
+            crate::flight::set_active(&app, want_active);
             let _ = app.emit(
                 "toggle-balloon-mode",
                 BalloonModePayload { active: want_active },
