@@ -28,8 +28,13 @@ use tauri::AppHandle;
 
 use engines::RawResult;
 
-/// Max SERP results carried forward into the prompt.
-const MAX_RESULTS: usize = 3;
+/// Max SERP results carried forward into the prompt. Kept small on purpose: the
+/// top two organic hits carry the answer, and extra rows are mostly noise that
+/// dilutes the model's focus (a wrong-answer symptom on e.g. weather queries).
+const MAX_RESULTS: usize = 2;
+/// Hard cap on a single snippet, so one verbose result can't crowd out the other
+/// or bury the actual datum in boilerplate.
+const MAX_SNIPPET_CHARS: usize = 220;
 
 /// The user-selectable search engine.
 ///
@@ -134,23 +139,76 @@ pub async fn search(app: &AppHandle, engine: SearchEngine, query: &str) -> Vec<S
         log::info!("search: {engine:?} returned no parseable results");
         return Vec::new();
     }
-    log::info!("search: webview {engine:?} → {} result(s)", raw.len());
 
-    raw.into_iter()
-        .take(MAX_RESULTS)
-        .map(|r| SearchResult {
-            title: r.title,
-            url: r.url,
-            snippet: r.snippet,
-        })
-        .collect()
+    let results = curate(raw);
+    log::info!("search: webview {engine:?} → {} result(s)", results.len());
+    results
+}
+
+/// Turn raw hits into the ≤[`MAX_RESULTS`] results injected into chat: drop
+/// junk/empty rows, de-duplicate by host (mirror/aggregator spam), and clean each
+/// snippet + title so the model sees the datum, not boilerplate. Pure — testable.
+fn curate(raw: Vec<RawResult>) -> Vec<SearchResult> {
+    let mut out: Vec<SearchResult> = Vec::new();
+    let mut seen_hosts: Vec<String> = Vec::new();
+    for r in raw {
+        let title = clean_snippet(&r.title);
+        let snippet = clean_snippet(&r.snippet);
+        // A row with neither a title nor a usable link is noise.
+        if title.is_empty() || !r.url.starts_with("http") {
+            continue;
+        }
+        let host = host_of(&r.url);
+        if !host.is_empty() && seen_hosts.iter().any(|h| h == &host) {
+            continue; // one hit per host — avoid the same source repeated
+        }
+        if !host.is_empty() {
+            seen_hosts.push(host);
+        }
+        out.push(SearchResult { title, url: r.url, snippet });
+        if out.len() >= MAX_RESULTS {
+            break;
+        }
+    }
+    out
+}
+
+/// Collapse whitespace, strip common SERP boilerplate, and cap length so a
+/// snippet carries the fact rather than chrome.
+fn clean_snippet(s: &str) -> String {
+    // Boilerplate fragments that add no information to the model.
+    const BOILERPLATE: &[&str] = &[
+        "网页快照", "百度快照", "翻译此页", "查看全部", "更多 ›", "更多>>", "详情 >",
+        "- 维基百科，自由的百科全书", "_百度百科", "_百度知道", "- 知乎",
+    ];
+    let mut t: String = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    for b in BOILERPLATE {
+        t = t.replace(b, " ");
+    }
+    let t = t.split_whitespace().collect::<Vec<_>>().join(" ");
+    let t = t.trim_matches(|c: char| c == '·' || c == '|' || c == '-' || c.is_whitespace());
+    if t.chars().count() <= MAX_SNIPPET_CHARS {
+        return t.to_string();
+    }
+    t.chars().take(MAX_SNIPPET_CHARS).collect::<String>().trim_end().to_string() + "…"
+}
+
+/// Registrable host of a URL (for de-duplication). Best-effort, no allocation of
+/// a full URL parser: strips scheme, path, and a leading `www.`.
+fn host_of(url: &str) -> String {
+    let after_scheme = url.split_once("://").map(|(_, r)| r).unwrap_or(url);
+    let host = after_scheme.split(['/', '?', '#']).next().unwrap_or("");
+    host.strip_prefix("www.").unwrap_or(host).to_lowercase()
 }
 
 /// Parse a rendered SERP document: the regex pass first (tolerant of class-name
 /// churn on layout landmarks), then the CSS-selector pass as a fallback. Pure
 /// and synchronous; an unrecognized / challenge page yields an empty vec.
 pub(crate) fn parse_rendered(engine: SearchEngine, html: &str) -> Vec<RawResult> {
-    let mut results = parsers::parse_serp_regex(engine, html, MAX_RESULTS * 2);
+    // Parse a handful more than we keep, so [`curate`] has headroom to drop
+    // junk/duplicate-host rows and still return [`MAX_RESULTS`].
+    const RAW_FETCH: usize = 8;
+    let mut results = parsers::parse_serp_regex(engine, html, RAW_FETCH);
     if results.is_empty() {
         results = engines::parse_serp(engine, html);
     }
@@ -204,6 +262,42 @@ mod tests {
         assert!(ctx.contains("【搜索：东京天气】"));
         assert!(ctx.contains("Tokyo Weather"));
         assert!(ctx.contains("Sunny, 20C"));
+    }
+
+    // ── content curation (Task 2: keep the datum, drop the noise) ──────────
+
+    #[test]
+    fn curate_trims_to_max_dedupes_hosts_and_drops_junk() {
+        let raw = vec![
+            RawResult { title: "上海天气 今天 22°C".into(), url: "https://www.weather.com.cn/a".into(), snippet: "多云 22°C 网页快照".into() },
+            // same host as #1 → dropped
+            RawResult { title: "上海一周天气".into(), url: "https://weather.com.cn/b".into(), snippet: "...".into() },
+            RawResult { title: "上海天气预报".into(), url: "https://tianqi.com/x".into(), snippet: "晴 20°C".into() },
+            // no usable link → dropped
+            RawResult { title: "广告".into(), url: "".into(), snippet: "buy now".into() },
+            RawResult { title: "third host".into(), url: "https://example.org/z".into(), snippet: "s".into() },
+        ];
+        let out = curate(raw);
+        assert_eq!(out.len(), MAX_RESULTS, "must cap at MAX_RESULTS");
+        assert_eq!(out[0].url, "https://www.weather.com.cn/a");
+        assert_eq!(out[1].url, "https://tianqi.com/x", "second weather.com.cn host deduped away");
+        assert!(!out[0].snippet.contains("网页快照"), "boilerplate stripped");
+    }
+
+    #[test]
+    fn clean_snippet_strips_boilerplate_and_caps_length() {
+        assert_eq!(clean_snippet("  多云   转晴  网页快照 "), "多云 转晴");
+        let long = "字".repeat(MAX_SNIPPET_CHARS + 50);
+        let cleaned = clean_snippet(&long);
+        assert!(cleaned.chars().count() <= MAX_SNIPPET_CHARS + 1, "capped (+ ellipsis)");
+        assert!(cleaned.ends_with('…'));
+    }
+
+    #[test]
+    fn host_of_strips_scheme_www_and_path() {
+        assert_eq!(host_of("https://www.Weather.com.cn/xyz?q=1"), "weather.com.cn");
+        assert_eq!(host_of("http://tianqi.com/"), "tianqi.com");
+        assert_eq!(host_of("not a url"), "not a url");
     }
 
     // ── parse_rendered: per-engine coverage on rendered-style HTML ──────────
