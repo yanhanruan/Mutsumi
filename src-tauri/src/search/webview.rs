@@ -79,6 +79,10 @@ pub struct WebviewSerp {
     /// Whether the app-lifetime event listener has been installed yet.
     #[cfg(not(test))]
     listener_installed: std::sync::atomic::AtomicBool,
+    /// Engines whose cookie jar has been warmed this session (homepage visited
+    /// once before the first search).
+    #[cfg(not(test))]
+    warmed: std::sync::Mutex<std::collections::HashSet<SearchEngine>>,
 }
 
 /// Percent-encode a query value for the SERP URL query string.
@@ -95,27 +99,78 @@ fn enc(s: &str) -> String {
 }
 
 /// Build the SERP URL for `engine`/`query`, tagging it with the per-navigation
-/// request id in the fragment (`#__serpid=<id>`). The fragment is never sent to
-/// the server and is ignored by the SERP page, but the init-script reads it back
-/// so Rust can correlate the emitted HTML with this exact request.
+/// request id as a query parameter (`&__serpid=<id>`).
+///
+/// The id rides in the **query string** (not the fragment) so it survives an
+/// anti-bot **redirect**: when Google bounces `/search?…` to
+/// `/sorry/index?continue=<original-url>`, the original URL — including our id —
+/// is preserved, percent-encoded, inside `continue`. The init-script recovers it
+/// from the (decoded) redirected URL, so a redirect-style challenge is still
+/// correlated and detected instead of silently timing out. Search engines ignore
+/// the unknown parameter.
 fn serp_url(engine: SearchEngine, query: &str, id: &str) -> String {
     let (base, param) = engines::endpoint(engine);
-    format!("{base}?{param}={}#{ID_KEY}={id}", enc(query))
+    format!("{base}?{param}={}&{ID_KEY}={id}", enc(query))
+}
+
+/// Engine homepage — navigated once per session before the first search to warm
+/// the cookie jar (a human lands on the site, then searches), which makes the
+/// engine markedly less likely to serve a bot challenge.
+fn homepage_url(engine: SearchEngine) -> &'static str {
+    match engine {
+        SearchEngine::BingCn => "https://cn.bing.com/",
+        SearchEngine::Bing => "https://www.bing.com/",
+        SearchEngine::Google => "https://www.google.com/",
+        SearchEngine::Baidu => "https://www.baidu.com/",
+        SearchEngine::DuckDuckGo => "https://duckduckgo.com/",
+    }
+}
+
+/// Pick which in-flight request an emitted HTML belongs to. Normally the exact
+/// id matches; but because navigations are serialized (≤1 pending at a time), a
+/// still-unattributed emit with the **sole** pending entry is routed there too —
+/// a belt-and-suspenders fallback for any case where the id didn't survive.
+/// Returns `None` if it can't be attributed. Pure — unit-tested.
+fn resolve_pending_key(pending_ids: &[String], emitted_id: &str) -> Option<String> {
+    if pending_ids.iter().any(|k| k == emitted_id) {
+        return Some(emitted_id.to_string());
+    }
+    if pending_ids.len() == 1 {
+        return Some(pending_ids[0].clone());
+    }
+    None
 }
 
 /// Init-script injected at document-start (WebView2 runs embedder scripts before
-/// page scripts and outside the page CSP). Top frame only; reads its request id
-/// from the URL fragment *before* the page can rewrite it, then polls for a
-/// known results container (up to [`READY_MAX_MS`]) and emits the rendered
-/// `outerHTML` via the core event plugin (works without `withGlobalTauri` — uses
-/// `__TAURI_INTERNALS__`).
-fn init_script() -> String {
+/// page scripts and outside the page CSP). Top frame only; recovers its request
+/// id from the **decoded full URL** (so it's found even when a challenge redirect
+/// wraps the original URL in a `continue=` param), then polls for a known results
+/// container (up to [`READY_MAX_MS`]) and emits the rendered `outerHTML` via the
+/// core event plugin.
+///
+/// When `hide_globals` is set (hardened mode), it first captures a **bound**
+/// `invoke` reference, then deletes `window.__TAURI_INTERNALS__` and the other
+/// `__TAURI*` globals — before any SERP/detector script runs — so the page can't
+/// fingerprint the embedded webview. `grab()` reports through the captured
+/// reference, which keeps working after the global is removed.
+fn init_script(hide_globals: bool) -> String {
+    // Runs at document-start, after Tauri's IPC init-script, before page scripts.
+    let hide = if hide_globals {
+        r#"try { ['__TAURI_INTERNALS__','__TAURI__','__TAURI_METADATA__','__TAURI_EVENT_PLUGIN_INTERNALS__','__TAURI_OS_PLUGIN_INTERNALS__'].forEach(function(k){ try { delete window[k]; } catch(e) { try { window[k] = undefined; } catch(e2){} } }); } catch(e) {}"#
+    } else {
+        ""
+    };
     format!(
         r#"(function() {{
   if (window.top !== window.self) return;          // ignore ad/iframe sub-frames
-  var m = (location.hash || '').match(/{key}=([^&]+)/);
+  var __ti = window.__TAURI_INTERNALS__;           // capture the IPC entry point…
+  var invoke = (__ti && __ti.invoke) ? __ti.invoke.bind(__ti) : null;
+  {hide}                                           // …then remove the automation tells
+  var href = location.href;
+  try {{ href = decodeURIComponent(href); }} catch (e) {{}}
+  var m = href.match(/{key}=([0-9]+)/);            // survives a `continue=`-wrapped redirect
   if (!m) return;                                  // not one of our navigations
-  var ID = decodeURIComponent(m[1]);
+  var ID = m[1];
   // Result containers across Bing / Google / Baidu / DuckDuckGo.
   var SELECTORS = ['#b_results', '#rso', '#search', '#content_left', '#links', '.result'];
   var MAX = {max}, POLL = {poll}, SETTLE = {settle}, waited = 0, done = false;
@@ -129,7 +184,7 @@ fn init_script() -> String {
     if (done) return; done = true;
     try {{
       var html = document.documentElement.outerHTML;
-      window.__TAURI_INTERNALS__.invoke('plugin:event|emit', {{ event: {event:?}, payload: {{ id: ID, html: html }} }});
+      if (invoke) invoke('plugin:event|emit', {{ event: {event:?}, payload: {{ id: ID, html: html }} }});
     }} catch (e) {{ console.error('[serp] emit failed', e); }}
   }}
   function tick() {{
@@ -141,12 +196,64 @@ fn init_script() -> String {
   }}
   tick();
 }})();"#,
+        hide = hide,
         key = ID_KEY,
         event = SERP_EVENT,
         max = READY_MAX_MS,
         poll = POLL_MS,
         settle = SETTLE_MS,
     )
+}
+
+/// Master hardening toggle, read from `MUTSUMI_SERP_HARDEN`. Default (unset) is
+/// **on** — the benchmark sets `0` for a clean baseline. Governs the browser
+/// args, the persistent profile vs incognito, and the global-hiding init-script.
+pub fn hardening_enabled() -> bool {
+    std::env::var("MUTSUMI_SERP_HARDEN")
+        .map(|v| v != "0" && !v.eq_ignore_ascii_case("false") && !v.eq_ignore_ascii_case("off"))
+        .unwrap_or(true)
+}
+
+/// WebView2 args applied in hardened mode. Preserves wry's defaults and adds
+/// `--disable-blink-features=AutomationControlled`, which removes
+/// `navigator.webdriver` / the automation flag.
+const HARDEN_BROWSER_ARGS: &str =
+    "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-blink-features=AutomationControlled";
+
+/// Outcome of one SERP fetch — the unit of the bot-detection benchmark.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Outcome {
+    /// Parsed N results (the good path).
+    Results(usize),
+    /// An anti-bot interstitial (Cloudflare / reCAPTCHA / "unusual traffic").
+    Challenge,
+    /// A real page that parsed to zero results (layout miss / genuinely empty).
+    Empty,
+    /// Fetch errored (timeout / setup failure).
+    Failed,
+}
+
+impl Outcome {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Outcome::Results(_) => "results",
+            Outcome::Challenge => "challenge",
+            Outcome::Empty => "empty",
+            Outcome::Failed => "failed",
+        }
+    }
+}
+
+/// Classify a fetch result for benchmarking / logging. Pure — unit-tested.
+pub fn classify_outcome(engine: SearchEngine, fetch: &Result<String, String>) -> Outcome {
+    match fetch {
+        Ok(html) if is_challenge_page(html) => Outcome::Challenge,
+        Ok(html) => match super::parse_rendered(engine, html).len() {
+            0 => Outcome::Empty,
+            n => Outcome::Results(n),
+        },
+        Err(_) => Outcome::Failed,
+    }
 }
 
 /// True when `html` is an anti-bot interstitial (Cloudflare / CAPTCHA / "unusual
@@ -206,7 +313,8 @@ mod real {
     use tokio::sync::oneshot;
 
     use super::{
-        init_script, serp_url, should_retry, WebviewSerp, MAX_ATTEMPTS, SERP_EVENT,
+        hardening_enabled, homepage_url, init_script, resolve_pending_key, serp_url, should_retry,
+        WebviewSerp, HARDEN_BROWSER_ARGS, MAX_ATTEMPTS, SERP_EVENT,
     };
     use crate::search::SearchEngine;
 
@@ -219,6 +327,9 @@ mod real {
     /// Pause before a challenge retry, giving the in-page JS challenge a moment
     /// to clear on the now-warm window.
     const RETRY_BACKOFF: Duration = Duration::from_millis(800);
+    /// How long to let the homepage warm-up navigation settle its cookies before
+    /// the first search navigates away.
+    const WARMUP_SETTLE: Duration = Duration::from_millis(1500);
 
     #[derive(serde::Deserialize)]
     struct SerpHtml {
@@ -248,26 +359,53 @@ mod real {
                     .and_then(|s| serde_json::from_str::<SerpHtml>(&s).ok())
             });
             if let Some(msg) = parsed {
-                if let Some(tx) =
-                    app_l.state::<WebviewSerp>().pending.lock().unwrap().remove(&msg.id)
-                {
-                    let _ = tx.send(msg.html);
+                let state = app_l.state::<WebviewSerp>();
+                let mut pending = state.pending.lock().unwrap();
+                let keys: Vec<String> = pending.keys().cloned().collect();
+                if let Some(key) = resolve_pending_key(&keys, &msg.id) {
+                    if let Some(tx) = pending.remove(&key) {
+                        let _ = tx.send(msg.html);
+                    }
                 }
             }
         });
     }
 
+    /// Dedicated on-disk profile for the SERP window (its own cookies + cache +
+    /// history — a returning-user look). Isolated from the user's real browser;
+    /// nothing here ever deletes user data.
+    fn serp_profile_dir(app: &AppHandle) -> Option<std::path::PathBuf> {
+        app.path().app_local_data_dir().ok().map(|d| d.join("serp-profile"))
+    }
+
     /// Create the hidden window. Must run on the main (UI) thread.
+    ///
+    /// In hardened mode (default; see [`hardening_enabled`]) it disables the
+    /// `AutomationControlled` fingerprint flag, uses a persistent profile, and
+    /// injects the global-hiding init-script. The un-hardened path (the
+    /// benchmark's baseline) uses an incognito profile and none of those.
     fn build_window(app: &AppHandle, url: tauri::Url) -> Result<(), String> {
         let visible = std::env::var("MUTSUMI_SERP_VISIBLE").is_ok(); // debugging aid
-        let built = WebviewWindowBuilder::new(app, SERP_WINDOW, WebviewUrl::External(url))
+        let harden = hardening_enabled();
+
+        let mut builder = WebviewWindowBuilder::new(app, SERP_WINDOW, WebviewUrl::External(url))
             .title("search")
             .visible(visible)
             .skip_taskbar(true)
             .inner_size(1000.0, 800.0)
-            .initialization_script(init_script().as_str())
-            .build()
-            .map_err(|e| format!("build: {e}"))?;
+            .initialization_script(init_script(harden).as_str());
+
+        if harden {
+            builder = builder.additional_browser_args(HARDEN_BROWSER_ARGS);
+            if let Some(dir) = serp_profile_dir(app) {
+                builder = builder.data_directory(dir);
+            }
+        } else {
+            // Baseline: ephemeral profile so warm cookies can't leak into it.
+            builder = builder.incognito(true);
+        }
+
+        let built = builder.build().map_err(|e| format!("build: {e}"))?;
         #[cfg(debug_assertions)]
         if visible {
             built.open_devtools();
@@ -288,6 +426,27 @@ mod real {
             let _ = w.close();
         }
         build_window(app, url)
+    }
+
+    /// Navigate the shared window to the engine homepage once per session to warm
+    /// its cookie jar before the first search (fire-and-forget: no id, so the
+    /// homepage never emits — we just give it a moment to set cookies). Assumes
+    /// the caller holds the nav lock.
+    async fn warm_up(app: &AppHandle, engine: SearchEngine) {
+        let Ok(url) = homepage_url(engine).parse::<tauri::Url>() else { return };
+        let app2 = app.clone();
+        let (setup_tx, setup_rx) = oneshot::channel::<Result<(), String>>();
+        if app
+            .run_on_main_thread(move || {
+                let _ = setup_tx.send(build_or_navigate(&app2, url));
+            })
+            .is_err()
+        {
+            return;
+        }
+        // Wait for the navigation to be scheduled, then let cookies settle.
+        let _ = setup_rx.await;
+        tokio::time::sleep(WARMUP_SETTLE).await;
     }
 
     /// One navigate→render→extract round-trip. Returns the rendered HTML or an
@@ -349,6 +508,12 @@ mod real {
         // One navigation at a time through the shared window.
         let _guard = state.nav.lock().await;
 
+        // Warm this engine's cookie jar once per session (reduces bot challenges).
+        if !state.warmed.lock().unwrap().contains(&engine) {
+            warm_up(app, engine).await;
+            state.warmed.lock().unwrap().insert(engine);
+        }
+
         let mut last = navigate_once(app, &state, engine, query).await?;
         for attempt in 1..MAX_ATTEMPTS {
             if !should_retry(attempt, &last, MAX_ATTEMPTS) {
@@ -368,11 +533,13 @@ mod tests {
     use regex::Regex;
 
     /// Mirror of the init-script's id regex, so the test proves `serp_url`
-    /// produces a fragment the browser-side script can read back.
-    fn extract_serpid(url: &str) -> Option<String> {
-        let hash = url.split_once('#').map(|(_, h)| h)?;
-        let re = Regex::new(&format!(r"{ID_KEY}=([^&]+)")).unwrap();
-        re.captures(hash).map(|c| c[1].to_string())
+    /// Mirror of the init-script's recovery logic (`decodeURIComponent(href)` then
+    /// `/__serpid=([0-9]+)/`), so the tests prove the same id the browser reads
+    /// back — including when a challenge redirect wraps our URL in `continue=`.
+    fn serpid_from_url(url: &str) -> Option<String> {
+        let decoded = crate::search::tracking::percent_decode(url);
+        let re = Regex::new(&format!(r"{ID_KEY}=([0-9]+)")).unwrap();
+        re.captures(&decoded).map(|c| c[1].to_string())
     }
 
     #[test]
@@ -393,33 +560,115 @@ mod tests {
     }
 
     #[test]
-    fn serp_url_id_round_trips_through_the_fragment() {
-        // The whole correlation scheme: the id we embed must be recoverable by
-        // the init-script's `/__serpid=([^&]+)/` regex.
+    fn serp_url_id_rides_in_the_query_and_round_trips() {
+        // The correlation scheme: the id must be recoverable from the URL by the
+        // same logic the init-script uses.
         for id in ["1", "1700000000000000001", "42"] {
             let u = serp_url(SearchEngine::Bing, "any query", id);
-            assert_eq!(extract_serpid(&u).as_deref(), Some(id), "url was {u}");
+            assert!(u.contains(&format!("&{ID_KEY}={id}")), "id not in query: {u}");
+            assert!(!u.contains('#'), "id must not be a fragment: {u}");
+            assert_eq!(serpid_from_url(&u).as_deref(), Some(id), "url was {u}");
         }
     }
 
     #[test]
-    fn serp_url_fragment_is_not_part_of_the_query_string() {
-        let u = serp_url(SearchEngine::Google, "x", "7");
-        let (before, after) = u.split_once('#').expect("has a fragment");
-        assert!(!before.contains('#'));
-        assert!(after.starts_with(&format!("{ID_KEY}=")));
+    fn serpid_survives_a_challenge_redirect() {
+        // Google bounces `/search?…&__serpid=123` to `/sorry/index?continue=<enc>`;
+        // the id survives, percent-encoded, inside `continue` and must still be
+        // recoverable (so the challenge is detected, not silently timed out).
+        let original = serp_url(SearchEngine::Google, "test", "123456789");
+        let continue_enc = original.replace('&', "%26").replace('=', "%3D");
+        let redirected = format!("https://www.google.com/sorry/index?continue={continue_enc}&hl=en");
+        assert_eq!(serpid_from_url(&redirected).as_deref(), Some("123456789"), "redirected url was {redirected}");
+    }
+
+    #[test]
+    fn homepage_urls_are_distinct_and_parseable() {
+        for e in [
+            SearchEngine::BingCn,
+            SearchEngine::Bing,
+            SearchEngine::Google,
+            SearchEngine::Baidu,
+            SearchEngine::DuckDuckGo,
+        ] {
+            assert!(homepage_url(e).parse::<tauri::Url>().is_ok(), "bad homepage for {e:?}");
+        }
+    }
+
+    #[test]
+    fn resolve_pending_prefers_exact_id_then_falls_back_to_sole_entry() {
+        // Exact match wins.
+        assert_eq!(
+            resolve_pending_key(&["a".into(), "b".into()], "b").as_deref(),
+            Some("b")
+        );
+        // No id match but a single in-flight request → routed to it (redirect case).
+        assert_eq!(resolve_pending_key(&["only".into()], "").as_deref(), Some("only"));
+        // Ambiguous (>1 pending, no match) → give up rather than misattribute.
+        assert_eq!(resolve_pending_key(&["a".into(), "b".into()], "z"), None);
+        // Nothing pending → nothing to route.
+        assert_eq!(resolve_pending_key(&[], "x"), None);
     }
 
     #[test]
     fn init_script_carries_the_event_name_key_and_readiness() {
-        let js = init_script();
+        let js = init_script(true);
         assert!(js.contains("serp-html"), "event name missing");
-        assert!(js.contains("__serpid"), "fragment key missing");
+        assert!(js.contains("__serpid"), "id key missing");
+        assert!(js.contains("decodeURIComponent(href)"), "redirect-surviving recovery missing");
         assert!(js.contains("4000"), "readiness cap missing");
         assert!(js.contains("#b_results"), "readiness selector missing");
         // Must report through the permissioned event plugin, top-frame only.
         assert!(js.contains("plugin:event|emit"));
         assert!(js.contains("window.top !== window.self"));
+    }
+
+    #[test]
+    fn init_script_hides_tauri_globals_only_when_hardened() {
+        let hardened = init_script(true);
+        // Captures a bound invoke first, then deletes the automation tells.
+        assert!(hardened.contains(".invoke.bind("), "must capture invoke before hiding");
+        assert!(hardened.contains("delete window[k]"), "must delete the globals");
+        assert!(hardened.contains("__TAURI_INTERNALS__"), "must target the IPC global");
+        // grab() must use the captured reference (works after the delete).
+        assert!(hardened.contains("if (invoke) invoke("), "grab must use captured invoke");
+
+        let baseline = init_script(false);
+        assert!(!baseline.contains("delete window[k]"), "baseline must not touch globals");
+    }
+
+    // ── outcome classifier (benchmark instrumentation) ─────────────────────
+
+    #[test]
+    fn classify_outcome_covers_every_arm() {
+        let bing = r#"<div id="b_results"><ol><li class="b_algo">
+            <h2><a href="https://example.com/a">A</a></h2><div class="b_caption"><p>s</p></div>
+          </li></ol></div>"#;
+        assert!(matches!(
+            classify_outcome(SearchEngine::BingCn, &Ok(bing.to_string())),
+            Outcome::Results(n) if n >= 1
+        ));
+
+        let cf = r#"<title>Just a moment...</title><div class="cf-browser-verification"></div>"#;
+        assert_eq!(classify_outcome(SearchEngine::Google, &Ok(cf.to_string())), Outcome::Challenge);
+
+        let empty = "<html><body><main>nothing recognizable</main></body></html>";
+        assert_eq!(classify_outcome(SearchEngine::BingCn, &Ok(empty.to_string())), Outcome::Empty);
+
+        assert_eq!(
+            classify_outcome(SearchEngine::BingCn, &Err("timed out".to_string())),
+            Outcome::Failed
+        );
+    }
+
+    #[test]
+    fn hardening_defaults_on_and_respects_the_env_toggle() {
+        // Note: reads process env; assert only the parse of explicit values via a
+        // pure mirror to avoid mutating global env in a parallel test run.
+        for (v, want) in [("0", false), ("false", false), ("off", false), ("1", true), ("yes", true)] {
+            let parsed = v != "0" && !v.eq_ignore_ascii_case("false") && !v.eq_ignore_ascii_case("off");
+            assert_eq!(parsed, want, "value {v}");
+        }
     }
 
     // ── challenge detection + retry policy (objective 3, user Test 4A/4B) ──

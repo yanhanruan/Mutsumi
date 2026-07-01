@@ -225,6 +225,9 @@ pub fn run() {
       // Pet state + pomodoro ticker (also drives late-night reminder).
       app_state::spawn_ticker(app.handle().clone(), shared.clone());
 
+      // Bot-detection benchmark — inert unless MUTSUMI_SERP_BENCH is set.
+      search::bench::maybe_spawn(app.handle());
+
       Ok(())
     })
     .run(tauri::generate_context!())

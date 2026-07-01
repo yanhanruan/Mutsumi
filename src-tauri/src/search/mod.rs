@@ -13,6 +13,7 @@
 //!   → parse_rendered (regex → CSS fallback) → format as a labeled
 //!   real-time-context block for injection into the chat prompt.
 
+pub mod bench;
 pub mod trigger;
 pub mod webview;
 
@@ -35,7 +36,7 @@ const MAX_RESULTS: usize = 3;
 /// Default is **Bing CN**: it renders fully in the WebView and is reliably
 /// reachable from a mainland network (Google often isn't). All engines remain
 /// selectable from Settings.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum SearchEngine {
     #[default]
