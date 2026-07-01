@@ -83,6 +83,10 @@ pub struct WebviewSerp {
     /// once before the first search).
     #[cfg(not(test))]
     warmed: std::sync::Mutex<std::collections::HashSet<SearchEngine>>,
+    /// When the last manual-solve prompt failed — drives the cooldown so we don't
+    /// re-pop the window on every search after the user dismissed it.
+    #[cfg(not(test))]
+    manual_cooldown: std::sync::Mutex<Option<std::time::Instant>>,
 }
 
 /// Percent-encode a query value for the SERP URL query string.
@@ -289,6 +293,24 @@ pub fn should_retry(attempt: u8, html: &str, max_attempts: u8) -> bool {
     attempt < max_attempts && is_challenge_page(html)
 }
 
+/// Whether the **manual-solve backstop** is enabled (opt-in via env for now; a
+/// UI setting can promote it later — kept off by default so the app never pops a
+/// window unexpectedly). When on, a still-challenged fetch surfaces the hidden
+/// window so the user clears the reCAPTCHA once; the clearance cookie then
+/// persists in the profile for subsequent searches.
+pub fn manual_solve_enabled() -> bool {
+    std::env::var("MUTSUMI_SERP_MANUAL")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("on"))
+        .unwrap_or(false)
+}
+
+/// Decide whether to surface the window for a manual solve: only on a genuine
+/// challenge, and not while a recent failed prompt's cooldown is active (so we
+/// don't nag on every subsequent search). Pure — unit-tested.
+fn should_prompt_manual(is_challenge: bool, cooldown_active: bool) -> bool {
+    is_challenge && !cooldown_active
+}
+
 /// Test stub — no window creation, so the unit-test harness doesn't link the
 /// native windowing imports. `search()` only reaches here with a real
 /// `AppHandle`, which the offline tests never have, so it is never invoked.
@@ -307,14 +329,15 @@ pub use real::fetch_serp;
 #[cfg(not(test))]
 mod real {
     use std::sync::atomic::Ordering;
-    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
     use tauri::{AppHandle, Listener, Manager, WebviewUrl, WebviewWindowBuilder};
     use tokio::sync::oneshot;
 
     use super::{
-        hardening_enabled, homepage_url, init_script, resolve_pending_key, serp_url, should_retry,
-        WebviewSerp, HARDEN_BROWSER_ARGS, MAX_ATTEMPTS, SERP_EVENT,
+        hardening_enabled, homepage_url, init_script, is_challenge_page, manual_solve_enabled,
+        resolve_pending_key, serp_url, should_prompt_manual, should_retry, WebviewSerp,
+        HARDEN_BROWSER_ARGS, MAX_ATTEMPTS, SERP_EVENT,
     };
     use crate::search::SearchEngine;
 
@@ -330,6 +353,10 @@ mod real {
     /// How long to let the homepage warm-up navigation settle its cookies before
     /// the first search navigates away.
     const WARMUP_SETTLE: Duration = Duration::from_millis(1500);
+    /// How long to wait for the user to clear a surfaced challenge.
+    const MANUAL_TIMEOUT: Duration = Duration::from_secs(150);
+    /// After a dismissed/failed manual prompt, don't re-pop the window for this long.
+    const MANUAL_COOLDOWN: Duration = Duration::from_secs(300);
 
     #[derive(serde::Deserialize)]
     struct SerpHtml {
@@ -449,6 +476,50 @@ mod real {
         tokio::time::sleep(WARMUP_SETTLE).await;
     }
 
+    /// Show or hide the singleton fetch window (main thread).
+    fn set_window_visible(app: &AppHandle, show: bool) {
+        let app2 = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            if let Some(w) = app2.get_webview_window(SERP_WINDOW) {
+                if show {
+                    let _ = w.show();
+                    let _ = w.set_focus();
+                } else {
+                    let _ = w.hide();
+                }
+            }
+        });
+    }
+
+    /// Backstop: the window is already on a challenge page — surface it so the
+    /// user clears the reCAPTCHA in place, then wait for the solved SERP to report
+    /// back (its `continue=`-preserved id, or the single-pending fallback, routes
+    /// the emit here). Returns the solved HTML, or `Err` if the user didn't solve
+    /// in time. Assumes the caller holds the nav lock.
+    async fn manual_solve(
+        app: &AppHandle,
+        state: &WebviewSerp,
+        engine: SearchEngine,
+    ) -> Result<String, String> {
+        let id = uid();
+        let (tx, rx) = oneshot::channel::<String>();
+        state.pending.lock().unwrap().insert(id.clone(), tx);
+
+        log::info!(
+            "search: {engine:?} still challenged — surfacing window for manual solve (≤{}s)",
+            MANUAL_TIMEOUT.as_secs()
+        );
+        set_window_visible(app, true);
+        let outcome = tokio::time::timeout(MANUAL_TIMEOUT, rx).await;
+        set_window_visible(app, false);
+        state.pending.lock().unwrap().remove(&id);
+
+        match outcome {
+            Ok(Ok(html)) => Ok(html),
+            _ => Err("manual solve timed out".into()),
+        }
+    }
+
     /// One navigate→render→extract round-trip. Returns the rendered HTML or an
     /// error (timeout / setup failure). Assumes the caller holds the nav lock.
     async fn navigate_once(
@@ -523,6 +594,30 @@ mod real {
             tokio::time::sleep(RETRY_BACKOFF).await;
             last = navigate_once(app, &state, engine, query).await?;
         }
+
+        // Backstop: if still challenged and manual-solve is enabled, surface the
+        // window so the user clears it once (cookie then persists). Cooldown-gated
+        // so a dismissed prompt doesn't re-pop on every subsequent search.
+        if manual_solve_enabled() {
+            let cooldown_active = state
+                .manual_cooldown
+                .lock()
+                .unwrap()
+                .map(|t| t.elapsed() < MANUAL_COOLDOWN)
+                .unwrap_or(false);
+            if should_prompt_manual(is_challenge_page(&last), cooldown_active) {
+                match manual_solve(app, &state, engine).await {
+                    Ok(html) => {
+                        *state.manual_cooldown.lock().unwrap() = None; // solved → clear
+                        last = html;
+                    }
+                    Err(_) => {
+                        *state.manual_cooldown.lock().unwrap() = Some(Instant::now());
+                    }
+                }
+            }
+        }
+
         Ok(last)
     }
 }
@@ -532,7 +627,6 @@ mod tests {
     use super::*;
     use regex::Regex;
 
-    /// Mirror of the init-script's id regex, so the test proves `serp_url`
     /// Mirror of the init-script's recovery logic (`decodeURIComponent(href)` then
     /// `/__serpid=([0-9]+)/`), so the tests prove the same id the browser reads
     /// back — including when a challenge redirect wraps our URL in `continue=`.
@@ -704,5 +798,24 @@ mod tests {
     fn should_not_retry_on_a_merely_unparseable_page() {
         let unknown = "<html><body><div>nothing we recognize</div></body></html>";
         assert!(!should_retry(1, unknown, MAX_ATTEMPTS));
+    }
+
+    // ── manual-solve backstop (1b) ─────────────────────────────────────────
+
+    #[test]
+    fn should_prompt_manual_only_on_challenge_and_off_cooldown() {
+        assert!(should_prompt_manual(true, false), "challenge + no cooldown → prompt");
+        assert!(!should_prompt_manual(true, true), "cooldown active → don't nag");
+        assert!(!should_prompt_manual(false, false), "not a challenge → no prompt");
+        assert!(!should_prompt_manual(false, true));
+    }
+
+    #[test]
+    fn manual_solve_is_opt_in_via_env_value() {
+        // Pure mirror of the env parse (avoid mutating global env under parallel tests).
+        for (v, want) in [("1", true), ("true", true), ("on", true), ("0", false), ("", false)] {
+            let parsed = v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("on");
+            assert_eq!(parsed, want, "value {v:?}");
+        }
     }
 }
