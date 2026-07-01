@@ -40,7 +40,7 @@ dotenvy = "0.15"
 rusqlite = { version = "0.32", features = ["bundled"] }
 scraper = "0.20"   # HTML parsing for search-result + page-body scraping
 regex = "1"        # date / keyword detection for search triggering
-tokio = { version = "1", features = ["time", "macros"] }  # search budget + concurrent embed/search (join!)
+tokio = { version = "1", features = ["time", "macros", "sync"] }  # search budget + concurrent embed/search (join!) + webview-serp oneshot/Mutex
 sysinfo = "0.36.1"   # CPU / memory / network sampling for the System State panel
 battery = "0.7.8"    # battery level + charge-rate time estimate
 

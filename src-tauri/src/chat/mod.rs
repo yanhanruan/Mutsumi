@@ -35,7 +35,7 @@ use crate::db::memory::{self, MemorySubject, RetrievalWeights};
 use crate::db::{now, state, Db};
 use crate::http::ApiError;
 use crate::persona;
-use crate::search::{self, live_weather, trigger, SearchState};
+use crate::search::{self, trigger, SearchState};
 use crate::services::qwen::{ChatMessage, ChatOptions, QwenClient};
 use crate::services::QwenState;
 
@@ -108,8 +108,11 @@ fn turn_options() -> ChatOptions {
 }
 
 /// Hard ceiling on the whole search step. If exceeded, the turn proceeds with
-/// no web context rather than making the user wait.
-const SEARCH_BUDGET: Duration = Duration::from_secs(9);
+/// no web context rather than making the user wait. Sized above the WebView
+/// fetch worst case (cold-start window create + a challenge retry, ~15 s) so the
+/// cap never pre-empts a legitimate retry; the common warm path finishes in
+/// ~1–2 s.
+const SEARCH_BUDGET: Duration = Duration::from_secs(16);
 
 /// Errors surfaced from the chat pipeline.
 ///
@@ -228,6 +231,7 @@ pub enum ChatEvent {
 /// The SQLite read is a short synchronous block; the `MutexGuard` is confined to
 /// it and dropped before the caller's next `.await`.
 async fn build_messages(
+    app: &AppHandle,
     qwen: &QwenClient,
     db: &Db,
     search: &SearchState,
@@ -244,25 +248,16 @@ async fn build_messages(
         if !search.enabled() || !trigger::needs_search(message) {
             return None;
         }
-        // Weather questions are answered from a structured weather service, not
-        // by scraping a search engine: SERPs are JS-rendered SPAs behind anti-bot
-        // defences, so the static client gets blank / HTTP-202 challenge pages —
-        // the v1.3.0 "city not supported" bug. Generic search is the fallback.
-        if let Some(city) = live_weather::parse_weather_query(message) {
-            let weather = tokio::time::timeout(
-                SEARCH_BUDGET,
-                live_weather::fetch_weather_context(search.client.http(), message, &city),
-            )
-            .await
-            .ok()
-            .flatten();
-            if weather.is_some() {
-                return weather;
-            }
-        }
+        // Single path: the hidden WebView renders the real SERP (running JS and
+        // clearing anti-bot challenges with the browser's genuine fingerprint),
+        // which the static reqwest client never could. Weather, encyclopedia and
+        // pricing questions are all served from the rendered SERP (incl. answer
+        // cards). Best-effort and capped by SEARCH_BUDGET so a slow or flaky
+        // engine can never stall the turn — on timeout we proceed with no
+        // web context.
         let results = tokio::time::timeout(
             SEARCH_BUDGET,
-            search::search(&search.client, search.engine(), message),
+            search::search(app, search.engine(), message),
         )
         .await
         .unwrap_or_default();
@@ -316,6 +311,7 @@ async fn build_messages(
 /// v1); `locale` ("en"/"zh"/"ja") sets the reply language.
 #[tauri::command]
 pub async fn chat_send(
+    app: AppHandle,
     qwen: State<'_, QwenState>,
     db: State<'_, Db>,
     search: State<'_, SearchState>,
@@ -330,7 +326,7 @@ pub async fn chat_send(
     let history = history.unwrap_or_default();
 
     let client = qwen.client();
-    let messages = build_messages(&client, &db, &search, &message, &locale, &history).await?;
+    let messages = build_messages(&app, &client, &db, &search, &message, &locale, &history).await?;
     let completion = client.chat(&messages, None, turn_options()).await?;
     Ok(completion.message.content.unwrap_or_default())
 }
@@ -370,7 +366,7 @@ pub async fn chat_stream(
     let history = history.unwrap_or_default();
 
     let client = qwen.client();
-    let messages = build_messages(&client, &db, &search, &message, &locale, &history).await?;
+    let messages = build_messages(&app, &client, &db, &search, &message, &locale, &history).await?;
 
     let completion = client
         .chat_stream(&messages, None, turn_options(), |delta| {
@@ -612,7 +608,7 @@ pub async fn chat_vision_stream(
     // turn (the vision turn re-adds it) and append the vision guidance block.
     let query = if caption.is_empty() { "图片".to_string() } else { caption.clone() };
     let client = qwen.client();
-    let mut messages = build_messages(&client, &db, &search, &query, &locale, &history).await?;
+    let mut messages = build_messages(&app, &client, &db, &search, &query, &locale, &history).await?;
     messages.pop(); // remove the placeholder user-text message
     messages.push(ChatMessage::system(persona::vision_guidance().to_string()));
 

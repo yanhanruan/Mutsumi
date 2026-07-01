@@ -181,8 +181,40 @@ mod tests {
     }
 
     #[test]
+    fn parses_google_layout_and_unwraps_redirect() {
+        let html = r#"
+            <div id="rso">
+              <div class="g"><a href="/url?q=https%3A%2F%2Fexample.com%2Fg1&sa=t">
+                <h3>Google Title</h3></a>
+                <div class="VwiC3b">Google snippet here.</div></div>
+            </div>"#;
+        let r = parse_serp(SearchEngine::Google, html);
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].title, "Google Title");
+        assert_eq!(r[0].url, "https://example.com/g1");
+        assert_eq!(r[0].snippet, "Google snippet here.");
+    }
+
+    #[test]
+    fn parses_baidu_layout() {
+        let html = r#"
+            <div id="content_left">
+              <div class="result c-container">
+                <h3><a href="http://www.baidu.com/link?url=abc">Baidu Title</a></h3>
+                <div class="c-abstract">Baidu snippet here.</div></div>
+            </div>"#;
+        let r = parse_serp(SearchEngine::Baidu, html);
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].title, "Baidu Title");
+        assert_eq!(r[0].url, "http://www.baidu.com/link?url=abc");
+        assert_eq!(r[0].snippet, "Baidu snippet here.");
+    }
+
+    #[test]
     fn missing_selectors_yield_empty() {
         assert!(parse_serp(SearchEngine::BingCn, "<html><body>nope</body></html>").is_empty());
+        assert!(parse_serp(SearchEngine::Google, "<html><body>nope</body></html>").is_empty());
+        assert!(parse_serp(SearchEngine::Baidu, "<html><body>nope</body></html>").is_empty());
     }
 
 
