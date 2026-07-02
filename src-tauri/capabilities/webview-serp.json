@@ -1,15 +1,15 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "webview-serp",
-  "description": "Hidden SERP-fetch window: lets the rendered search page report its HTML back to Rust via the core event plugin. Scoped to the search-engine origins only.",
+  "description": "Hidden SERP-fetch window: lets the rendered search page report its HTML back to Rust via the core event plugin. Scoped to the search engines' own domain families — including their challenge/consent sub-domains (e.g. wappass.baidu.com, sorry/consent on google.com) so a challenge page can still report back instead of timing out invisibly.",
   "windows": ["serp-fetcher"],
   "remote": {
     "urls": [
-      "https://cn.bing.com/*",
-      "https://www.bing.com/*",
-      "https://www.google.com/*",
-      "https://www.baidu.com/*",
-      "https://html.duckduckgo.com/*"
+      "https://*.bing.com/*",
+      "https://*.google.com/*",
+      "https://*.baidu.com/*",
+      "https://duckduckgo.com/*",
+      "https://*.duckduckgo.com/*"
     ]
   },
   "permissions": ["core:default", "core:event:allow-emit"]
