@@ -97,13 +97,25 @@ async fn run(app: AppHandle, engines: Vec<SearchEngine>) {
     log::info!("serp-bench: START engines={engines:?} queries={n}");
 
     let mut rows: Vec<(SearchEngine, Tally)> = Vec::new();
+    // Per-query notes for anything that wasn't a clean `results` — the detail that
+    // turns "1 challenge / 2 failed" into an actual cause.
+    let mut notes: Vec<String> = Vec::new();
     for engine in engines {
         let mut tally = Tally::default();
         for (i, q) in QUERIES.iter().enumerate() {
             let fetch = webview::fetch_serp(&app, engine, q).await;
             let outcome = classify_outcome(engine, &fetch);
             tally.record(outcome);
-            log::info!("serp-bench {engine:?} [{}/{n}] {q} -> {}", i + 1, outcome.label());
+            let detail = query_detail(&fetch, outcome);
+            log::info!(
+                "serp-bench {engine:?} [{}/{n}] {q} -> {}{}",
+                i + 1,
+                outcome.label(),
+                detail.as_deref().map(|d| format!(" ({d})")).unwrap_or_default()
+            );
+            if let Some(d) = detail {
+                notes.push(format!("- `{engine:?}` — {q} → **{}** — {d}", outcome.label()));
+            }
             if i + 1 < n {
                 tokio::time::sleep(SPACING).await;
             }
@@ -115,9 +127,35 @@ async fn run(app: AppHandle, engines: Vec<SearchEngine>) {
         rows.push((engine, tally));
     }
 
-    let report = render_report(n, &rows);
+    let mut report = render_report(n, &rows);
+    if !notes.is_empty() {
+        report.push_str("### Anomalies (per query)\n\n");
+        for note in &notes {
+            report.push_str(note);
+            report.push('\n');
+        }
+        report.push('\n');
+    }
     log::info!("serp-bench: RESULTS\n{report}");
     write_report(&app, &report);
+}
+
+/// Diagnostic detail for a non-`results` outcome: the fetch error for `failed`,
+/// the matched challenge markers + page size for `challenge` (a real Google block
+/// shows `/sorry/index`; a lone `g-recaptcha` on a large page is a stray asset on
+/// a SERP that just failed to parse), the page size for `empty`. `None` for a
+/// clean `results` outcome. Pure.
+fn query_detail(fetch: &Result<String, String>, outcome: Outcome) -> Option<String> {
+    match (fetch, outcome) {
+        (Err(e), _) => Some(format!("error: {e}")),
+        (Ok(html), Outcome::Challenge) => Some(format!(
+            "markers={:?} bytes={}",
+            webview::challenge_markers(html),
+            html.len()
+        )),
+        (Ok(html), Outcome::Empty) => Some(format!("no results parsed; bytes={}", html.len())),
+        _ => None,
+    }
 }
 
 fn render_report(n: usize, rows: &[(SearchEngine, Tally)]) -> String {
@@ -192,5 +230,17 @@ mod tests {
         let r = render_report(12, &rows);
         assert!(r.contains("| Google | 8 | 4 | 0 | 0 |"));
         assert!(r.contains("| BingCn | 12 | 0 | 0 | 0 |"));
+    }
+
+    #[test]
+    fn query_detail_explains_only_anomalies() {
+        // Clean results → no note.
+        assert!(query_detail(&Ok("<div id=\"b_results\"></div>".into()), Outcome::Results(3)).is_none());
+        // Failed → surfaces the fetch error verbatim (timeout vs setup, etc.).
+        let d = query_detail(&Err("timed out waiting for rendered HTML".into()), Outcome::Failed).unwrap();
+        assert!(d.contains("error:") && d.contains("timed out"), "got {d}");
+        // Challenge → matched markers + page size, so a real block is told from a stray token.
+        let d = query_detail(&Ok(r#"<div class="g-recaptcha"></div>"#.into()), Outcome::Challenge).unwrap();
+        assert!(d.contains("markers=") && d.contains("g-recaptcha") && d.contains("bytes="), "got {d}");
     }
 }

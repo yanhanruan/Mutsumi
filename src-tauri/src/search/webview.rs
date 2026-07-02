@@ -241,29 +241,39 @@ pub fn classify_outcome(engine: SearchEngine, fetch: &Result<String, String>) ->
     }
 }
 
-/// True when `html` is an anti-bot interstitial (Cloudflare / CAPTCHA / "unusual
-/// traffic"), not a real SERP. Markers are deliberately specific to challenge
-/// chrome so a result snippet that merely mentions "captcha" doesn't trip it.
-/// Pure — unit-tested.
-pub fn is_challenge_page(html: &str) -> bool {
+/// ASCII challenge markers (matched case-insensitively). Deliberately specific to
+/// challenge chrome so a result snippet that merely mentions "captcha" won't trip.
+const CHALLENGE_ASCII: &[&str] = &[
+    "just a moment",
+    "cf-browser-verification",
+    "/cdn-cgi/challenge",
+    "cf_chl_",
+    "challenge-platform",
+    "unusual traffic",
+    "/sorry/index",          // Google interstitial
+    "g-recaptcha",
+    "id=\"recaptcha\"",
+    "h-captcha",
+];
+/// CJK challenge markers (matched as-is).
+const CHALLENGE_CJK: &[&str] = &["人机验证", "安全验证", "异常流量", "请完成验证", "滑动验证", "百度安全验证"];
+
+/// Which challenge markers appear in `html`. Basis of [`is_challenge_page`], and
+/// surfaced by the benchmark as diagnostic detail (`/sorry/index` or "unusual
+/// traffic" means a real Google block; a lone `g-recaptcha` on a large page is a
+/// stray asset on a working SERP). Pure — unit-tested.
+pub fn challenge_markers(html: &str) -> Vec<&'static str> {
     let lower = html.to_lowercase();
-    const ASCII: &[&str] = &[
-        "just a moment",
-        "cf-browser-verification",
-        "/cdn-cgi/challenge",
-        "cf_chl_",
-        "challenge-platform",
-        "unusual traffic",
-        "/sorry/index",          // Google interstitial
-        "g-recaptcha",
-        "id=\"recaptcha\"",
-        "h-captcha",
-    ];
-    if ASCII.iter().any(|m| lower.contains(m)) {
-        return true;
-    }
-    const CJK: &[&str] = &["人机验证", "安全验证", "异常流量", "请完成验证", "滑动验证", "百度安全验证"];
-    CJK.iter().any(|m| html.contains(m))
+    let mut hits: Vec<&'static str> =
+        CHALLENGE_ASCII.iter().copied().filter(|m| lower.contains(m)).collect();
+    hits.extend(CHALLENGE_CJK.iter().copied().filter(|m| html.contains(m)));
+    hits
+}
+
+/// True when `html` is an anti-bot interstitial (Cloudflare / CAPTCHA / "unusual
+/// traffic"), not a real SERP. Pure — unit-tested.
+pub fn is_challenge_page(html: &str) -> bool {
+    !challenge_markers(html).is_empty()
 }
 
 /// A challenge only *blocks* when the page also produced no results. A real SERP
@@ -864,6 +874,16 @@ mod tests {
         let serp = r#"<ol><li class="b_algo"><h2><a href="https://example.com/a">Title A</a></h2>
             <div class="b_caption"><p>An ordinary snippet about a CAPTCHA tutorial.</p></div></li></ol>"#;
         assert!(!is_challenge_page(serp), "a result that mentions captcha must not count as a challenge");
+    }
+
+    #[test]
+    fn challenge_markers_reports_each_hit_for_diagnosis() {
+        assert!(challenge_markers("<html><body>ordinary results</body></html>").is_empty());
+        let m = challenge_markers(r#"<title>Just a moment...</title><div class="g-recaptcha"></div>"#);
+        assert!(m.contains(&"just a moment") && m.contains(&"g-recaptcha"), "got {m:?}");
+        // The discriminating marker: a real Google block says /sorry/index, not just g-recaptcha.
+        assert!(challenge_markers("redirected to /sorry/index?continue=x").contains(&"/sorry/index"));
+        assert!(challenge_markers("<p>百度安全验证</p>").contains(&"百度安全验证"));
     }
 
     #[test]

@@ -66,7 +66,10 @@ MUTSUMI_SERP_BENCH=all    npm run tauri dev   # all five
 
 12 fixed queries per engine, spaced 5 s, classified into results / challenge / empty / failed and
 appended to `<app-log-dir>/serp-bench.md`. With the fixed classifier, `challenge` should be ~0 for
-queries that actually work.
+queries that actually work. Any non-`results` outcome also gets an **"Anomalies (per query)"**
+detail line — the fetch error for `failed`, and the matched challenge markers + page size for
+`challenge` (`/sorry/index` or "unusual traffic" = a real Google block; a lone `g-recaptcha` on a
+large page = a stray asset on a SERP that just failed to parse).
 
 ## Lesson
 
