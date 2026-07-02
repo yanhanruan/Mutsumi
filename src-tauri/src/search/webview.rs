@@ -21,10 +21,12 @@
 //! permissioned plugin commands), so the injected init-script reports the
 //! rendered HTML via the core **event** plugin (`plugin:event|emit`, granted to
 //! the `serp-fetcher` window in `capabilities/webview-serp.json`), which Rust
-//! listens for. Each navigation carries a request id in the URL fragment
-//! (`#__serpid=…`); the init-script reads it at document-start and echoes it back
-//! so a late emit from a previous, timed-out navigation can never be mistaken for
-//! the current one.
+//! listens for. Each navigation carries a request id in the URL **query**
+//! (`&__serpid=…` — a query param, not a fragment, so it survives a redirect that
+//! wraps the URL in `continue=`); the init-script reads it at document-start and
+//! echoes it back to attribute the emit. When a redirect *drops* the param
+//! (Baidu), the script reports with an empty id and [`resolve_pending_key`] routes
+//! it via the sole in-flight navigation (they're serialized, so there's only one).
 //!
 //! ## Resilience (no fallback catches a miss now)
 //! * **Readiness wait** — the init-script polls for a known results container
@@ -155,6 +157,14 @@ fn resolve_pending_key(pending_ids: &[String], emitted_id: &str) -> Option<Strin
 /// wraps the original URL in a `continue=` param), then polls for a known results
 /// container (up to [`READY_MAX_MS`]) and emits the rendered `outerHTML` via the
 /// core event plugin.
+///
+/// If the id is **absent** — an engine (Baidu) redirects `/s?…&__serpid=…` to a
+/// URL that drops the param — it reports anyway with an empty id rather than
+/// bailing silently (which would time out invisibly). Navigations are serialized,
+/// so [`resolve_pending_key`]'s sole-pending fallback still attributes it to the
+/// in-flight fetch, turning a mystery timeout into a real outcome (results, or a
+/// visible challenge). The window only ever loads our own top-frame navigations,
+/// and the warm-up homepage has no pending entry, so a stray emit is dropped.
 fn init_script() -> String {
     // Runs at document-start, after Tauri's IPC init-script, before page scripts.
     format!(
@@ -165,8 +175,7 @@ fn init_script() -> String {
   var href = location.href;
   try {{ href = decodeURIComponent(href); }} catch (e) {{}}
   var m = href.match(/{key}=([0-9]+)/);            // survives a `continue=`-wrapped redirect
-  if (!m) return;                                  // not one of our navigations
-  var ID = m[1];
+  var ID = m ? m[1] : '';                          // no id (redirect dropped it)? still report
   // Result containers across Bing / Google / Baidu / DuckDuckGo.
   var SELECTORS = ['#b_results', '#rso', '#search', '#content_left', '#links', '.result'];
   var MAX = {max}, POLL = {poll}, SETTLE = {settle}, waited = 0, done = false;
