@@ -87,6 +87,10 @@ pub struct WebviewSerp {
     /// re-pop the window on every search after the user dismissed it.
     #[cfg(not(test))]
     manual_cooldown: std::sync::Mutex<Option<std::time::Instant>>,
+    /// Whether a manual-solve session is currently surfaced. At most one runs at
+    /// a time — a burst of challenged queries must not stack windows.
+    #[cfg(not(test))]
+    manual_active: std::sync::atomic::AtomicBool,
 }
 
 /// Percent-encode a query value for the SERP URL query string.
@@ -680,9 +684,16 @@ mod real {
             last = navigate_once(app, &state, engine, query).await?;
         }
 
-        // Backstop: if still challenged and manual-solve is enabled, surface the
-        // window so the user clears it once (cookie then persists). Cooldown-gated
-        // so a dismissed prompt doesn't re-pop on every subsequent search.
+        // Backstop: if still challenged, hand the solve to a **detached** task.
+        // The caller's search budget is short (chat caps it and cancels this
+        // future on timeout), so blocking here would tear the surfaced window down
+        // before the user could finish — and orphan it, since the cleanup runs
+        // after the wait. The task re-acquires the nav lock (serializing with
+        // other searches, so nothing navigates the window away mid-solve) and
+        // reserves the window for the user. This turn returns the challenge HTML
+        // as-is — it parses to no results, so chat proceeds without web context;
+        // the cleared cookie then warms subsequent searches. Cooldown-gated so a
+        // dismissed prompt doesn't re-pop on every search.
         if manual_solve_enabled() {
             let cooldown_active = state
                 .manual_cooldown
@@ -691,19 +702,51 @@ mod real {
                 .map(|t| t.elapsed() < MANUAL_COOLDOWN)
                 .unwrap_or(false);
             if should_prompt_manual(is_challenge_page(&last), cooldown_active) {
-                match manual_solve(app, &state, engine).await {
-                    Ok(html) => {
-                        *state.manual_cooldown.lock().unwrap() = None; // solved → clear
-                        last = html;
-                    }
-                    Err(_) => {
-                        *state.manual_cooldown.lock().unwrap() = Some(Instant::now());
-                    }
-                }
+                spawn_manual_solve(app.clone(), engine, query.to_string());
             }
         }
 
         Ok(last)
+    }
+
+    /// Spawn a detached solve session so the caller's (short) search budget can't
+    /// cancel it mid-solve. At most one runs at a time (guarded by
+    /// `manual_active`). The task owns the nav lock for its duration, so no
+    /// concurrent search can navigate the window away while the user is solving.
+    fn spawn_manual_solve(app: AppHandle, engine: SearchEngine, query: String) {
+        {
+            let state = app.state::<WebviewSerp>();
+            if state.manual_active.swap(true, Ordering::SeqCst) {
+                return; // a solve session is already up
+            }
+        }
+        tauri::async_runtime::spawn(async move {
+            let state = app.state::<WebviewSerp>();
+            let _guard = state.nav.lock().await;
+            let outcome = run_manual_solve_session(&app, &state, engine, &query).await;
+            match outcome {
+                Ok(()) => *state.manual_cooldown.lock().unwrap() = None, // solved → clear
+                Err(_) => *state.manual_cooldown.lock().unwrap() = Some(Instant::now()),
+            }
+            state.manual_active.store(false, Ordering::SeqCst);
+        });
+    }
+
+    /// Under the nav lock: re-navigate to the query so the window is on a fresh
+    /// challenge page it owns, then surface it and wait for the user to clear it.
+    /// `Ok` if the challenge was already gone (cookie warm) or the user solved;
+    /// `Err` on timeout. Assumes the caller holds the nav lock.
+    async fn run_manual_solve_session(
+        app: &AppHandle,
+        state: &WebviewSerp,
+        engine: SearchEngine,
+        query: &str,
+    ) -> Result<(), String> {
+        let html = navigate_once(app, state, engine, query).await?;
+        if !is_challenge_page(&html) {
+            return Ok(()); // no challenge to solve — cookie already warm
+        }
+        manual_solve(app, state, engine).await.map(|_| ())
     }
 }
 
