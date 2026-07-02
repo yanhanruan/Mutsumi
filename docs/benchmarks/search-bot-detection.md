@@ -64,9 +64,37 @@ MUTSUMI_SERP_BENCH=google MUTSUMI_SERP_HARDEN=1 npm run tauri dev
 appended to `<app-log-dir>/serp-bench.md`. `MUTSUMI_SERP_VISIBLE=1` shows the window so you can
 watch a challenge render.
 
-## Results
+## ⚠️ Correction (2026-07-02): the numbers below are INVALID
 
-Measured 2026-07-02, Google only, direct connection, 12 queries per mode, spaced 5 s.
+**The benchmark's classifier was broken, so every conclusion drawn from it is retracted.**
+`classify_outcome` checked `is_challenge_page(html)` *before* checking whether the page
+actually yielded results. A real Google results page embeds reCAPTCHA assets (e.g.
+`/recaptcha/api.js`), so its HTML contains a challenge-y token — and the classifier counted
+those **working results pages as challenges**. A runtime screenshot of a normal Tokyo-weather
+SERP (full weather card + forecast + news) confirmed it: Google returned results, the code
+called it a challenge and popped a manual-solve window over a perfectly good page.
+
+So "12/12 challenge, both modes" almost certainly means **Google was returning results the
+whole time** and the counter mis-scored them. The hardening story ("no client-side lever
+moves Google", "IP reputation dominates", "keep hardening because failed = 0") was built on
+that mis-scoring and should not be trusted.
+
+**Fix (committed):** results now win. `classify_outcome`, the retry loop, and the manual-solve
+trigger all use `is_blocking_challenge(has_results, html) = !has_results && is_challenge_page`,
+so a page we can parse is served as results even if it carries a stray token; only a
+**resultless** page with a challenge marker counts as a block.
+
+**What still stands / what to redo:**
+- Bing CN stays the default (it works; unrelated to this bug).
+- The `__TAURI_INTERNALS__`-delete safety check is independent and still holds (`failed = 0`
+  means `invoke`/emit was not broken by the delete).
+- Everything else — the challenge rate, whether hardening matters, whether Google needs
+  manual-solve at all — **must be re-measured** with the fixed classifier before it's believed.
+
+## Results (INVALID — see correction above; kept for the record)
+
+Measured 2026-07-02, Google only, direct connection, 12 queries per mode, spaced 5 s. These
+counts came from the broken classifier and over-report `challenge`.
 
 ### Baseline (`HARDEN=0`)
 
@@ -80,55 +108,14 @@ Measured 2026-07-02, Google only, direct connection, 12 queries per mode, spaced
 |---|---:|---:|---:|---:|
 | Google | 0 | 12 | 0 | 0 |
 
-### Δ (challenges eliminated)
+## Re-run needed
 
-| engine | baseline challenge | hardened challenge | Δ |
-|---|---:|---:|---:|
-| Google | 12 | 12 | **0** |
+With the fixed classifier, re-run both modes and refill this doc:
 
-## Interpretation
+```bash
+MUTSUMI_SERP_BENCH=google MUTSUMI_SERP_HARDEN=0 npm run tauri dev
+MUTSUMI_SERP_BENCH=google MUTSUMI_SERP_HARDEN=1 npm run tauri dev
+```
 
-**Hardening had no effect on Google: 12/12 → 12/12.** Every query was served a reCAPTCHA /
-`/sorry/index` challenge in both modes. The three client-side levers
-(`AutomationControlled` off, persistent profile, `__TAURI_INTERNALS__` delete) removed zero
-challenges here.
-
-Two things this *does* establish:
-
-- **The hardening is safe to keep.** `failed = 0` in both runs is the key control: the page
-  HTML was captured and correctly classified as a *challenge*, not lost to a timeout. That
-  proves the `delete window.__TAURI_INTERNALS__` leg did **not** break the captured `invoke`
-  / emit path — the failure mode we were guarding against (lever 3 silently killing IPC) did
-  not occur. So the levers stay on by default; they cost nothing and may still help the four
-  engines that already pass. For Google specifically they are a documented no-op.
-- **The pre-run ranking was wrong for Google.** We ranked the fixable fingerprint/profile
-  tells as the primary lever and IP reputation as secondary. The measurement refutes that:
-  with every client-side tell removed, the challenge rate is unchanged. The operative cause
-  is the residual we can't touch from the client — IP reputation and/or Google's treatment of
-  an embedded WebView2 session at the network level. This is the "honest ceiling" flagged up
-  front, now measured rather than assumed.
-
-### Decisions this settles
-
-1. **Bing CN stays the default engine** (unchanged). Google is not viable as a default over
-   this WebView path — it challenges 100% of queries.
-2. **Keep `MUTSUMI_SERP_HARDEN` on by default.** Free, non-destructive (`failed = 0`), and
-   plausibly useful for the non-Google engines; no reason to disable it.
-3. **Do _not_ build the 1b audio auto-solver (Vosk / Wit.ai).** The challenge fires on *every*
-   Google query, and Google actively hardens the audio challenge against bots — an STT solver
-   would be attempting the most-defended path, on every request, for the one engine we already
-   keep non-default. That's a poor return for a ~50 MB model dependency plus hosting.
-4. **Manual-solve is the chosen Google path, now on by default.** Since no client-side lever
-   moves the challenge, a challenged fetch surfaces the fetch window (with a localized
-   instruction banner) so the user clears the reCAPTCHA once; the clearance cookie then
-   persists in the profile for later searches. On by default, disable with
-   `MUTSUMI_SERP_MANUAL=0`, and auto-suppressed during a benchmark run (unattended). Caveat:
-   the chat search budget is short, so the *first* challenged query may already have answered
-   without web context by the time the window appears — solving it warms the cookie for the
-   next search rather than the current turn.
-
-### Optional follow-up
-
-Run `MUTSUMI_SERP_BENCH=all MUTSUMI_SERP_HARDEN=1` once to confirm hardening doesn't *regress*
-the four working engines (each should show `results > 0`, `failed = 0`). Not required — those
-engines passed runtime validation — but it would close the loop on "hardening breaks nothing."
+Expect `challenge` to drop sharply (likely to ~0 for the queries that actually work). Only
+then decide whether hardening or manual-solve earn their keep for Google.

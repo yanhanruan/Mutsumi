@@ -255,8 +255,13 @@ impl Outcome {
 /// Classify a fetch result for benchmarking / logging. Pure — unit-tested.
 pub fn classify_outcome(engine: SearchEngine, fetch: &Result<String, String>) -> Outcome {
     match fetch {
-        Ok(html) if is_challenge_page(html) => Outcome::Challenge,
         Ok(html) => match super::parse_rendered(engine, html).len() {
+            // Results win. A page we can parse into results IS a SERP, even if its
+            // HTML also carries a challenge-y token — Google embeds reCAPTCHA
+            // assets on ordinary results pages, so checking the marker first
+            // misclassifies working SERPs as challenges (it did). Only a page that
+            // yielded **no** results and shows a challenge marker is a real block.
+            0 if is_challenge_page(html) => Outcome::Challenge,
             0 => Outcome::Empty,
             n => Outcome::Results(n),
         },
@@ -289,12 +294,20 @@ pub fn is_challenge_page(html: &str) -> bool {
     CJK.iter().any(|m| html.contains(m))
 }
 
-/// Whether to re-navigate after a failed attempt: only when a challenge was
-/// detected *and* attempts remain. A merely-empty/unparseable page is **not**
-/// retried. Pure — unit-tested. (`attempt` is 1-based: the attempt that just
-/// produced `html`.)
-pub fn should_retry(attempt: u8, html: &str, max_attempts: u8) -> bool {
-    attempt < max_attempts && is_challenge_page(html)
+/// A challenge only *blocks* when the page also produced no results. A real SERP
+/// that merely carries a stray challenge token (Google embeds reCAPTCHA assets on
+/// ordinary results pages) is **not** a block — it must serve its results, never
+/// trigger a retry or the manual-solve window. Pure — unit-tested.
+pub fn is_blocking_challenge(has_results: bool, html: &str) -> bool {
+    !has_results && is_challenge_page(html)
+}
+
+/// Whether to re-navigate after a failed attempt: only when the page was a
+/// *blocking* challenge (marker **and** no results) and attempts remain. A
+/// merely-empty/unparseable page, or a real SERP with a stray token, is **not**
+/// retried. Pure — unit-tested. (`attempt` is 1-based.)
+pub fn should_retry(attempt: u8, blocking_challenge: bool, max_attempts: u8) -> bool {
+    attempt < max_attempts && blocking_challenge
 }
 
 /// Policy for [`manual_solve_enabled`], factored out to be unit-testable without
@@ -404,7 +417,7 @@ mod real {
     use tokio::sync::oneshot;
 
     use super::{
-        hardening_enabled, homepage_url, init_script, is_challenge_page, manual_solve_enabled,
+        hardening_enabled, homepage_url, init_script, is_blocking_challenge, manual_solve_enabled,
         resolve_pending_key, serp_url, should_prompt_manual, should_retry, solve_banner_js,
         solve_strings, WebviewSerp, HARDEN_BROWSER_ARGS, MAX_ATTEMPTS, SERP_EVENT,
     };
@@ -676,10 +689,11 @@ mod real {
 
         let mut last = navigate_once(app, &state, engine, query).await?;
         for attempt in 1..MAX_ATTEMPTS {
-            if !should_retry(attempt, &last, MAX_ATTEMPTS) {
+            let has_results = !crate::search::parse_rendered(engine, &last).is_empty();
+            if !should_retry(attempt, is_blocking_challenge(has_results, &last), MAX_ATTEMPTS) {
                 break;
             }
-            log::info!("search: webview {engine:?} hit a challenge page, retrying once");
+            log::info!("search: webview {engine:?} hit a blocking challenge, retrying once");
             tokio::time::sleep(RETRY_BACKOFF).await;
             last = navigate_once(app, &state, engine, query).await?;
         }
@@ -695,13 +709,15 @@ mod real {
         // the cleared cookie then warms subsequent searches. Cooldown-gated so a
         // dismissed prompt doesn't re-pop on every search.
         if manual_solve_enabled() {
+            let has_results = !crate::search::parse_rendered(engine, &last).is_empty();
+            let blocked = is_blocking_challenge(has_results, &last);
             let cooldown_active = state
                 .manual_cooldown
                 .lock()
                 .unwrap()
                 .map(|t| t.elapsed() < MANUAL_COOLDOWN)
                 .unwrap_or(false);
-            if should_prompt_manual(is_challenge_page(&last), cooldown_active) {
+            if should_prompt_manual(blocked, cooldown_active) {
                 spawn_manual_solve(app.clone(), engine, query.to_string());
             }
         }
@@ -743,8 +759,9 @@ mod real {
         query: &str,
     ) -> Result<(), String> {
         let html = navigate_once(app, state, engine, query).await?;
-        if !is_challenge_page(&html) {
-            return Ok(()); // no challenge to solve — cookie already warm
+        let has_results = !crate::search::parse_rendered(engine, &html).is_empty();
+        if !is_blocking_challenge(has_results, &html) {
+            return Ok(()); // results present (or no block) — nothing to solve
         }
         manual_solve(app, state, engine).await.map(|_| ())
     }
@@ -914,18 +931,38 @@ mod tests {
     }
 
     #[test]
-    fn should_retry_exactly_once_on_a_challenge() {
-        let cf = r#"<title>Just a moment...</title>"#;
-        // First attempt hit a challenge → retry permitted.
-        assert!(should_retry(1, cf, MAX_ATTEMPTS));
-        // After the retry (attempt == MAX) → no more retries even if still challenged.
-        assert!(!should_retry(MAX_ATTEMPTS, cf, MAX_ATTEMPTS));
+    fn should_retry_exactly_once_on_a_blocking_challenge() {
+        // Blocking challenge → retry once, then stop at the attempt cap.
+        assert!(should_retry(1, true, MAX_ATTEMPTS));
+        assert!(!should_retry(MAX_ATTEMPTS, true, MAX_ATTEMPTS));
+        // Not a block (real SERP, or merely-empty page) → never retry.
+        assert!(!should_retry(1, false, MAX_ATTEMPTS));
     }
 
     #[test]
-    fn should_not_retry_on_a_merely_unparseable_page() {
-        let unknown = "<html><body><div>nothing we recognize</div></body></html>";
-        assert!(!should_retry(1, unknown, MAX_ATTEMPTS));
+    fn is_blocking_challenge_requires_no_results() {
+        let cf = r#"<title>Just a moment...</title><div class="cf-browser-verification"></div>"#;
+        // Challenge markers but results WERE parsed → not a block. This is the bug
+        // the screenshot exposed: a working Google SERP embeds a challenge-y token,
+        // and we must serve its results instead of popping a solve window.
+        assert!(!is_blocking_challenge(true, cf));
+        // Challenge markers and no results → a genuine block.
+        assert!(is_blocking_challenge(false, cf));
+        // No markers, no results → just empty, not a challenge.
+        assert!(!is_blocking_challenge(false, "<html><body>nothing</body></html>"));
+    }
+
+    #[test]
+    fn classify_prefers_results_over_a_stray_challenge_token() {
+        // A real Bing SERP whose HTML also loads a reCAPTCHA asset must classify as
+        // Results, not Challenge (checking the marker first would misfire).
+        let serp = r#"<div id="b_results"><ol><li class="b_algo">
+            <h2><a href="https://example.com/a">A</a></h2><div class="b_caption"><p>s</p></div>
+          </li></ol></div><script src="https://www.google.com/recaptcha/api.js"></script>"#;
+        assert!(matches!(
+            classify_outcome(SearchEngine::BingCn, &Ok(serp.to_string())),
+            Outcome::Results(n) if n >= 1
+        ));
     }
 
     // ── manual-solve backstop (1b) ─────────────────────────────────────────
