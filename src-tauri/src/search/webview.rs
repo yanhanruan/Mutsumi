@@ -155,25 +155,13 @@ fn resolve_pending_key(pending_ids: &[String], emitted_id: &str) -> Option<Strin
 /// wraps the original URL in a `continue=` param), then polls for a known results
 /// container (up to [`READY_MAX_MS`]) and emits the rendered `outerHTML` via the
 /// core event plugin.
-///
-/// When `hide_globals` is set (hardened mode), it first captures a **bound**
-/// `invoke` reference, then deletes `window.__TAURI_INTERNALS__` and the other
-/// `__TAURI*` globals — before any SERP/detector script runs — so the page can't
-/// fingerprint the embedded webview. `grab()` reports through the captured
-/// reference, which keeps working after the global is removed.
-fn init_script(hide_globals: bool) -> String {
+fn init_script() -> String {
     // Runs at document-start, after Tauri's IPC init-script, before page scripts.
-    let hide = if hide_globals {
-        r#"try { ['__TAURI_INTERNALS__','__TAURI__','__TAURI_METADATA__','__TAURI_EVENT_PLUGIN_INTERNALS__','__TAURI_OS_PLUGIN_INTERNALS__'].forEach(function(k){ try { delete window[k]; } catch(e) { try { window[k] = undefined; } catch(e2){} } }); } catch(e) {}"#
-    } else {
-        ""
-    };
     format!(
         r#"(function() {{
   if (window.top !== window.self) return;          // ignore ad/iframe sub-frames
-  var __ti = window.__TAURI_INTERNALS__;           // capture the IPC entry point…
+  var __ti = window.__TAURI_INTERNALS__;           // capture the IPC entry point
   var invoke = (__ti && __ti.invoke) ? __ti.invoke.bind(__ti) : null;
-  {hide}                                           // …then remove the automation tells
   var href = location.href;
   try {{ href = decodeURIComponent(href); }} catch (e) {{}}
   var m = href.match(/{key}=([0-9]+)/);            // survives a `continue=`-wrapped redirect
@@ -204,7 +192,6 @@ fn init_script(hide_globals: bool) -> String {
   }}
   tick();
 }})();"#,
-        hide = hide,
         key = ID_KEY,
         event = SERP_EVENT,
         max = READY_MAX_MS,
@@ -212,21 +199,6 @@ fn init_script(hide_globals: bool) -> String {
         settle = SETTLE_MS,
     )
 }
-
-/// Master hardening toggle, read from `MUTSUMI_SERP_HARDEN`. Default (unset) is
-/// **on** — the benchmark sets `0` for a clean baseline. Governs the browser
-/// args, the persistent profile vs incognito, and the global-hiding init-script.
-pub fn hardening_enabled() -> bool {
-    std::env::var("MUTSUMI_SERP_HARDEN")
-        .map(|v| v != "0" && !v.eq_ignore_ascii_case("false") && !v.eq_ignore_ascii_case("off"))
-        .unwrap_or(true)
-}
-
-/// WebView2 args applied in hardened mode. Preserves wry's defaults and adds
-/// `--disable-blink-features=AutomationControlled`, which removes
-/// `navigator.webdriver` / the automation flag.
-const HARDEN_BROWSER_ARGS: &str =
-    "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-blink-features=AutomationControlled";
 
 /// Outcome of one SERP fetch — the unit of the bot-detection benchmark.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -417,9 +389,9 @@ mod real {
     use tokio::sync::oneshot;
 
     use super::{
-        hardening_enabled, homepage_url, init_script, is_blocking_challenge, manual_solve_enabled,
+        homepage_url, init_script, is_blocking_challenge, manual_solve_enabled,
         resolve_pending_key, serp_url, should_prompt_manual, should_retry, solve_banner_js,
-        solve_strings, WebviewSerp, HARDEN_BROWSER_ARGS, MAX_ATTEMPTS, SERP_EVENT,
+        solve_strings, WebviewSerp, MAX_ATTEMPTS, SERP_EVENT,
     };
     use crate::search::SearchEngine;
 
@@ -480,41 +452,26 @@ mod real {
         });
     }
 
-    /// Dedicated on-disk profile for the SERP window (its own cookies + cache +
-    /// history — a returning-user look). Isolated from the user's real browser;
-    /// nothing here ever deletes user data.
-    fn serp_profile_dir(app: &AppHandle) -> Option<std::path::PathBuf> {
-        app.path().app_local_data_dir().ok().map(|d| d.join("serp-profile"))
-    }
-
     /// Create the hidden window. Must run on the main (UI) thread.
     ///
-    /// In hardened mode (default; see [`hardening_enabled`]) it disables the
-    /// `AutomationControlled` fingerprint flag, uses a persistent profile, and
-    /// injects the global-hiding init-script. The un-hardened path (the
-    /// benchmark's baseline) uses an incognito profile and none of those.
+    /// Incognito (ephemeral) — a plain Chromium tab with the browser's own
+    /// genuine fingerprint. We tried fingerprint/profile hardening; a benchmark
+    /// (see `docs/benchmarks/search-bot-detection.md`) showed it changed nothing,
+    /// because the engines return results to this WebView as-is. Cookies still
+    /// persist for the window's session (it's long-lived + reused), which is all
+    /// the manual-solve backstop needs.
     fn build_window(app: &AppHandle, url: tauri::Url) -> Result<(), String> {
         let visible = std::env::var("MUTSUMI_SERP_VISIBLE").is_ok(); // debugging aid
-        let harden = hardening_enabled();
 
-        let mut builder = WebviewWindowBuilder::new(app, SERP_WINDOW, WebviewUrl::External(url))
+        let built = WebviewWindowBuilder::new(app, SERP_WINDOW, WebviewUrl::External(url))
             .title("search")
             .visible(visible)
             .skip_taskbar(true)
             .inner_size(1000.0, 800.0)
-            .initialization_script(init_script(harden).as_str());
-
-        if harden {
-            builder = builder.additional_browser_args(HARDEN_BROWSER_ARGS);
-            if let Some(dir) = serp_profile_dir(app) {
-                builder = builder.data_directory(dir);
-            }
-        } else {
-            // Baseline: ephemeral profile so warm cookies can't leak into it.
-            builder = builder.incognito(true);
-        }
-
-        let built = builder.build().map_err(|e| format!("build: {e}"))?;
+            .initialization_script(init_script().as_str())
+            .incognito(true)
+            .build()
+            .map_err(|e| format!("build: {e}"))?;
         #[cfg(debug_assertions)]
         if visible {
             built.open_devtools();
@@ -851,29 +808,18 @@ mod tests {
 
     #[test]
     fn init_script_carries_the_event_name_key_and_readiness() {
-        let js = init_script(true);
+        let js = init_script();
         assert!(js.contains("serp-html"), "event name missing");
         assert!(js.contains("__serpid"), "id key missing");
         assert!(js.contains("decodeURIComponent(href)"), "redirect-surviving recovery missing");
         assert!(js.contains("4000"), "readiness cap missing");
         assert!(js.contains("#b_results"), "readiness selector missing");
-        // Must report through the permissioned event plugin, top-frame only.
+        // Reports through the captured, bound invoke via the permissioned event
+        // plugin, top-frame only.
+        assert!(js.contains(".invoke.bind("), "must capture a bound invoke");
+        assert!(js.contains("if (invoke) invoke("), "grab must use the captured invoke");
         assert!(js.contains("plugin:event|emit"));
         assert!(js.contains("window.top !== window.self"));
-    }
-
-    #[test]
-    fn init_script_hides_tauri_globals_only_when_hardened() {
-        let hardened = init_script(true);
-        // Captures a bound invoke first, then deletes the automation tells.
-        assert!(hardened.contains(".invoke.bind("), "must capture invoke before hiding");
-        assert!(hardened.contains("delete window[k]"), "must delete the globals");
-        assert!(hardened.contains("__TAURI_INTERNALS__"), "must target the IPC global");
-        // grab() must use the captured reference (works after the delete).
-        assert!(hardened.contains("if (invoke) invoke("), "grab must use captured invoke");
-
-        let baseline = init_script(false);
-        assert!(!baseline.contains("delete window[k]"), "baseline must not touch globals");
     }
 
     // ── outcome classifier (benchmark instrumentation) ─────────────────────
@@ -898,16 +844,6 @@ mod tests {
             classify_outcome(SearchEngine::BingCn, &Err("timed out".to_string())),
             Outcome::Failed
         );
-    }
-
-    #[test]
-    fn hardening_defaults_on_and_respects_the_env_toggle() {
-        // Note: reads process env; assert only the parse of explicit values via a
-        // pure mirror to avoid mutating global env in a parallel test run.
-        for (v, want) in [("0", false), ("false", false), ("off", false), ("1", true), ("yes", true)] {
-            let parsed = v != "0" && !v.eq_ignore_ascii_case("false") && !v.eq_ignore_ascii_case("off");
-            assert_eq!(parsed, want, "value {v}");
-        }
     }
 
     // ── challenge detection + retry policy (objective 3, user Test 4A/4B) ──

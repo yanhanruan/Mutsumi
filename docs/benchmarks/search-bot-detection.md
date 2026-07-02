@@ -1,121 +1,74 @@
-# Search Bot-Detection — Baseline vs Hardened
+# Search Bot-Detection — post-mortem
 
-**Date:** 2026-07-01 · **Branch:** `feat/search-webview-only` · **Subject:** the WebView
-search path (`search::webview::fetch_serp`) and its resistance to anti-bot challenges.
+**Subject:** the WebView search path (`search::webview::fetch_serp`) and whether it gets
+stopped by anti-bot challenges. Companion to [S2](search-correctness.md) (which measured whether
+search *improves answers*).
 
-Companion to [S2](search-correctness.md): S2 measured whether search *improves answers*; this
-measures whether the WebView actually *gets* a SERP, or gets stopped by a reCAPTCHA / Cloudflare
-challenge — and how much client-side hardening reduces that.
+## TL;DR
 
-## Why
+We thought Google served a reCAPTCHA on every query and built fingerprint/profile **hardening**
+to beat it. It was a **false alarm caused by our own classifier**, not a real block. The
+hardening was removed as dead weight. The one real bug — misclassifying working result pages as
+challenges — is fixed.
 
-After the WebView-only refactor, runtime validation passed for every engine **except Google**,
-which serves a reCAPTCHA challenge. This benchmark exists to (a) name the causes, (b) apply
-fingerprint/profile hardening, and (c) **quantify** the reduction in challenges rather than
-guessing.
+## What we believed (wrong)
 
-## Root-cause analysis — why a challenge fires
+After the WebView-only refactor, runtime checks + an in-app benchmark reported Google returning a
+challenge on **12/12** queries, both with and without hardening. We concluded Google was 100%
+blocked, that no client-side lever moved it, and that IP reputation dominated. On that basis we
+added: `--disable-blink-features=AutomationControlled`, a persistent profile, and a document-start
+delete of `window.__TAURI_INTERNALS__` (all behind `MUTSUMI_SERP_HARDEN`).
 
-The connection to Google here is **direct (no proxy)**, so the fixable levers dominate. Ranked:
+## The actual bug
 
-1. **Automation fingerprint tells.** `navigator.webdriver` / `AutomationControlled` — wry does
-   **not** disable this by default (verified in `wry-0.55.1`). And `window.__TAURI_INTERNALS__`
-   (plus other `__TAURI*` globals) is exposed on the page — a dead giveaway of an embedded webview
-   to any detection script.
-2. **Cold / empty profile.** A fresh WebView with no cookies, cache, or history looks like a bot.
-3. **IP reputation.** Still a factor, but with a direct connection it's secondary; the benchmark
-   shows how much is left after 1–2 are removed.
-4. **Behavioral.** Already fine — ≤ 1 search / 5 s, a real *rendered* window, genuine TLS/JA3.
+`classify_outcome` (and the retry loop, and the manual-solve trigger) checked
+`is_challenge_page(html)` **before** checking whether the page produced results. A normal Google
+SERP embeds reCAPTCHA assets (`/recaptcha/api.js`), so its HTML contains a challenge-y token — and
+the classifier scored those **working results pages as challenges**. A runtime screenshot settled
+it: a full Tokyo-weather SERP (weather card + forecast + news) rendered fine while the code popped
+a manual-solve window over it. Google had been returning results the whole time; the "12/12
+challenge" counts were the classifier over-reporting. Every conclusion drawn from that benchmark
+is retracted.
 
-## Hardening applied (all gated by `MUTSUMI_SERP_HARDEN`)
+## The fix
 
-| # | Lever | Addresses | Where |
-|---|---|---|---|
-| 1 | `--disable-blink-features=AutomationControlled` (+ wry defaults) | `navigator.webdriver` | `build_window` `additional_browser_args` |
-| 2 | Persistent `data_directory` profile (cookies **+ cache + history**); baseline uses `incognito` | cold profile | `build_window` |
-| 3 | Capture bound `invoke`, then `delete window.__TAURI_INTERNALS__` (+ `__TAURI*`) at document-start | embedded-webview tell | `init_script(hide_globals=true)` |
-| — | Per-session homepage **warm-up** before the first search | cold profile | `warm_up` |
+Results win. One predicate gates classification, retry, and the solve popup:
 
-**Deliberately rejected:** UA spoofing. Overriding the UA without matching Client Hints is itself
-a mismatch tell; the native WebView2 UA is internally consistent, so we leave it.
-
-The request-id also moved from the URL **fragment** to a **query param** so it survives a
-`/sorry/index?continue=…` redirect — without that, redirect challenges time out *invisibly* and
-can't even be counted. That fix is the prerequisite for this benchmark.
-
-## Method
-
-12 fixed queries (`bench.rs::QUERIES`) that should all return results, so a `challenge`/`empty`
-count is a clean bot-detection signal. Each fetch is classified by
-`webview::classify_outcome` into **results / challenge / empty / failed**. Queries are spaced
-**5 s** (real-usage pattern; a burst would itself provoke challenges). The runner lives in the app
-(`search::bench`) because the live path needs a real WebView — it can't run under `cargo test`.
-
-Two launches per engine, each a fresh process so the toggle is read cleanly at window build:
-
-```bash
-# baseline (no hardening; incognito profile)
-MUTSUMI_SERP_BENCH=google MUTSUMI_SERP_HARDEN=0 npm run tauri dev
-# hardened (default)
-MUTSUMI_SERP_BENCH=google MUTSUMI_SERP_HARDEN=1 npm run tauri dev
+```
+is_blocking_challenge(has_results, html) = !has_results && is_challenge_page(html)
 ```
 
-`MUTSUMI_SERP_BENCH` accepts a single engine key, a comma list, or `all`. Results are logged and
-appended to `<app-log-dir>/serp-bench.md`. `MUTSUMI_SERP_VISIBLE=1` shows the window so you can
-watch a challenge render.
+A page we can parse is served as results even if it carries a stray token; only a **resultless**
+page with a challenge marker is a real block.
 
-## ⚠️ Correction (2026-07-02): the numbers below are INVALID
+## Hardening: removed
 
-**The benchmark's classifier was broken, so every conclusion drawn from it is retracted.**
-`classify_outcome` checked `is_challenge_page(html)` *before* checking whether the page
-actually yielded results. A real Google results page embeds reCAPTCHA assets (e.g.
-`/recaptcha/api.js`), so its HTML contains a challenge-y token — and the classifier counted
-those **working results pages as challenges**. A runtime screenshot of a normal Tokyo-weather
-SERP (full weather card + forecast + news) confirmed it: Google returned results, the code
-called it a challenge and popped a manual-solve window over a perfectly good page.
+With the classifier fixed, the hardening had no job — the engines return results to a plain
+incognito WebView. Removed: the `MUTSUMI_SERP_HARDEN` toggle, the `AutomationControlled`/browser
+args, the persistent `serp-profile` data directory, and the `__TAURI_INTERNALS__`-hiding
+init-script. The fetch window is now a plain incognito tab with the browser's genuine fingerprint.
+(The one thing that survived independently: deleting the IPC global never broke `invoke`/emit —
+but that only ever mattered *because* of the hardening, which is gone.)
 
-So "12/12 challenge, both modes" almost certainly means **Google was returning results the
-whole time** and the counter mis-scored them. The hardening story ("no client-side lever
-moves Google", "IP reputation dominates", "keep hardening because failed = 0") was built on
-that mis-scoring and should not be trusted.
+**Kept:** the manual-solve backstop (`MUTSUMI_SERP_MANUAL`, default on). Post-fix it fires only on
+a genuine block (zero results **and** a challenge marker), so it won't misfire on working Google —
+if a real challenge ever appears, the fetch window surfaces with a localized banner for the user to
+clear it, and the cleared cookie persists for the window's session.
 
-**Fix (committed):** results now win. `classify_outcome`, the retry loop, and the manual-solve
-trigger all use `is_blocking_challenge(has_results, html) = !has_results && is_challenge_page`,
-so a page we can parse is served as results even if it carries a stray token; only a
-**resultless** page with a challenge marker counts as a block.
+## Running the benchmark now
 
-**What still stands / what to redo:**
-- Bing CN stays the default (it works; unrelated to this bug).
-- The `__TAURI_INTERNALS__`-delete safety check is independent and still holds (`failed = 0`
-  means `invoke`/emit was not broken by the delete).
-- Everything else — the challenge rate, whether hardening matters, whether Google needs
-  manual-solve at all — **must be re-measured** with the fixed classifier before it's believed.
-
-## Results (INVALID — see correction above; kept for the record)
-
-Measured 2026-07-02, Google only, direct connection, 12 queries per mode, spaced 5 s. These
-counts came from the broken classifier and over-report `challenge`.
-
-### Baseline (`HARDEN=0`)
-
-| engine | results | challenge | empty | failed |
-|---|---:|---:|---:|---:|
-| Google | 0 | 12 | 0 | 0 |
-
-### Hardened (`HARDEN=1`)
-
-| engine | results | challenge | empty | failed |
-|---|---:|---:|---:|---:|
-| Google | 0 | 12 | 0 | 0 |
-
-## Re-run needed
-
-With the fixed classifier, re-run both modes and refill this doc:
+Still available (`search::bench`, env-gated), now without the HARDEN split:
 
 ```bash
-MUTSUMI_SERP_BENCH=google MUTSUMI_SERP_HARDEN=0 npm run tauri dev
-MUTSUMI_SERP_BENCH=google MUTSUMI_SERP_HARDEN=1 npm run tauri dev
+MUTSUMI_SERP_BENCH=google npm run tauri dev   # one engine
+MUTSUMI_SERP_BENCH=all    npm run tauri dev   # all five
 ```
 
-Expect `challenge` to drop sharply (likely to ~0 for the queries that actually work). Only
-then decide whether hardening or manual-solve earn their keep for Google.
+12 fixed queries per engine, spaced 5 s, classified into results / challenge / empty / failed and
+appended to `<app-log-dir>/serp-bench.md`. With the fixed classifier, `challenge` should be ~0 for
+queries that actually work.
+
+## Lesson
+
+Validate the measurement against a real page before building on it. A whole hardening effort was
+spent on a number the instrument invented; one screenshot of a real SERP falsified it.

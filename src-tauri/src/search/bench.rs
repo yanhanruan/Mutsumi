@@ -5,11 +5,9 @@
 //! `MUTSUMI_SERP_BENCH=<engine|all>` before launch and it drives a fixed query
 //! set (spaced like real usage) through [`super::webview::fetch_serp`], classifies
 //! each outcome with [`super::webview::classify_outcome`], and writes a Markdown
-//! results table to the app log dir. Pair it with `MUTSUMI_SERP_HARDEN=0|1` to get
-//! a clean **baseline vs hardened** comparison in two separate launches.
+//! results table to the app log dir.
 //!
-//!   MUTSUMI_SERP_BENCH=google MUTSUMI_SERP_HARDEN=0 npm run tauri dev   # baseline
-//!   MUTSUMI_SERP_BENCH=google MUTSUMI_SERP_HARDEN=1 npm run tauri dev   # hardened
+//!   MUTSUMI_SERP_BENCH=google npm run tauri dev
 //!
 //! See `docs/benchmarks/search-bot-detection.md` for method + results.
 
@@ -17,7 +15,7 @@ use std::time::Duration;
 
 use tauri::{AppHandle, Manager};
 
-use super::webview::{self, classify_outcome, hardening_enabled, Outcome};
+use super::webview::{self, classify_outcome, Outcome};
 use super::SearchEngine;
 
 /// Fixed query set — all *should* return results, so a `challenge`/`empty` count
@@ -95,9 +93,8 @@ impl Tally {
 }
 
 async fn run(app: AppHandle, engines: Vec<SearchEngine>) {
-    let hardened = hardening_enabled();
     let n = QUERIES.len();
-    log::info!("serp-bench: START hardened={hardened} engines={engines:?} queries={n}");
+    log::info!("serp-bench: START engines={engines:?} queries={n}");
 
     let mut rows: Vec<(SearchEngine, Tally)> = Vec::new();
     for engine in engines {
@@ -118,18 +115,17 @@ async fn run(app: AppHandle, engines: Vec<SearchEngine>) {
         rows.push((engine, tally));
     }
 
-    let report = render_report(hardened, n, &rows);
+    let report = render_report(n, &rows);
     log::info!("serp-bench: RESULTS\n{report}");
     write_report(&app, &report);
 }
 
-fn render_report(hardened: bool, n: usize, rows: &[(SearchEngine, Tally)]) -> String {
+fn render_report(n: usize, rows: &[(SearchEngine, Tally)]) -> String {
     let ts = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
     let mut s = format!(
-        "## Run {ts} — `HARDEN={}` ({n} queries/engine)\n\n\
+        "## Run {ts} ({n} queries/engine)\n\n\
          | engine | results | challenge | empty | failed |\n\
-         |---|---:|---:|---:|---:|\n",
-        if hardened { 1 } else { 0 }
+         |---|---:|---:|---:|---:|\n"
     );
     for (engine, t) in rows {
         s.push_str(&format!(
@@ -149,7 +145,7 @@ fn write_report(app: &AppHandle, report: &str) {
     };
     let _ = std::fs::create_dir_all(&dir);
     let path = dir.join("serp-bench.md");
-    // Append so baseline + hardened runs accumulate in one file.
+    // Append so successive runs accumulate in one file.
     use std::io::Write;
     match std::fs::OpenOptions::new().create(true).append(true).open(&path) {
         Ok(mut f) => {
@@ -193,8 +189,7 @@ mod tests {
             (SearchEngine::Google, Tally { results: 8, challenge: 4, empty: 0, failed: 0 }),
             (SearchEngine::BingCn, Tally { results: 12, challenge: 0, empty: 0, failed: 0 }),
         ];
-        let r = render_report(true, 12, &rows);
-        assert!(r.contains("HARDEN=1"));
+        let r = render_report(12, &rows);
         assert!(r.contains("| Google | 8 | 4 | 0 | 0 |"));
         assert!(r.contains("| BingCn | 12 | 0 | 0 | 0 |"));
     }
