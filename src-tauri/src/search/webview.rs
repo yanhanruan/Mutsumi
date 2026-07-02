@@ -293,15 +293,80 @@ pub fn should_retry(attempt: u8, html: &str, max_attempts: u8) -> bool {
     attempt < max_attempts && is_challenge_page(html)
 }
 
-/// Whether the **manual-solve backstop** is enabled (opt-in via env for now; a
-/// UI setting can promote it later — kept off by default so the app never pops a
-/// window unexpectedly). When on, a still-challenged fetch surfaces the hidden
-/// window so the user clears the reCAPTCHA once; the clearance cookie then
-/// persists in the profile for subsequent searches.
+/// Policy for [`manual_solve_enabled`], factored out to be unit-testable without
+/// mutating process env. Benchmarks force it **off** (a benchmark run is
+/// unattended — it must never pop a window). Otherwise it defaults **on**: when a
+/// search hits a challenge page, surface the window so the user can clear it
+/// once; the clearance cookie then persists in the profile for later searches.
+/// An explicit off-ish `MUTSUMI_SERP_MANUAL` value disables it. Pure.
+fn manual_solve_policy(bench_active: bool, manual_env: Option<&str>) -> bool {
+    if bench_active {
+        return false;
+    }
+    match manual_env {
+        Some(v) => v != "0" && !v.eq_ignore_ascii_case("false") && !v.eq_ignore_ascii_case("off"),
+        None => true,
+    }
+}
+
+/// Whether the **manual-solve backstop** is enabled. Default on (a challenge
+/// surfaces the window for the user to clear); disable with
+/// `MUTSUMI_SERP_MANUAL=0` (or `false`/`off`). Suppressed automatically during an
+/// unattended benchmark run (`MUTSUMI_SERP_BENCH` set). The chat search budget is
+/// short, so the *first* challenged query may already have answered without web
+/// context by the time the window appears — solving it still warms the clearance
+/// cookie so subsequent searches succeed.
 pub fn manual_solve_enabled() -> bool {
-    std::env::var("MUTSUMI_SERP_MANUAL")
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("on"))
-        .unwrap_or(false)
+    manual_solve_policy(
+        std::env::var("MUTSUMI_SERP_BENCH").is_ok(),
+        std::env::var("MUTSUMI_SERP_MANUAL").ok().as_deref(),
+    )
+}
+
+/// Localized (title, instruction) for the challenge-solve window. Rust-side
+/// (mirrors [`crate::tray`]'s `labels_for_locale`) because the window navigates
+/// to a *remote* page and so can't reach the Vue i18n system. Supported locales:
+/// `zh` | `ja` | else English. Pure — unit-tested.
+fn solve_strings(locale: &str) -> (&'static str, &'static str) {
+    match locale {
+        "zh" => (
+            "请完成验证",
+            "该搜索引擎要求验证。请在此窗口内完成验证；完成后窗口会自动关闭并继续搜索。",
+        ),
+        "ja" => (
+            "認証を完了してください",
+            "検索エンジンが認証を求めています。このウィンドウで認証を完了してください。完了すると自動的に閉じ、検索を続行します。",
+        ),
+        _ => (
+            "Complete verification",
+            "This search engine needs a quick verification. Please complete it in this window — it closes automatically and the search continues.",
+        ),
+    }
+}
+
+/// JS that pins a fixed instruction banner to the top of the (remote) challenge
+/// page so the surfaced window explains itself. Uses CSSOM property assignment
+/// (never a `style` attribute) to stay clear of the page's `style-src` CSP, and a
+/// sentinel id so a re-inject is idempotent. Pure — unit-tested.
+fn solve_banner_js(instruction: &str) -> String {
+    let text = serde_json::to_string(instruction).unwrap_or_else(|_| "\"\"".into());
+    format!(
+        r#"(function(){{
+  try {{
+    if (document.getElementById('__mutsumi_hint')) return;
+    var b = document.createElement('div');
+    b.id = '__mutsumi_hint';
+    b.textContent = {text};
+    b.style.position = 'fixed'; b.style.top = '0'; b.style.left = '0'; b.style.right = '0';
+    b.style.zIndex = '2147483647'; b.style.padding = '12px 16px';
+    b.style.font = '14px system-ui, -apple-system, sans-serif'; b.style.lineHeight = '1.4';
+    b.style.background = '#1f2937'; b.style.color = '#ffffff';
+    b.style.textAlign = 'center'; b.style.boxShadow = '0 2px 8px rgba(0,0,0,.3)';
+    (document.body || document.documentElement).appendChild(b);
+  }} catch(e) {{}}
+}})();"#,
+        text = text,
+    )
 }
 
 /// Decide whether to surface the window for a manual solve: only on a genuine
@@ -336,8 +401,8 @@ mod real {
 
     use super::{
         hardening_enabled, homepage_url, init_script, is_challenge_page, manual_solve_enabled,
-        resolve_pending_key, serp_url, should_prompt_manual, should_retry, WebviewSerp,
-        HARDEN_BROWSER_ARGS, MAX_ATTEMPTS, SERP_EVENT,
+        resolve_pending_key, serp_url, should_prompt_manual, should_retry, solve_banner_js,
+        solve_strings, WebviewSerp, HARDEN_BROWSER_ARGS, MAX_ATTEMPTS, SERP_EVENT,
     };
     use crate::search::SearchEngine;
 
@@ -476,17 +541,29 @@ mod real {
         tokio::time::sleep(WARMUP_SETTLE).await;
     }
 
-    /// Show or hide the singleton fetch window (main thread).
-    fn set_window_visible(app: &AppHandle, show: bool) {
+    /// Hide the singleton fetch window (main thread).
+    fn hide_window(app: &AppHandle) {
         let app2 = app.clone();
         let _ = app.run_on_main_thread(move || {
             if let Some(w) = app2.get_webview_window(SERP_WINDOW) {
-                if show {
-                    let _ = w.show();
-                    let _ = w.set_focus();
-                } else {
-                    let _ = w.hide();
-                }
+                let _ = w.hide();
+            }
+        });
+    }
+
+    /// Surface the fetch window for a manual solve (main thread): set a localized
+    /// title, show + focus it, and inject the instruction banner so the otherwise
+    /// hidden window explains what the user needs to do.
+    fn surface_for_solve(app: &AppHandle, title: &str, banner_js: &str) {
+        let app2 = app.clone();
+        let title = title.to_string();
+        let banner = banner_js.to_string();
+        let _ = app.run_on_main_thread(move || {
+            if let Some(w) = app2.get_webview_window(SERP_WINDOW) {
+                let _ = w.set_title(&title);
+                let _ = w.show();
+                let _ = w.set_focus();
+                let _ = w.eval(&banner);
             }
         });
     }
@@ -505,13 +582,21 @@ mod real {
         let (tx, rx) = oneshot::channel::<String>();
         state.pending.lock().unwrap().insert(id.clone(), tx);
 
+        // Localize the window chrome from the frontend-reported locale (the SERP
+        // page is remote, so it can't use the Vue i18n system).
+        let locale = app
+            .try_state::<crate::app_state::LocaleState>()
+            .map(|s| s.get())
+            .unwrap_or_default();
+        let (title, hint) = solve_strings(&locale);
+
         log::info!(
             "search: {engine:?} still challenged — surfacing window for manual solve (≤{}s)",
             MANUAL_TIMEOUT.as_secs()
         );
-        set_window_visible(app, true);
+        surface_for_solve(app, title, &solve_banner_js(hint));
         let outcome = tokio::time::timeout(MANUAL_TIMEOUT, rx).await;
-        set_window_visible(app, false);
+        hide_window(app);
         state.pending.lock().unwrap().remove(&id);
 
         match outcome {
@@ -811,11 +896,47 @@ mod tests {
     }
 
     #[test]
-    fn manual_solve_is_opt_in_via_env_value() {
-        // Pure mirror of the env parse (avoid mutating global env under parallel tests).
-        for (v, want) in [("1", true), ("true", true), ("on", true), ("0", false), ("", false)] {
-            let parsed = v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("on");
-            assert_eq!(parsed, want, "value {v:?}");
+    fn manual_solve_policy_defaults_on_and_yields_to_bench_and_off_values() {
+        // Default (env unset) → on: a challenge surfaces the window.
+        assert!(manual_solve_policy(false, None));
+        // Explicit off-ish values disable it.
+        for v in ["0", "false", "off", "OFF", "False"] {
+            assert!(!manual_solve_policy(false, Some(v)), "value {v:?} should disable");
         }
+        // Any other value keeps it on.
+        for v in ["1", "true", "on", "yes"] {
+            assert!(manual_solve_policy(false, Some(v)), "value {v:?} should enable");
+        }
+        // A benchmark run forces it off regardless of the manual value (unattended —
+        // must never pop a window mid-bench).
+        assert!(!manual_solve_policy(true, None));
+        assert!(!manual_solve_policy(true, Some("1")));
+        assert!(!manual_solve_policy(true, Some("on")));
+    }
+
+    #[test]
+    fn solve_strings_are_localized_and_fall_back_to_english() {
+        for loc in ["zh", "ja", "en", "", "fr"] {
+            let (title, hint) = solve_strings(loc);
+            assert!(!title.is_empty(), "empty title for {loc:?}");
+            assert!(!hint.is_empty(), "empty hint for {loc:?}");
+        }
+        // Distinct per supported locale.
+        assert_ne!(solve_strings("zh").0, solve_strings("en").0);
+        assert_ne!(solve_strings("ja").0, solve_strings("en").0);
+        assert_ne!(solve_strings("zh").1, solve_strings("ja").1);
+        // Unknown locale → English fallback.
+        assert_eq!(solve_strings("fr"), solve_strings("en"));
+    }
+
+    #[test]
+    fn solve_banner_js_json_encodes_the_instruction() {
+        let js = solve_banner_js("Please verify");
+        assert!(js.contains("\"Please verify\""), "instruction not embedded: {js}");
+        assert!(js.contains("__mutsumi_hint"), "sentinel id missing");
+        assert!(js.contains("position"), "banner not pinned");
+        // Special chars are escaped by serde so they can't break out of the JS string.
+        let js2 = solve_banner_js("a\"b");
+        assert!(js2.contains(r#"a\"b"#), "quote not escaped: {js2}");
     }
 }

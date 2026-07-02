@@ -117,9 +117,15 @@ Two things this *does* establish:
 3. **Do _not_ build the 1b audio auto-solver (Vosk / Wit.ai).** The challenge fires on *every*
    Google query, and Google actively hardens the audio challenge against bots — an STT solver
    would be attempting the most-defended path, on every request, for the one engine we already
-   keep non-default. That's a poor return for a ~50 MB model dependency plus hosting. The
-   opt-in **manual-solve backstop** (`MUTSUMI_SERP_MANUAL=1`) remains the only Google escape
-   hatch, for the rare user who insists on Google.
+   keep non-default. That's a poor return for a ~50 MB model dependency plus hosting.
+4. **Manual-solve is the chosen Google path, now on by default.** Since no client-side lever
+   moves the challenge, a challenged fetch surfaces the fetch window (with a localized
+   instruction banner) so the user clears the reCAPTCHA once; the clearance cookie then
+   persists in the profile for later searches. On by default, disable with
+   `MUTSUMI_SERP_MANUAL=0`, and auto-suppressed during a benchmark run (unattended). Caveat:
+   the chat search budget is short, so the *first* challenged query may already have answered
+   without web context by the time the window appears — solving it warms the cookie for the
+   next search rather than the current turn.
 
 ### Optional follow-up
 

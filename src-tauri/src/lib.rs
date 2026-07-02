@@ -76,6 +76,7 @@ pub fn run() {
     .plugin(tauri_plugin_clipboard_manager::init())
     .plugin(tauri_plugin_opener::init())
     .manage(shared.clone())
+    .manage(app_state::LocaleState::default())
     .manage(weather_state)
     .manage(audio_state)
     .manage(media_state)
