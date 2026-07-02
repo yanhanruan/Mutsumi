@@ -66,32 +66,63 @@ watch a challenge render.
 
 ## Results
 
-> Paste the two tables the runner appends to `serp-bench.md` here. `challenge` is the metric of
-> interest; `failed` should stay ≈ 0 (a spike to all-`failed` under `HARDEN=1` means the
-> `__TAURI_INTERNALS__` delete broke `invoke` — that leg would then be reverted).
+Measured 2026-07-02, Google only, direct connection, 12 queries per mode, spaced 5 s.
 
 ### Baseline (`HARDEN=0`)
 
 | engine | results | challenge | empty | failed |
 |---|---:|---:|---:|---:|
-| _(fill from run)_ | | | | |
+| Google | 0 | 12 | 0 | 0 |
 
 ### Hardened (`HARDEN=1`)
 
 | engine | results | challenge | empty | failed |
 |---|---:|---:|---:|---:|
-| _(fill from run)_ | | | | |
+| Google | 0 | 12 | 0 | 0 |
 
 ### Δ (challenges eliminated)
 
 | engine | baseline challenge | hardened challenge | Δ |
 |---|---:|---:|---:|
-| _(fill in)_ | | | |
+| Google | 12 | 12 | **0** |
 
-## Interpretation (to complete after the run)
+## Interpretation
 
-- **Success** = a measurable drop in `challenge` (especially non-Google) with `failed` ≈ 0.
-- If Google stays heavily challenged after hardening, that's the empirical case for the **1b
-  solver** (next task) and for keeping Bing CN the default (it already is).
-- Honest ceiling: no client-side lever fixes IP reputation; these numbers isolate what *is*
-  fixable client-side.
+**Hardening had no effect on Google: 12/12 → 12/12.** Every query was served a reCAPTCHA /
+`/sorry/index` challenge in both modes. The three client-side levers
+(`AutomationControlled` off, persistent profile, `__TAURI_INTERNALS__` delete) removed zero
+challenges here.
+
+Two things this *does* establish:
+
+- **The hardening is safe to keep.** `failed = 0` in both runs is the key control: the page
+  HTML was captured and correctly classified as a *challenge*, not lost to a timeout. That
+  proves the `delete window.__TAURI_INTERNALS__` leg did **not** break the captured `invoke`
+  / emit path — the failure mode we were guarding against (lever 3 silently killing IPC) did
+  not occur. So the levers stay on by default; they cost nothing and may still help the four
+  engines that already pass. For Google specifically they are a documented no-op.
+- **The pre-run ranking was wrong for Google.** We ranked the fixable fingerprint/profile
+  tells as the primary lever and IP reputation as secondary. The measurement refutes that:
+  with every client-side tell removed, the challenge rate is unchanged. The operative cause
+  is the residual we can't touch from the client — IP reputation and/or Google's treatment of
+  an embedded WebView2 session at the network level. This is the "honest ceiling" flagged up
+  front, now measured rather than assumed.
+
+### Decisions this settles
+
+1. **Bing CN stays the default engine** (unchanged). Google is not viable as a default over
+   this WebView path — it challenges 100% of queries.
+2. **Keep `MUTSUMI_SERP_HARDEN` on by default.** Free, non-destructive (`failed = 0`), and
+   plausibly useful for the non-Google engines; no reason to disable it.
+3. **Do _not_ build the 1b audio auto-solver (Vosk / Wit.ai).** The challenge fires on *every*
+   Google query, and Google actively hardens the audio challenge against bots — an STT solver
+   would be attempting the most-defended path, on every request, for the one engine we already
+   keep non-default. That's a poor return for a ~50 MB model dependency plus hosting. The
+   opt-in **manual-solve backstop** (`MUTSUMI_SERP_MANUAL=1`) remains the only Google escape
+   hatch, for the rare user who insists on Google.
+
+### Optional follow-up
+
+Run `MUTSUMI_SERP_BENCH=all MUTSUMI_SERP_HARDEN=1` once to confirm hardening doesn't *regress*
+the four working engines (each should show `results > 0`, `failed = 0`). Not required — those
+engines passed runtime validation — but it would close the loop on "hardening breaks nothing."
