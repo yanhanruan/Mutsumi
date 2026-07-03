@@ -133,6 +133,7 @@ pub async fn search(app: &AppHandle, engine: SearchEngine, query: &str) -> Vec<S
             return Vec::new();
         }
     };
+    maybe_dump_html(app, engine, &html);
 
     let raw = parse_rendered(engine, &html);
     // A challenge page can itself parse to a stray "result" (Baidu's 百度安全验证
@@ -151,6 +152,24 @@ pub async fn search(app: &AppHandle, engine: SearchEngine, query: &str) -> Vec<S
     // log::info!("search: webview {engine:?} → {} result(s)", results.len());
     log::info!("search: webview {engine:?} → {:?}", results);
     results
+}
+
+/// Debug aid: when `MUTSUMI_SERP_DUMP` is set, write the raw fetched SERP HTML to
+/// `<app-log-dir>/serp-dump-<engine>.html` so the real DOM can be inspected and
+/// turned into a parser fixture — instead of guessing at (hashed) class names.
+/// No-op otherwise, so it's safe to call unconditionally.
+fn maybe_dump_html(app: &AppHandle, engine: SearchEngine, html: &str) {
+    if std::env::var("MUTSUMI_SERP_DUMP").is_err() {
+        return;
+    }
+    use tauri::Manager;
+    let Ok(dir) = app.path().app_log_dir() else { return };
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join(format!("serp-dump-{engine:?}.html"));
+    match std::fs::write(&path, html) {
+        Ok(()) => log::info!("search: dumped {engine:?} SERP HTML ({} bytes) to {}", html.len(), path.display()),
+        Err(e) => log::warn!("search: could not dump {engine:?} HTML: {e}"),
+    }
 }
 
 /// Turn raw hits into the ≤[`MAX_RESULTS`] results injected into chat: drop
