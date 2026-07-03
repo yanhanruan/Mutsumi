@@ -107,12 +107,15 @@ fn turn_options() -> ChatOptions {
     }
 }
 
-/// Hard ceiling on the whole search step. If exceeded, the turn proceeds with
-/// no web context rather than making the user wait. Sized above the WebView
-/// fetch worst case (cold-start window create + a challenge retry, ~15 s) so the
-/// cap never pre-empts a legitimate retry; the common warm path finishes in
+/// Last-resort ceiling on the whole search step — a safety net against a
+/// pathological hang, NOT the normal latency bound. The fetch bounds itself
+/// internally (~9 s render worst case), and when a search hits an anti-bot
+/// challenge the turn **intentionally waits** while the surfaced window lets
+/// the user solve it (≤150 s), so the solved SERP answers this very message.
+/// Sized above warm-up + render + the full manual-solve window so the cap can
+/// never tear the solve down mid-interaction; the common warm path finishes in
 /// ~1–2 s.
-const SEARCH_BUDGET: Duration = Duration::from_secs(16);
+const SEARCH_BUDGET: Duration = Duration::from_secs(180);
 
 /// Errors surfaced from the chat pipeline.
 ///
@@ -241,20 +244,19 @@ async fn build_messages(
 ) -> Result<Vec<ChatMessage>, ChatError> {
     // Search-enhanced awareness + embedding run concurrently (they are
     // independent), so search latency overlaps the embed call instead of
-    // stacking. Search is best-effort and capped by SEARCH_BUDGET so a slow or
-    // flaky engine can never stall the turn — on timeout we just proceed
-    // without web context.
+    // stacking. Search is best-effort: fetch errors and unclear challenges
+    // degrade to no web context, never to a failed turn.
     let search_fut = async {
         if !search.enabled() || !trigger::needs_search(message) {
             return None;
         }
-        // Single path: the hidden WebView renders the real SERP (running JS and
-        // clearing anti-bot challenges with the browser's genuine fingerprint),
-        // which the static reqwest client never could. Weather, encyclopedia and
-        // pricing questions are all served from the rendered SERP (incl. answer
-        // cards). Best-effort and capped by SEARCH_BUDGET so a slow or flaky
-        // engine can never stall the turn — on timeout we proceed with no
-        // web context.
+        // Single path: the hidden WebView renders the real SERP (running JS with
+        // the browser's genuine fingerprint), which a static HTTP client never
+        // could. If the engine serves an anti-bot challenge, the fetch surfaces
+        // the window and this turn WAITS for the user to solve it (bounded by
+        // the fetch's internal solve timeout), so the solved results feed this
+        // same reply. SEARCH_BUDGET is only a safety net above all internal
+        // bounds — it must not pre-empt an in-progress solve.
         let results = tokio::time::timeout(
             SEARCH_BUDGET,
             search::search(app, search.engine(), message),

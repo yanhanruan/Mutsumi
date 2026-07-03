@@ -175,8 +175,6 @@ async fn run(app: AppHandle, engines: Vec<SearchEngine>) {
 
 /// One engine × theme cell of the quality run.
 struct QualityCell {
-    theme: &'static str,
-    query: &'static str,
     /// Summary-matrix symbol (see the report legend).
     summary: String,
     /// Full per-query section (before-table + after-block), already rendered.
@@ -217,8 +215,6 @@ fn quality_cell(
     let heading = format!("### {engine:?} · {theme} · «{query}»\n\n");
     match fetch {
         Err(e) => QualityCell {
-            theme,
-            query,
             summary: "✗ failed".into(),
             section: format!("{heading}fetch failed: `{e}`\n\n"),
         },
@@ -226,8 +222,6 @@ fn quality_cell(
             let raw = super::parse_rendered(engine, html);
             if webview::is_blocking_challenge(engine, !raw.is_empty(), html) {
                 return QualityCell {
-                    theme,
-                    query,
                     summary: "🛡 challenge".into(),
                     section: format!(
                         "{heading}blocking challenge (markers {:?}) — no context sent\n\n",
@@ -237,8 +231,6 @@ fn quality_cell(
             }
             let (sent, verdicts) = super::curate_report(query, raw);
             QualityCell {
-                theme,
-                query,
                 summary: summary_symbol(&sent, &verdicts),
                 section: format!(
                     "{heading}{}",
@@ -330,8 +322,9 @@ fn render_quality_report(per_engine: &[(SearchEngine, Vec<QualityCell>)]) -> Str
          `rel` = shares a term with the query (trad/simp folded); `datum` = states \
          the KIND of fact the query asks for (天气→气温/天况, 股价/汇率→价格数字, \
          发售→日期; title or snippet).\n\n\
-         > Baidu: if the 百度安全验证 window pops, solve it — the queries after it \
-         then measure post-solve quality.\n\n",
+         > If a challenge window pops (百度安全验证 / reCAPTCHA), solve it — the \
+         fetch waits for you, and that same query then records the post-solve \
+         result.\n\n",
         max = super::MAX_RESULTS,
     );
 

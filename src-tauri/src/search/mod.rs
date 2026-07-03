@@ -9,9 +9,9 @@
 //! is strictly more capable. Any failure degrades to "no web context"; search
 //! never breaks chat.
 //!
-//!   needs_search? → webview::fetch_serp (primary engine, challenge-gated retry)
-//!   → parse_rendered (regex → CSS fallback) → format as a labeled
-//!   real-time-context block for injection into the chat prompt.
+//!   needs_search? → webview::fetch_serp (challenge → window surfaces, waits
+//!   for the user's solve) → parse_rendered (regex → CSS fallback) → format as
+//!   a labeled real-time-context block for injection into the chat prompt.
 
 pub mod bench;
 pub mod trigger;
@@ -139,10 +139,11 @@ pub async fn search(app: &AppHandle, engine: SearchEngine, query: &str) -> Vec<S
 
     let raw = parse_rendered(engine, &html);
     // A challenge page can itself parse to a stray "result" (Baidu's 百度安全验证
-    // captcha yields one). Never feed that to the model — treat a blocking
-    // challenge as no web context. `fetch_serp` already surfaces the solve popup.
+    // captcha yields one). Never feed that to the model. Reaching this with a
+    // challenge means the user didn't clear the surfaced window in time (or the
+    // solve is disabled) — `fetch_serp` already waited for them.
     if webview::is_blocking_challenge(engine, !raw.is_empty(), &html) {
-        log::info!("search: {engine:?} hit a challenge page — no web context");
+        log::info!("search: {engine:?} challenge not cleared — no web context");
         return Vec::new();
     }
     if raw.is_empty() {

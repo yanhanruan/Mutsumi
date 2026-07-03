@@ -31,10 +31,13 @@
 //! ## Resilience (no fallback catches a miss now)
 //! * **Readiness wait** — the init-script polls for a known results container
 //!   before grabbing, up to a hard cap, instead of a blind fixed settle.
-//! * **Challenge-gated retry** — [`is_challenge_page`] detects Cloudflare/CAPTCHA
-//!   interstitials; [`should_retry`] permits exactly one re-navigation of the
-//!   same warm window when challenged. A page that merely parses to *empty* is
-//!   **not** retried (no benefit, keeps latency bounded).
+//! * **Inline manual solve, never a retry** — [`is_challenge_page`] detects
+//!   Cloudflare/CAPTCHA interstitials. A challenge is **never** re-requested
+//!   (without the user clearing it, a second navigation returns the same
+//!   interstitial); instead the window is surfaced immediately and the fetch —
+//!   and the chat turn awaiting it — waits for the user to solve, so the solved
+//!   SERP feeds that same reply. On timeout/failure the challenge page is
+//!   returned as-is and chat proceeds without web context.
 //! * **Self-heal** — a closed/wedged window is rebuilt before failing.
 //! Every error path degrades to "no web context"; chat is never blocked.
 //!
@@ -46,8 +49,8 @@
 //! unit-test binary fail to load (`STATUS_ENTRYPOINT_NOT_FOUND`). The offline
 //! tests never reach the WebView, so a stub [`fetch_serp`] stands in. The pure
 //! helpers below ([`serp_url`], [`init_script`], [`is_challenge_page`],
-//! [`should_retry`]) stay always-compiled so the URL/correlation/retry contract
-//! *is* unit-tested without a browser.
+//! [`should_solve_inline`]) stay always-compiled so the URL/correlation/challenge
+//! contract *is* unit-tested without a browser.
 
 use super::{engines, SearchEngine};
 
@@ -62,8 +65,6 @@ const READY_MAX_MS: u64 = 4000;
 const POLL_MS: u64 = 150;
 /// Short tail (ms) after the container appears, to let late rows paint.
 const SETTLE_MS: u64 = 400;
-/// Max navigate→render→extract attempts (1 original + 1 challenge retry).
-const MAX_ATTEMPTS: u8 = 2;
 
 /// Managed state for the singleton hidden fetch window. Its internals only exist
 /// in non-test builds (see the module's "Test builds" note).
@@ -85,14 +86,6 @@ pub struct WebviewSerp {
     /// once before the first search).
     #[cfg(not(test))]
     warmed: std::sync::Mutex<std::collections::HashSet<SearchEngine>>,
-    /// When the last manual-solve prompt failed — drives the cooldown so we don't
-    /// re-pop the window on every search after the user dismissed it.
-    #[cfg(not(test))]
-    manual_cooldown: std::sync::Mutex<Option<std::time::Instant>>,
-    /// Whether a manual-solve session is currently surfaced. At most one runs at
-    /// a time — a burst of challenged queries must not stack windows.
-    #[cfg(not(test))]
-    manual_active: std::sync::atomic::AtomicBool,
 }
 
 /// Percent-encode a query value for the SERP URL query string.
@@ -310,12 +303,14 @@ pub fn is_blocking_challenge(engine: SearchEngine, has_results: bool, html: &str
     }
 }
 
-/// Whether to re-navigate after a failed attempt: only when the page was a
-/// *blocking* challenge (marker **and** no results) and attempts remain. A
-/// merely-empty/unparseable page, or a real SERP with a stray token, is **not**
-/// retried. Pure — unit-tested. (`attempt` is 1-based.)
-pub fn should_retry(attempt: u8, blocking_challenge: bool, max_attempts: u8) -> bool {
-    attempt < max_attempts && blocking_challenge
+/// What to do when a fetch lands on a blocking challenge: surface the window and
+/// wait for the user, **never** re-request — without the user clearing it, a
+/// second navigation returns the exact same interstitial (a lesson from the
+/// removed retry: it only added latency). When manual solve is disabled
+/// (unattended benchmark, `MUTSUMI_SERP_MANUAL=0`), the challenge page is
+/// returned as-is. Pure — unit-tested.
+pub fn should_solve_inline(blocking_challenge: bool, manual_enabled: bool) -> bool {
+    blocking_challenge && manual_enabled
 }
 
 /// Policy for [`manual_solve_enabled`], factored out to be unit-testable without
@@ -334,13 +329,11 @@ fn manual_solve_policy(bench_active: bool, manual_env: Option<&str>) -> bool {
     }
 }
 
-/// Whether the **manual-solve backstop** is enabled. Default on (a challenge
-/// surfaces the window for the user to clear); disable with
-/// `MUTSUMI_SERP_MANUAL=0` (or `false`/`off`). Suppressed automatically during an
-/// unattended benchmark run (`MUTSUMI_SERP_BENCH` set). The chat search budget is
-/// short, so the *first* challenged query may already have answered without web
-/// context by the time the window appears — solving it still warms the clearance
-/// cookie so subsequent searches succeed.
+/// Whether the **manual-solve backstop** is enabled. Default on: a challenge
+/// surfaces the window immediately and the search (and the chat turn awaiting
+/// it) waits for the user to clear it, so the solved SERP answers that same
+/// message. Disable with `MUTSUMI_SERP_MANUAL=0` (or `false`/`off`). Suppressed
+/// automatically during an unattended benchmark run (`MUTSUMI_SERP_BENCH` set).
 pub fn manual_solve_enabled() -> bool {
     manual_solve_policy(
         std::env::var("MUTSUMI_SERP_BENCH").is_ok(),
@@ -394,13 +387,6 @@ fn solve_banner_js(instruction: &str) -> String {
     )
 }
 
-/// Decide whether to surface the window for a manual solve: only on a genuine
-/// challenge, and not while a recent failed prompt's cooldown is active (so we
-/// don't nag on every subsequent search). Pure — unit-tested.
-fn should_prompt_manual(is_challenge: bool, cooldown_active: bool) -> bool {
-    is_challenge && !cooldown_active
-}
-
 /// Test stub — no window creation, so the unit-test harness doesn't link the
 /// native windowing imports. `search()` only reaches here with a real
 /// `AppHandle`, which the offline tests never have, so it is never invoked.
@@ -419,15 +405,15 @@ pub use real::fetch_serp;
 #[cfg(not(test))]
 mod real {
     use std::sync::atomic::Ordering;
-    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     use tauri::{AppHandle, Listener, Manager, WebviewUrl, WebviewWindowBuilder};
     use tokio::sync::oneshot;
 
     use super::{
         homepage_url, init_script, is_blocking_challenge, manual_solve_enabled,
-        resolve_pending_key, serp_url, should_prompt_manual, should_retry, solve_banner_js,
-        solve_strings, WebviewSerp, MAX_ATTEMPTS, SERP_EVENT,
+        resolve_pending_key, serp_url, should_solve_inline, solve_banner_js, solve_strings,
+        WebviewSerp, SERP_EVENT,
     };
     use crate::search::SearchEngine;
 
@@ -437,16 +423,11 @@ mod real {
     /// cold-start cost of creating the window on the first query; warm
     /// navigations finish far under it.
     const WEBVIEW_TIMEOUT: Duration = Duration::from_secs(7);
-    /// Pause before a challenge retry, giving the in-page JS challenge a moment
-    /// to clear on the now-warm window.
-    const RETRY_BACKOFF: Duration = Duration::from_millis(800);
     /// How long to let the homepage warm-up navigation settle its cookies before
     /// the first search navigates away.
     const WARMUP_SETTLE: Duration = Duration::from_millis(1500);
     /// How long to wait for the user to clear a surfaced challenge.
     const MANUAL_TIMEOUT: Duration = Duration::from_secs(150);
-    /// After a dismissed/failed manual prompt, don't re-pop the window for this long.
-    const MANUAL_COOLDOWN: Duration = Duration::from_secs(300);
 
     #[derive(serde::Deserialize)]
     struct SerpHtml {
@@ -583,11 +564,29 @@ mod real {
         });
     }
 
-    /// Backstop: the window is already on a challenge page — surface it so the
-    /// user clears the reCAPTCHA in place, then wait for the solved SERP to report
-    /// back (its `continue=`-preserved id, or the single-pending fallback, routes
-    /// the emit here). Returns the solved HTML, or `Err` if the user didn't solve
-    /// in time. Assumes the caller holds the nav lock.
+    /// Cancellation-safe cleanup for a surfaced solve window: hides the window
+    /// and drops the pending entry **even if the awaiting future is cancelled**
+    /// (e.g. the chat turn's outer budget fires mid-solve). A cancelled solve
+    /// must never orphan a visible window — the bug that originally forced the
+    /// solve to run detached.
+    struct SolveCleanup<'a> {
+        app: AppHandle,
+        state: &'a WebviewSerp,
+        id: String,
+    }
+
+    impl Drop for SolveCleanup<'_> {
+        fn drop(&mut self) {
+            self.state.pending.lock().unwrap().remove(&self.id);
+            hide_window(&self.app);
+        }
+    }
+
+    /// The window is on a challenge page — surface it immediately so the user
+    /// clears it in place, and **wait** for the solved SERP to report back (its
+    /// `continue=`-preserved id, or the single-pending fallback, routes the emit
+    /// here). Returns the solved HTML, or `Err` if the user didn't solve in
+    /// time. Assumes the caller holds the nav lock.
     async fn manual_solve(
         app: &AppHandle,
         state: &WebviewSerp,
@@ -596,6 +595,7 @@ mod real {
         let id = uid();
         let (tx, rx) = oneshot::channel::<String>();
         state.pending.lock().unwrap().insert(id.clone(), tx);
+        let _cleanup = SolveCleanup { app: app.clone(), state, id };
 
         // Localize the window chrome from the frontend-reported locale (the SERP
         // page is remote, so it can't use the Vue i18n system).
@@ -606,15 +606,11 @@ mod real {
         let (title, hint) = solve_strings(&locale);
 
         log::info!(
-            "search: {engine:?} still challenged — surfacing window for manual solve (≤{}s)",
+            "search: {engine:?} challenged — surfacing window, waiting for the user (≤{}s)",
             MANUAL_TIMEOUT.as_secs()
         );
         surface_for_solve(app, title, &solve_banner_js(hint));
-        let outcome = tokio::time::timeout(MANUAL_TIMEOUT, rx).await;
-        hide_window(app);
-        state.pending.lock().unwrap().remove(&id);
-
-        match outcome {
+        match tokio::time::timeout(MANUAL_TIMEOUT, rx).await {
             Ok(Ok(html)) => Ok(html),
             _ => Err("manual solve timed out".into()),
         }
@@ -665,9 +661,15 @@ mod real {
     }
 
     /// Drive a SERP fetch through the hidden WebView; returns the rendered HTML.
-    /// Retries exactly once on a detected anti-bot challenge (never on a plain
-    /// empty page). Best-effort — every error path is recoverable by the
-    /// caller degrading to no web context.
+    ///
+    /// On a **blocking challenge** the window is surfaced immediately and this
+    /// call waits for the user to clear it (≤[`MANUAL_TIMEOUT`]) — no retry is
+    /// ever attempted, because without the user solving, a re-request returns
+    /// the exact same interstitial. The chat turn awaiting this fetch waits with
+    /// it, so a successful solve feeds the solved SERP into that same reply; on
+    /// timeout/failure the challenge HTML is returned as-is (parses to no
+    /// context, chat proceeds without web data). Best-effort — every error path
+    /// is recoverable by the caller degrading to no web context.
     pub async fn fetch_serp(
         app: &AppHandle,
         engine: SearchEngine,
@@ -676,7 +678,8 @@ mod real {
         let state = app.state::<WebviewSerp>();
         ensure_listener(app, &state);
 
-        // One navigation at a time through the shared window.
+        // One navigation at a time through the shared window (also keeps a
+        // concurrent search from navigating away mid-solve).
         let _guard = state.nav.lock().await;
 
         // Warm this engine's cookie jar once per session (reduces bot challenges).
@@ -685,83 +688,19 @@ mod real {
             state.warmed.lock().unwrap().insert(engine);
         }
 
-        let mut last = navigate_once(app, &state, engine, query).await?;
-        for attempt in 1..MAX_ATTEMPTS {
-            let has_results = !crate::search::parse_rendered(engine, &last).is_empty();
-            if !should_retry(attempt, is_blocking_challenge(engine, has_results, &last), MAX_ATTEMPTS) {
-                break;
-            }
-            log::info!("search: webview {engine:?} hit a blocking challenge, retrying once");
-            tokio::time::sleep(RETRY_BACKOFF).await;
-            last = navigate_once(app, &state, engine, query).await?;
-        }
-
-        // Backstop: if still challenged, hand the solve to a **detached** task.
-        // The caller's search budget is short (chat caps it and cancels this
-        // future on timeout), so blocking here would tear the surfaced window down
-        // before the user could finish — and orphan it, since the cleanup runs
-        // after the wait. The task re-acquires the nav lock (serializing with
-        // other searches, so nothing navigates the window away mid-solve) and
-        // reserves the window for the user. This turn returns the challenge HTML
-        // as-is — it parses to no results, so chat proceeds without web context;
-        // the cleared cookie then warms subsequent searches. Cooldown-gated so a
-        // dismissed prompt doesn't re-pop on every search.
-        if manual_solve_enabled() {
-            let has_results = !crate::search::parse_rendered(engine, &last).is_empty();
-            let blocked = is_blocking_challenge(engine, has_results, &last);
-            let cooldown_active = state
-                .manual_cooldown
-                .lock()
-                .unwrap()
-                .map(|t| t.elapsed() < MANUAL_COOLDOWN)
-                .unwrap_or(false);
-            if should_prompt_manual(blocked, cooldown_active) {
-                spawn_manual_solve(app.clone(), engine, query.to_string());
-            }
-        }
-
-        Ok(last)
-    }
-
-    /// Spawn a detached solve session so the caller's (short) search budget can't
-    /// cancel it mid-solve. At most one runs at a time (guarded by
-    /// `manual_active`). The task owns the nav lock for its duration, so no
-    /// concurrent search can navigate the window away while the user is solving.
-    fn spawn_manual_solve(app: AppHandle, engine: SearchEngine, query: String) {
-        {
-            let state = app.state::<WebviewSerp>();
-            if state.manual_active.swap(true, Ordering::SeqCst) {
-                return; // a solve session is already up
-            }
-        }
-        tauri::async_runtime::spawn(async move {
-            let state = app.state::<WebviewSerp>();
-            let _guard = state.nav.lock().await;
-            let outcome = run_manual_solve_session(&app, &state, engine, &query).await;
-            match outcome {
-                Ok(()) => *state.manual_cooldown.lock().unwrap() = None, // solved → clear
-                Err(_) => *state.manual_cooldown.lock().unwrap() = Some(Instant::now()),
-            }
-            state.manual_active.store(false, Ordering::SeqCst);
-        });
-    }
-
-    /// Under the nav lock: re-navigate to the query so the window is on a fresh
-    /// challenge page it owns, then surface it and wait for the user to clear it.
-    /// `Ok` if the challenge was already gone (cookie warm) or the user solved;
-    /// `Err` on timeout. Assumes the caller holds the nav lock.
-    async fn run_manual_solve_session(
-        app: &AppHandle,
-        state: &WebviewSerp,
-        engine: SearchEngine,
-        query: &str,
-    ) -> Result<(), String> {
-        let html = navigate_once(app, state, engine, query).await?;
+        let html = navigate_once(app, &state, engine, query).await?;
         let has_results = !crate::search::parse_rendered(engine, &html).is_empty();
-        if !is_blocking_challenge(engine, has_results, &html) {
-            return Ok(()); // results present (or no block) — nothing to solve
+        let blocked = is_blocking_challenge(engine, has_results, &html);
+        if !should_solve_inline(blocked, manual_solve_enabled()) {
+            return Ok(html);
         }
-        manual_solve(app, state, engine).await.map(|_| ())
+        match manual_solve(app, &state, engine).await {
+            Ok(solved) => Ok(solved),
+            Err(e) => {
+                log::info!("search: {engine:?} challenge not cleared ({e}) — no web context");
+                Ok(html)
+            }
+        }
     }
 }
 
@@ -918,12 +857,15 @@ mod tests {
     }
 
     #[test]
-    fn should_retry_exactly_once_on_a_blocking_challenge() {
-        // Blocking challenge → retry once, then stop at the attempt cap.
-        assert!(should_retry(1, true, MAX_ATTEMPTS));
-        assert!(!should_retry(MAX_ATTEMPTS, true, MAX_ATTEMPTS));
-        // Not a block (real SERP, or merely-empty page) → never retry.
-        assert!(!should_retry(1, false, MAX_ATTEMPTS));
+    fn challenge_pops_solve_immediately_and_never_when_unattended() {
+        // A blocking challenge with manual solve on → surface + wait, right away.
+        assert!(should_solve_inline(true, true));
+        // Unattended (bench / MUTSUMI_SERP_MANUAL=0) → return the page as-is;
+        // and there is NO retry path at all — re-requesting an unsolved
+        // challenge just returns the same interstitial.
+        assert!(!should_solve_inline(true, false));
+        assert!(!should_solve_inline(false, true), "no challenge → nothing to solve");
+        assert!(!should_solve_inline(false, false));
     }
 
     #[test]
@@ -975,14 +917,6 @@ mod tests {
     }
 
     // ── manual-solve backstop (1b) ─────────────────────────────────────────
-
-    #[test]
-    fn should_prompt_manual_only_on_challenge_and_off_cooldown() {
-        assert!(should_prompt_manual(true, false), "challenge + no cooldown → prompt");
-        assert!(!should_prompt_manual(true, true), "cooldown active → don't nag");
-        assert!(!should_prompt_manual(false, false), "not a challenge → no prompt");
-        assert!(!should_prompt_manual(false, true));
-    }
 
     #[test]
     fn manual_solve_policy_defaults_on_and_yields_to_bench_and_off_values() {
