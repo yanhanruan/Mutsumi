@@ -101,21 +101,37 @@ fn parse_google(doc: &Html) -> Vec<RawResult> {
 }
 
 // ── Baidu ───────────────────────────────────────────────────────────
+//
+// Modern Baidu results are `div.result.c-container` cards. Two quirks vs. the
+// other engines (verified against a real dump):
+//   * The visible `<a href>` is an opaque `baidu.com/link?url=…` redirect, but
+//     the container carries the **real** destination in its `mu` attribute — so
+//     we read `mu` (which also gives distinct hosts for de-dup). Fall back to the
+//     redirect href only if `mu` is missing.
+//   * The snippet lives in a `data-module="abstract"` block with hashed class
+//     names (`summary-text_xxx`), not the old `.c-abstract` — so target the
+//     stable `data-module` hook first, then older class fallbacks.
 fn parse_baidu(doc: &Html) -> Vec<RawResult> {
-    let item = sel("div.result, div.c-container");
+    let item = sel("div.result.c-container, div.result");
     let title_a = sel("h3 a");
-    let snippet = sel(".c-abstract, [class*=content-right], .c-span-last");
+    let snippet = sel(
+        "[data-module=abstract], [class*=summary-text], .c-abstract, [class*=content-right], .c-span-last",
+    );
     let mut out = Vec::new();
     for el in doc.select(&item) {
         let Some(a) = el.select(&title_a).next() else { continue };
-        let url = a.value().attr("href").unwrap_or_default().to_string();
-        if url.is_empty() {
+        let url = el
+            .value()
+            .attr("mu")
+            .filter(|u| u.starts_with("http"))
+            .map(str::to_string)
+            .unwrap_or_else(|| a.value().attr("href").unwrap_or_default().to_string());
+        let title = text_of(&a);
+        if url.is_empty() || title.is_empty() {
             continue;
         }
         out.push(RawResult {
-            title: text_of(&a),
-            // Baidu links are redirectors (baidu.com/link?url=…); kept as-is —
-            // body extraction follows the redirect, and the URL is still shown.
+            title,
             url,
             snippet: el.select(&snippet).next().map(|s| text_of(&s)).unwrap_or_default(),
         });
@@ -197,6 +213,7 @@ mod tests {
 
     #[test]
     fn parses_baidu_layout() {
+        // Older layout: no `mu`, snippet in `.c-abstract` → falls back correctly.
         let html = r#"
             <div id="content_left">
               <div class="result c-container">
@@ -208,6 +225,33 @@ mod tests {
         assert_eq!(r[0].title, "Baidu Title");
         assert_eq!(r[0].url, "http://www.baidu.com/link?url=abc");
         assert_eq!(r[0].snippet, "Baidu snippet here.");
+    }
+
+    #[test]
+    fn parses_baidu_modern_card_mu_url_and_abstract_snippet() {
+        // Trimmed from a real dump: the real URL is in `mu`, the visible href is
+        // an opaque baidu.com/link redirect, and the snippet (with the datum) is
+        // in a data-module="abstract" block with hashed classes.
+        let html = r#"
+            <div class="result c-container xpath-log new-pmd" tpl="www_index"
+                 mu="https://cn.investing.com/currencies/cny-jpy">
+              <div class="cosc-card"><div class="title-wrapper_4oy6O">
+                <h3 class="cosc-title t"><a class="cosc-title-a"
+                    href="http://www.baidu.com/link?url=v8x9MKHcyw5"><span class="cosc-title-slot">
+                    <span class="tts-b-hl"><!--s-text-->今日<em>人民币对日元汇率</em>(CNY JPY)<!--/s-text--></span>
+                    </span></a></h3></div>
+                <div data-module="abstract" class="content-gap_3jlQr"><div class="cos-color-text-tiny">
+                  <span class="summary-text_15QGa"><em>查询</em>今日人民币对日元汇率(CNY JPY)最新行情。 CNY/JPY最新汇率为23.9200。 实时外汇 货币 JPY 23.9203 -0.0114 (-0.05%)</span>
+                </div></div>
+              </div></div>"#;
+        let r = parse_serp(SearchEngine::Baidu, html);
+        assert_eq!(r.len(), 1);
+        // Real destination host, not the baidu.com/link redirect.
+        assert_eq!(r[0].url, "https://cn.investing.com/currencies/cny-jpy");
+        assert_eq!(r[0].title, "今日人民币对日元汇率(CNY JPY)");
+        // The actual datum survives into the snippet.
+        assert!(r[0].snippet.contains("CNY/JPY最新汇率为23.9200"), "snippet was {:?}", r[0].snippet);
+        assert!(r[0].snippet.contains("23.9203"), "rate missing from {:?}", r[0].snippet);
     }
 
     #[test]
