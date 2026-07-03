@@ -61,7 +61,7 @@ Mutsumi 是一个静静住在你屏幕角落的小伙伴。
 * 🥒 **小黄瓜**：为了尽可能还原睦头，我们结合剧情内容、角色设定、荣格八维与九型人格分析，对角色进行了长期拆解与建模。通过 Prompt Engineering 与行为约束设计，实现睦头安静而真诚的性格，而不是千篇一律的 AI 回复。
 * 💭 **长期记忆**：她会记得你们聊过的事情：家里的猫、最近的工作、偶尔提起的小烦恼，甚至是你们之间那些不起眼的小约定。底层基于 RAG 记忆系统实现，本地化轻量存储。
 * 🗂️ **连续记录 & 历史检索**：所有对话像微信 / iMessage 一样连成一条时间线并保存在本地；可按关键词或日期翻查，向上滚动自动加载更早的消息，并按时间分组显示。
-* 🔍 **搜索增强**：睦头也会主动了解外面的世界。内置轻量级搜索系统，可以获取最新网络热点、Ave Mujica 相关资讯、天气等实时信息。相比依赖模型原生搜索 Agent，响应更快、成本更低，结果也更聚焦。
+* 🔍 **联网搜索**：睦头也会好奇外面的世界。想知道最近的热点、Ave Mujica 的新消息、或者今天的天气？跟她说一声就好。她会像真人一样悄悄开一个浏览器标签页，打开搜索引擎、读页面，再把真正有用的那几条挑出来告诉你——不是套壳调 API，所以更快、更省，也更聚焦。
 * 🖼️ **图片识别**：睦子米可以看得懂你的照片！她会笨拙但真心地用自己的方式来表达（你做的菜、你的猫、窗外的雨……），陪你度过每一次值得纪念的时刻。
 * 💙 **Emoji 选择器**：内置可搜索的表情面板，支持中 / 英 / 日关键词。
 * 🎙️ **语音输入**：支持语音输入转文本。
@@ -234,8 +234,8 @@ Mutsumi is a quiet little companion living in the corner of your screen. She min
 * 🗂️ **Persistent Chat History & Search**
   All conversations are stored locally and organized into a continuous timeline, similar to WeChat, iMessage, or other modern messaging apps. Browse past chats by keyword or date, automatically load older messages as you scroll, and view conversations grouped by time.
 
-* 🔍 **Enhanced Search**
-  Mutsumi can keep up with the world outside, too. A built-in lightweight search system allows her to access real-time information such as trending topics, Ave Mujica news, weather updates (explicit search required), and more. Compared with relying solely on an LLM's built-in search agent, this approach is faster, more cost-efficient, and more focused.
+* 🔍 **Web Search**
+  Mutsumi's curious about the world outside, too. Wondering about today's headlines, the latest Ave Mujica news, or the weather? Just ask. Behind the scenes she quietly opens a real browser tab — the way a person would — reads the search page, and pulls out the handful of results that actually matter. No API wrappers, so it's faster, cheaper, and more to the point.
 
 * 🖼️ **Image Understanding**
   Mutsumi can understand the photos you share. Whether it's a meal you cooked, your cat, or the rain outside your window, she'll respond in her own sincere and sometimes awkward way, helping you preserve the moments that matter.
