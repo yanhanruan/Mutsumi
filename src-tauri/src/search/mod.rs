@@ -135,6 +135,13 @@ pub async fn search(app: &AppHandle, engine: SearchEngine, query: &str) -> Vec<S
     };
 
     let raw = parse_rendered(engine, &html);
+    // A challenge page can itself parse to a stray "result" (Baidu's 百度安全验证
+    // captcha yields one). Never feed that to the model — treat a blocking
+    // challenge as no web context. `fetch_serp` already surfaces the solve popup.
+    if webview::is_blocking_challenge(engine, !raw.is_empty(), &html) {
+        log::info!("search: {engine:?} hit a challenge page — no web context");
+        return Vec::new();
+    }
     if raw.is_empty() {
         log::info!("search: {engine:?} returned no parseable results");
         return Vec::new();

@@ -236,16 +236,19 @@ impl Outcome {
 /// Classify a fetch result for benchmarking / logging. Pure — unit-tested.
 pub fn classify_outcome(engine: SearchEngine, fetch: &Result<String, String>) -> Outcome {
     match fetch {
-        Ok(html) => match super::parse_rendered(engine, html).len() {
-            // Results win. A page we can parse into results IS a SERP, even if its
-            // HTML also carries a challenge-y token — Google embeds reCAPTCHA
-            // assets on ordinary results pages, so checking the marker first
-            // misclassifies working SERPs as challenges (it did). Only a page that
-            // yielded **no** results and shows a challenge marker is a real block.
-            0 if is_challenge_page(html) => Outcome::Challenge,
-            0 => Outcome::Empty,
-            n => Outcome::Results(n),
-        },
+        Ok(html) => {
+            let n = super::parse_rendered(engine, html).len();
+            // Results win (a parseable SERP with a stray token is a SERP) — except
+            // where [`is_blocking_challenge`] overrides it (Baidu's parseable
+            // captcha page).
+            if is_blocking_challenge(engine, n > 0, html) {
+                Outcome::Challenge
+            } else if n > 0 {
+                Outcome::Results(n)
+            } else {
+                Outcome::Empty
+            }
+        }
         Err(_) => Outcome::Failed,
     }
 }
@@ -285,12 +288,26 @@ pub fn is_challenge_page(html: &str) -> bool {
     !challenge_markers(html).is_empty()
 }
 
-/// A challenge only *blocks* when the page also produced no results. A real SERP
-/// that merely carries a stray challenge token (Google embeds reCAPTCHA assets on
-/// ordinary results pages) is **not** a block — it must serve its results, never
-/// trigger a retry or the manual-solve window. Pure — unit-tested.
-pub fn is_blocking_challenge(has_results: bool, html: &str) -> bool {
-    !has_results && is_challenge_page(html)
+/// Whether `html` is a challenge that should **block** — surface the solve popup,
+/// retry, and never feed the page to the model.
+///
+/// For most engines a challenge only blocks when the page *also* produced no
+/// results: a real SERP that merely carries a stray challenge token (Google
+/// embeds reCAPTCHA assets on ordinary results pages) must serve its results.
+///
+/// **Baidu is the exception.** Its 百度安全验证 slider-captcha page is itself
+/// parseable — our Baidu parser scrapes a stray "result" (the 意见反馈 / 刷新
+/// link) off it, so `has_results` is true and results-win would let the captcha
+/// junk through as a real result. For Baidu, any challenge page blocks regardless
+/// of a spurious parse. Pure — unit-tested.
+pub fn is_blocking_challenge(engine: SearchEngine, has_results: bool, html: &str) -> bool {
+    if !is_challenge_page(html) {
+        return false;
+    }
+    match engine {
+        SearchEngine::Baidu => true,
+        _ => !has_results,
+    }
 }
 
 /// Whether to re-navigate after a failed attempt: only when the page was a
@@ -671,7 +688,7 @@ mod real {
         let mut last = navigate_once(app, &state, engine, query).await?;
         for attempt in 1..MAX_ATTEMPTS {
             let has_results = !crate::search::parse_rendered(engine, &last).is_empty();
-            if !should_retry(attempt, is_blocking_challenge(has_results, &last), MAX_ATTEMPTS) {
+            if !should_retry(attempt, is_blocking_challenge(engine, has_results, &last), MAX_ATTEMPTS) {
                 break;
             }
             log::info!("search: webview {engine:?} hit a blocking challenge, retrying once");
@@ -691,7 +708,7 @@ mod real {
         // dismissed prompt doesn't re-pop on every search.
         if manual_solve_enabled() {
             let has_results = !crate::search::parse_rendered(engine, &last).is_empty();
-            let blocked = is_blocking_challenge(has_results, &last);
+            let blocked = is_blocking_challenge(engine, has_results, &last);
             let cooldown_active = state
                 .manual_cooldown
                 .lock()
@@ -741,7 +758,7 @@ mod real {
     ) -> Result<(), String> {
         let html = navigate_once(app, state, engine, query).await?;
         let has_results = !crate::search::parse_rendered(engine, &html).is_empty();
-        if !is_blocking_challenge(has_results, &html) {
+        if !is_blocking_challenge(engine, has_results, &html) {
             return Ok(()); // results present (or no block) — nothing to solve
         }
         manual_solve(app, state, engine).await.map(|_| ())
@@ -910,16 +927,22 @@ mod tests {
     }
 
     #[test]
-    fn is_blocking_challenge_requires_no_results() {
+    fn is_blocking_challenge_results_win_except_baidu() {
         let cf = r#"<title>Just a moment...</title><div class="cf-browser-verification"></div>"#;
-        // Challenge markers but results WERE parsed → not a block. This is the bug
-        // the screenshot exposed: a working Google SERP embeds a challenge-y token,
-        // and we must serve its results instead of popping a solve window.
-        assert!(!is_blocking_challenge(true, cf));
-        // Challenge markers and no results → a genuine block.
-        assert!(is_blocking_challenge(false, cf));
-        // No markers, no results → just empty, not a challenge.
-        assert!(!is_blocking_challenge(false, "<html><body>nothing</body></html>"));
+        // Non-Baidu: markers but results WERE parsed → not a block (serve the SERP;
+        // the Google reCAPTCHA-asset case).
+        assert!(!is_blocking_challenge(SearchEngine::Google, true, cf));
+        // Non-Baidu: markers and no results → a genuine block.
+        assert!(is_blocking_challenge(SearchEngine::Google, false, cf));
+        // No markers → never a block.
+        assert!(!is_blocking_challenge(SearchEngine::Google, false, "<html>ok</html>"));
+        assert!(!is_blocking_challenge(SearchEngine::Baidu, false, "<html>ok</html>"));
+
+        // Baidu: its captcha page is parseable, so a stray result must NOT mask the
+        // challenge — Baidu blocks whenever the challenge chrome is present.
+        let baidu_cap = "<html><body>百度安全验证 请完成下方验证后继续操作</body></html>";
+        assert!(is_blocking_challenge(SearchEngine::Baidu, true, baidu_cap));
+        assert!(is_blocking_challenge(SearchEngine::Baidu, false, baidu_cap));
     }
 
     #[test]
@@ -933,6 +956,22 @@ mod tests {
             classify_outcome(SearchEngine::BingCn, &Ok(serp.to_string())),
             Outcome::Results(n) if n >= 1
         ));
+    }
+
+    #[test]
+    fn classify_baidu_captcha_as_challenge_despite_a_stray_result() {
+        // Baidu's 百度安全验证 page parses to a spurious result (the parser scrapes
+        // a link off it); it must still classify as a challenge, not Results.
+        let html = r#"<div id="content_left"><div class="result c-container">
+            <h3><a href="http://www.baidu.com/link?url=x">意见反馈</a></h3>
+            <div class="c-abstract">刷新</div></div></div>
+            <div>百度安全验证 请完成下方验证后继续操作</div>"#;
+        // Sanity: it really does parse to a (spurious) result.
+        assert!(!crate::search::parse_rendered(SearchEngine::Baidu, html).is_empty());
+        assert_eq!(
+            classify_outcome(SearchEngine::Baidu, &Ok(html.to_string())),
+            Outcome::Challenge
+        );
     }
 
     // ── manual-solve backstop (1b) ─────────────────────────────────────────

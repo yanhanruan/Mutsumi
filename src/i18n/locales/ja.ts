@@ -85,7 +85,7 @@ export const ja: Translations = {
     bingCn:     'Bing（中国）',
     bing:       'Bing',
     google:     'Google',
-    baidu:      'Baidu',
+    baidu:      'Baidu（非推奨）',
   },
   searchEnabled:     'ウェブ検索',
   searchEnabledHint: 'オンの時は時事・リアルタイムな質問でネット検索を参照します。オフなら睦の知識と記憶のみで返答します（高速）。',
