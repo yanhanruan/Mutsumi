@@ -117,6 +117,10 @@ fn parse_baidu(doc: &Html) -> Vec<RawResult> {
     let snippet = sel(
         "[data-module=abstract], [class*=summary-text], .c-abstract, [class*=content-right], .c-span-last",
     );
+    // 商业推广 (sponsored) rows: Baidu marks them with `tuiguang` classes/attrs
+    // or an ad-badge span whose entire text is 广告/推广. Never surface ads.
+    let ad_marker = sel("[data-tuiguang], [class*=tuiguang]");
+    let span = sel("span");
     let mut out = Vec::new();
     // Baidu answer cards are `result-op` aladdin cards the organic loop below
     // skips, but they hold the actual datum — put one first so "…汇率" / "…天气"
@@ -126,6 +130,13 @@ fn parse_baidu(doc: &Html) -> Vec<RawResult> {
         out.push(card);
     }
     for el in doc.select(&item) {
+        if el.value().attr("data-tuiguang").is_some()
+            || el.value().classes().any(|c| c.contains("tuiguang"))
+            || el.select(&ad_marker).next().is_some()
+            || el.select(&span).any(|s| matches!(text_of(&s).as_str(), "广告" | "推广"))
+        {
+            continue; // sponsored row
+        }
         let Some(a) = el.select(&title_a).next() else { continue };
         let url = el
             .value()
@@ -204,6 +215,11 @@ fn parse_ddg(doc: &Html) -> Vec<RawResult> {
     let snippet = sel(".result__snippet");
     let mut out = Vec::new();
     for el in doc.select(&item) {
+        // Sponsored rows carry a `result--ad` class (their y.js click-through URL
+        // is also rejected in `clean_ddg_url`, which covers the regex path too).
+        if el.value().classes().any(|c| c.starts_with("result--ad")) {
+            continue;
+        }
         let Some(a) = el.select(&title_a).next() else { continue };
         let raw = a.value().attr("href").unwrap_or_default();
         let url = tracking::clean_ddg_url(raw);
@@ -360,6 +376,45 @@ mod tests {
         assert_eq!(r[0].url, "https://weathernew.pae.baidu.com/weathernew/pc?query=x");
         assert!(r[0].snippet.contains("宁德") && r[0].snippet.contains("晴") && r[0].snippet.contains("28~37°C"), "got {:?}", r[0].snippet);
         assert!(!r[0].snippet.contains("11:00"), "hourly chart must be cut: {:?}", r[0].snippet);
+    }
+
+    #[test]
+    fn baidu_skips_sponsored_rows() {
+        // Ad containers carry data-tuiguang / tuiguang classes / a 广告 badge span;
+        // all three markers must exclude the row while organics still parse.
+        let html = r#"
+            <div id="content_left">
+              <div class="result c-container" data-tuiguang="1" mu="https://ad.example.com/a">
+                <h3><a href="http://www.baidu.com/link?url=AD1">特价旅游套餐</a></h3></div>
+              <div class="result c-container" mu="https://ad.example.com/b">
+                <h3><a href="http://www.baidu.com/link?url=AD2">特价酒店</a></h3>
+                <span class="ec-tuiguang-label">优惠</span></div>
+              <div class="result c-container" mu="https://ad.example.com/c">
+                <h3><a href="http://www.baidu.com/link?url=AD3">贷款服务</a></h3>
+                <span class="badge">广告</span></div>
+              <div class="result c-container" mu="https://real.example.com/x">
+                <h3><a href="http://www.baidu.com/link?url=OK">正经结果</a></h3>
+                <div data-module="abstract"><span class="summary-text_1">真实摘要。</span></div></div>
+            </div>"#;
+        let r = parse_serp(SearchEngine::Baidu, html);
+        assert_eq!(r.len(), 1, "only the organic row survives: {r:?}");
+        assert_eq!(r[0].url, "https://real.example.com/x");
+    }
+
+    #[test]
+    fn ddg_skips_ad_rows() {
+        // Sponsored rows have a result--ad class and a y.js click-through URL —
+        // either alone must exclude them.
+        let html = r#"
+            <div class="result results_links result--ad">
+              <a class="result__a" href="https://duckduckgo.com/y.js?ad_provider=bingv7aa&u3=https%3A%2F%2Fad.example.com">Ad title</a>
+              <div class="result__snippet">Buy now.</div></div>
+            <div class="result results_links">
+              <a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Freal.example.org%2Fpage&rut=x">Real result</a>
+              <div class="result__snippet">Real snippet.</div></div>"#;
+        let r = parse_serp(SearchEngine::DuckDuckGo, html);
+        assert_eq!(r.len(), 1, "only the organic row survives: {r:?}");
+        assert_eq!(r[0].url, "https://real.example.org/page");
     }
 
     #[test]

@@ -55,6 +55,12 @@ pub fn clean_ddg_url(raw: &str) -> String {
             }
         }
     }
+    // DDG sponsored rows click through `duckduckgo.com/y.js?ad_provider=…` — an
+    // ad redirect, not an organic destination. Reject it outright so both parser
+    // paths (regex + CSS) drop ads by URL alone.
+    if link.contains("duckduckgo.com/y.js") {
+        return String::new();
+    }
     if link.starts_with("http") {
         link
     } else {
@@ -245,6 +251,15 @@ mod tests {
     fn ddg_unwraps_uddg_param() {
         let url = "//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.org%2Fpage&rut=x";
         assert_eq!(clean_ddg_url(url), "https://example.org/page");
+    }
+
+    #[test]
+    fn ddg_ad_click_redirect_rejected() {
+        // y.js is DDG's ad click-through — never a real result URL.
+        let ad = "https://duckduckgo.com/y.js?ad_provider=bingv7aa&u3=https%3A%2F%2Fad.example.com";
+        assert_eq!(clean_ddg_url(ad), "");
+        let ad_rel = "//duckduckgo.com/y.js?ad_provider=bingv7aa";
+        assert_eq!(clean_ddg_url(ad_rel), "");
     }
 
     #[test]
