@@ -118,10 +118,11 @@ fn parse_baidu(doc: &Html) -> Vec<RawResult> {
         "[data-module=abstract], [class*=summary-text], .c-abstract, [class*=content-right], .c-span-last",
     );
     let mut out = Vec::new();
-    // The exchange-rate answer card (`tpl="jr_exrate_san"`, a `result-op` aladdin
-    // card that the organic loop below skips) carries the actual datum — put it
-    // first so "…汇率" queries feed the model the number, not just links.
-    if let Some(card) = parse_baidu_exrate_card(doc) {
+    // Baidu answer cards are `result-op` aladdin cards the organic loop below
+    // skips, but they hold the actual datum — put one first so "…汇率" / "…天气"
+    // queries feed the model the number, not just links. (A query shows at most
+    // one such card.)
+    if let Some(card) = parse_baidu_exrate_card(doc).or_else(|| parse_baidu_weather_card(doc)) {
         out.push(card);
     }
     for el in doc.select(&item) {
@@ -170,6 +171,30 @@ fn parse_baidu_exrate_card(doc: &Html) -> Option<RawResult> {
         .unwrap_or("https://www.baidu.com/")
         .to_string();
     Some(RawResult { title: "汇率换算".to_string(), url, snippet: lines.join("；") })
+}
+
+/// Baidu's weather answer card (`tpl="weather_forecast_new_san"`, a `result-op`
+/// aladdin card). Its rendered summary — city, current temp, condition, day
+/// range, air quality, feels-like, wind — is a contiguous run that precedes the
+/// hourly chart, whose axis tabs begin at "气温". Take the card text up to there
+/// so the model gets today's conditions without the hourly/7-day noise.
+fn parse_baidu_weather_card(doc: &Html) -> Option<RawResult> {
+    let card = sel(
+        "div.result-op[tpl=weather_forecast_new_san], div[tpl=weather_forecast_new_san]",
+    );
+    let el = doc.select(&card).next()?;
+    let text = text_of(&el);
+    let summary = text.split("气温").next().unwrap_or(&text).trim();
+    if summary.is_empty() {
+        return None;
+    }
+    let url = el
+        .value()
+        .attr("mu")
+        .filter(|u| u.starts_with("http"))
+        .unwrap_or("https://www.baidu.com/")
+        .to_string();
+    Some(RawResult { title: "天气".to_string(), url, snippet: summary.to_string() })
 }
 
 // ── DuckDuckGo (html.duckduckgo.com) ────────────────────────────────
@@ -311,6 +336,30 @@ mod tests {
         assert_eq!(r[0].url, "http://forex.hexun.com/USDCNY/", "card URL from mu");
         assert!(r[0].snippet.contains("6.7797") && r[0].snippet.contains("0.1475"), "got {:?}", r[0].snippet);
         assert_eq!(r[1].url, "https://www.chinamoney.com.cn/x", "organic still parsed");
+    }
+
+    #[test]
+    fn parses_baidu_weather_card_summary_without_hourly() {
+        // Weather answer card (tpl=weather_forecast_new_san): take the summary up
+        // to the hourly chart ("气温" tab), URL from `mu`.
+        let html = r#"
+            <div id="content_left">
+              <div class="result-op c-container new-pmd" tpl="weather_forecast_new_san"
+                   mu="https://weathernew.pae.baidu.com/weathernew/pc?query=x">
+                <div class="main-info_7ImSO">
+                  <div class="loc_4ZDVN">宁德</div><div>10:40更新</div>
+                  <div class="weather-main_lecpj">33<span>°</span> 28~37°C 晴 44 优 体感38° 东风3级
+                    <div class="tab">气温 风力 降水量 紫外线 现在 11:00 12:00</div>
+                  </div>
+                </div>
+              </div>
+            </div>"#;
+        let r = parse_serp(SearchEngine::Baidu, html);
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].title, "天气");
+        assert_eq!(r[0].url, "https://weathernew.pae.baidu.com/weathernew/pc?query=x");
+        assert!(r[0].snippet.contains("宁德") && r[0].snippet.contains("晴") && r[0].snippet.contains("28~37°C"), "got {:?}", r[0].snippet);
+        assert!(!r[0].snippet.contains("11:00"), "hourly chart must be cut: {:?}", r[0].snippet);
     }
 
     #[test]
