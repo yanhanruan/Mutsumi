@@ -118,6 +118,12 @@ fn parse_baidu(doc: &Html) -> Vec<RawResult> {
         "[data-module=abstract], [class*=summary-text], .c-abstract, [class*=content-right], .c-span-last",
     );
     let mut out = Vec::new();
+    // The exchange-rate answer card (`tpl="jr_exrate_san"`, a `result-op` aladdin
+    // card that the organic loop below skips) carries the actual datum — put it
+    // first so "…汇率" queries feed the model the number, not just links.
+    if let Some(card) = parse_baidu_exrate_card(doc) {
+        out.push(card);
+    }
     for el in doc.select(&item) {
         let Some(a) = el.select(&title_a).next() else { continue };
         let url = el
@@ -137,6 +143,33 @@ fn parse_baidu(doc: &Html) -> Vec<RawResult> {
         });
     }
     out
+}
+
+/// Baidu's exchange-rate answer card (百度股市通 汇率换算): a `result-op`
+/// aladdin card with `tpl="jr_exrate_san"`. It's not a normal `result` card, so
+/// the organic parser skips it — but it holds the rate in `money-style` divs
+/// (e.g. "1 美元 ≈ 6.7797 人民币" / "1 人民币 ≈ 0.1475 美元"), which is exactly the
+/// answer for "…汇率" queries. Extract those lines as a synthetic result, using
+/// the card's `mu` as the source URL.
+fn parse_baidu_exrate_card(doc: &Html) -> Option<RawResult> {
+    let card = sel("div.result-op[tpl=jr_exrate_san], div[tpl=jr_exrate_san]");
+    let rate = sel("[class*=money-style]");
+    let el = doc.select(&card).next()?;
+    let lines: Vec<String> = el
+        .select(&rate)
+        .map(|r| text_of(&r))
+        .filter(|s| !s.is_empty())
+        .collect();
+    if lines.is_empty() {
+        return None;
+    }
+    let url = el
+        .value()
+        .attr("mu")
+        .filter(|u| u.starts_with("http"))
+        .unwrap_or("https://www.baidu.com/")
+        .to_string();
+    Some(RawResult { title: "汇率换算".to_string(), url, snippet: lines.join("；") })
 }
 
 // ── DuckDuckGo (html.duckduckgo.com) ────────────────────────────────
@@ -252,6 +285,32 @@ mod tests {
         // The actual datum survives into the snippet.
         assert!(r[0].snippet.contains("CNY/JPY最新汇率为23.9200"), "snippet was {:?}", r[0].snippet);
         assert!(r[0].snippet.contains("23.9203"), "rate missing from {:?}", r[0].snippet);
+    }
+
+    #[test]
+    fn parses_baidu_exchange_rate_card_first() {
+        // The 汇率换算 answer card is a `result-op` aladdin card (tpl=jr_exrate_san)
+        // with the rate in money-style divs and the real URL in `mu`. It must come
+        // out first, ahead of the organic result below it.
+        let html = r#"
+            <div id="content_left">
+              <div class="result-op c-container new-pmd" tpl="jr_exrate_san"
+                   mu="http://forex.hexun.com/USDCNY/">
+                <a href="http://www.baidu.com/link?url=WeOV">汇率换算</a>
+                <div><div class="money-style_59F57">1 美元 ≈ 6.7797 人民币</div>
+                     <div class="money-style_59F57">1 人民币 ≈ 0.1475 美元</div></div>
+              </div>
+              <div class="result c-container" mu="https://www.chinamoney.com.cn/x">
+                <h3><a href="http://www.baidu.com/link?url=abc">人民币汇率中间价</a></h3>
+                <div data-module="abstract"><span class="summary-text_1">中间价说明</span></div>
+              </div>
+            </div>"#;
+        let r = parse_serp(SearchEngine::Baidu, html);
+        assert_eq!(r.len(), 2, "card + one organic");
+        assert_eq!(r[0].title, "汇率换算");
+        assert_eq!(r[0].url, "http://forex.hexun.com/USDCNY/", "card URL from mu");
+        assert!(r[0].snippet.contains("6.7797") && r[0].snippet.contains("0.1475"), "got {:?}", r[0].snippet);
+        assert_eq!(r[1].url, "https://www.chinamoney.com.cn/x", "organic still parsed");
     }
 
     #[test]
