@@ -1,94 +1,62 @@
 <script setup lang="ts">
 /**
- * BalloonPet — floating balloon zombie, active when the user is truly idle.
+ * BalloonPet — flying-mode sprite, shown while the user is truly idle.
  *
- * Lifecycle:
- *   - Listens for `toggle-balloon-mode { active: boolean }` from the Rust
- *     idle detector (src-tauri/src/idle.rs).
- *   - When active: starts a requestAnimationFrame loop that moves the sprite
- *     using vector-blended movement (see useBalloonFlight.ts).
- *   - When inactive: cancels the RAF loop and hides the sprite.
+ * Movement lives in Rust (src-tauri/src/flight.rs): the whole OS window
+ * glides across the monitor work area. Animating the sprite *inside* the
+ * webview was the old approach and looked like erratic jitter — the window
+ * is only ~170×289 CSS px, so the sprite had almost no room to travel.
+ * This component therefore only renders the frame animation; it never moves
+ * the sprite.
  *
- * Movement recap (all math lives in useBalloonFlight.ts):
- *   - Every tick: stepPosition adds the current velocity, clamps to viewport.
- *   - On any wall hit: blendVectors() picks a new direction, applyWallForce()
- *     guarantees the sprite can't stick by forcing the axis away from the wall.
- *   - Sprite image: cycles through /assets/fly_right/ when vx ≥ 0,
- *                   /assets/fly_left/ when vx < 0.
+ * Events (from Rust):
+ *   - `toggle-balloon-mode { active }`  (idle.rs)  — show/hide + start/stop RAF.
+ *   - `balloon-facing { facing }`       (flight.rs) — "left" | "right", emitted
+ *     at flight start and on every horizontal edge bounce.
  *
- * Note: fly_right / fly_left frame sequences must be placed at
- *   public/assets/fly_right/frame_001.webp … frame_NNN.webp
- *   public/assets/fly_left/ frame_001.webp … frame_NNN.webp
- * Update FRAMES_RIGHT / FRAMES_LEFT below to match your actual frame counts.
+ * Frames: only a LEFT-facing sequence exists —
+ *   public/assets/fly_left/frame_001.webp … frame_192.webp
+ * Playback ping-pongs (1 → last → 1 → …). Right-facing flight mirrors the
+ * sprite with scaleX(-1); there is no fly_right folder.
  */
 import { ref, onMounted, onUnmounted } from 'vue'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
-import {
-  SPRITE_W, SPRITE_H,
-  blendVectors, applyWallForce, stepPosition,
-} from '../composables/useBalloonFlight'
 
 // ── Config ──────────────────────────────────────────────────────────
-/** Frame rate for the sprite animation cycle (not the movement rate). */
+/** Total frames in public/assets/fly_left/ (frame_001 … frame_192). */
+const FRAME_COUNT = 192
+
+/** Sprite playback rate in frames per second. */
 const FRAME_RATE   = 12
 const MS_PER_FRAME = 1000 / FRAME_RATE
 
-/** Number of frames in public/assets/fly_right/ and fly_left/. */
-const FRAMES_RIGHT = 8
-const FRAMES_LEFT  = 8
-
 // ── Reactive render state ───────────────────────────────────────────
 const visible = ref(false)
-const spriteX = ref(0)
-const spriteY = ref(0)
+const facing  = ref<'left' | 'right'>('left')
 const imgSrc  = ref('')
 
 // ── Internal mutable state (not reactive — updated every RAF tick) ──
-let vx = 0
-let vy = 0
 let frameIndex    = 0
+let pingPongStep  = 1   // +1 while playing 1→last, −1 while playing last→1
 let lastFrameTime = 0
 let rafId: number | null = null
-let unlisten: UnlistenFn | null = null
+let unlistenMode:   UnlistenFn | null = null
+let unlistenFacing: UnlistenFn | null = null
 
-// ── Frame path helper ───────────────────────────────────────────────
-function frameSrc(dir: 'right' | 'left', idx: number): string {
-  const folder = dir === 'right' ? 'fly_right' : 'fly_left'
-  const n = String(idx + 1).padStart(3, '0')
-  return `/assets/${folder}/frame_${n}.webp`
+function frameSrc(idx: number): string {
+  return `/assets/fly_left/frame_${String(idx + 1).padStart(3, '0')}.webp`
 }
 
-// ── RAF animation loop ───────────────────────────────────────────────
+// ── RAF animation loop (frame cycling only — no movement) ───────────
 function tick(now: number) {
   if (!visible.value) return
 
-  const w = window.innerWidth
-  const h = window.innerHeight
-
-  // Step position and detect wall hits.
-  const { nx, ny, hitLeft, hitRight, hitTop, hitBot } =
-    stepPosition(spriteX.value, spriteY.value, vx, vy, w, h)
-
-  // On any wall hit: recalculate blended direction, then force axis away.
-  if (hitLeft || hitRight || hitTop || hitBot) {
-    const blended = blendVectors(nx, ny, w, h)
-    const forced  = applyWallForce(
-      blended.vx, blended.vy,
-      hitLeft, hitRight, hitTop, hitBot,
-    )
-    vx = forced.vx
-    vy = forced.vy
-  }
-
-  spriteX.value = nx
-  spriteY.value = ny
-
-  // Advance sprite frame at FRAME_RATE fps (independent of movement speed).
   if (now - lastFrameTime >= MS_PER_FRAME) {
-    const dir   = vx >= 0 ? 'right' : 'left'
-    const count = vx >= 0 ? FRAMES_RIGHT : FRAMES_LEFT
-    frameIndex    = (frameIndex + 1) % count
-    imgSrc.value  = frameSrc(dir, frameIndex)
+    // Ping-pong: bounce the step direction at both ends of the sequence.
+    const next = frameIndex + pingPongStep
+    if (next < 0 || next >= FRAME_COUNT) pingPongStep = -pingPongStep
+    frameIndex   += pingPongStep
+    imgSrc.value  = frameSrc(frameIndex)
     lastFrameTime = now
   }
 
@@ -97,21 +65,10 @@ function tick(now: number) {
 
 // ── Activation / deactivation ───────────────────────────────────────
 function activate() {
-  const w = window.innerWidth
-  const h = window.innerHeight
-
-  // Start near the center of the viewport.
-  spriteX.value = w / 2 - SPRITE_W / 2
-  spriteY.value = h / 2 - SPRITE_H / 2
-
-  // Pick an initial blended velocity.
-  const v = blendVectors(spriteX.value, spriteY.value, w, h)
-  vx = v.vx
-  vy = v.vy
-
   frameIndex    = 0
+  pingPongStep  = 1
   lastFrameTime = 0
-  imgSrc.value  = frameSrc(vx >= 0 ? 'right' : 'left', 0)
+  imgSrc.value  = frameSrc(0)
   visible.value = true
 
   if (rafId !== null) cancelAnimationFrame(rafId)
@@ -128,15 +85,19 @@ function deactivate() {
 
 // ── Lifecycle ────────────────────────────────────────────────────────
 onMounted(async () => {
-  unlisten = await listen<{ active: boolean }>('toggle-balloon-mode', e => {
+  unlistenMode = await listen<{ active: boolean }>('toggle-balloon-mode', e => {
     if (e.payload.active) activate()
     else deactivate()
+  })
+  unlistenFacing = await listen<{ facing: 'left' | 'right' }>('balloon-facing', e => {
+    facing.value = e.payload.facing
   })
 })
 
 onUnmounted(() => {
   deactivate()
-  unlisten?.()
+  unlistenMode?.()
+  unlistenFacing?.()
 })
 </script>
 
@@ -145,13 +106,8 @@ onUnmounted(() => {
     <div v-if="visible" class="balloon-stage">
       <img
         :src="imgSrc"
-        :style="{
-          left:   spriteX + 'px',
-          top:    spriteY + 'px',
-          width:  SPRITE_W + 'px',
-          height: SPRITE_H + 'px',
-        }"
         class="balloon-sprite"
+        :class="{ mirrored: facing === 'right' }"
         alt=""
         draggable="false"
       />
@@ -160,8 +116,8 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-/* Full-viewport transparent layer — pointer-events: none so the pet
-   window still receives mouse input for drag/click while balloon is active. */
+/* Full-window transparent layer — pointer-events: none so the pet window
+   still receives mouse input while balloon mode is active. */
 .balloon-stage {
   position: fixed;
   inset: 0;
@@ -170,15 +126,22 @@ onUnmounted(() => {
   z-index: 10;
 }
 
+/* The sprite fills the window and stays put — the window itself flies. */
 .balloon-sprite {
-  position: absolute;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
   pointer-events: none;
   user-select: none;
   -webkit-user-drag: none;
 }
 
-/* Fade in/out — the sprite animation itself handles the visual float. */
+/* Only left-facing frames exist; mirror them for rightward flight. */
+.balloon-sprite.mirrored {
+  transform: scaleX(-1);
+}
+
+/* Fade in/out — the frame animation handles the visual float. */
 .balloon-enter-active,
 .balloon-leave-active { transition: opacity 400ms ease; }
 .balloon-enter-from,

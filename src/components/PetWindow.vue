@@ -378,6 +378,13 @@ async function onContextAction(action: MenuAction) {
 let unlistenLateNight: UnlistenFn | null = null
 let unlistenWillHide: UnlistenFn | null = null
 let unlistenShow: UnlistenFn | null = null
+let unlistenBalloon: UnlistenFn | null = null
+
+// ── Balloon (flying) mode ──────────────────────────────────────────
+// While the idle detector has balloon mode active, BalloonPet's flying
+// sprite replaces the normal pet: hide the pet frame and badges so they
+// don't ride along under the flying animation as flight.rs moves the window.
+const balloonActive = ref(false)
 
 onMounted(async () => {
   // Sync persisted chat settings to the backend so saved choices survive restarts
@@ -404,12 +411,16 @@ onMounted(async () => {
   unlistenLateNight = await listen('late-night-reminder', () => {
     bubbleRef.value?.show(t.value.lateNightReminder)
   })
+  unlistenBalloon = await listen<{ active: boolean }>('toggle-balloon-mode', e => {
+    balloonActive.value = e.payload.active
+  })
 })
 
 onUnmounted(() => {
   unlistenWillHide?.()
   unlistenShow?.()
   unlistenLateNight?.()
+  unlistenBalloon?.()
 })
 </script>
 
@@ -423,18 +434,18 @@ onUnmounted(() => {
     @contextmenu="onContextMenu"
   >
     <img
-      v-show="ready && !overlayOpen"
+      v-show="ready && !overlayOpen && !balloonActive"
       ref="imgRef"
       class="frame"
       :style="{ opacity: spriteOpacity }"
       draggable="false"
     />
     <Transition name="zzz-fade">
-      <SleepZzz v-if="sleeping && !overlayOpen && config.showZzz" />
+      <SleepZzz v-if="sleeping && !overlayOpen && !balloonActive && config.showZzz" />
     </Transition>
-    <PomodoroBadge v-if="!overlayOpen" />
-    <WeatherBadge v-if="!overlayOpen && config.showWeather && weatherAvailable !== false" />
-    <MusicBadge v-if="!overlayOpen && config.showMusic" />
+    <PomodoroBadge v-if="!overlayOpen && !balloonActive" />
+    <WeatherBadge v-if="!overlayOpen && !balloonActive && config.showWeather && weatherAvailable !== false" />
+    <MusicBadge v-if="!overlayOpen && !balloonActive && config.showMusic" />
     <div class="bubble-anchor">
       <ChatBubble ref="bubbleRef" />
     </div>
