@@ -148,7 +148,8 @@ pub async fn search(app: &AppHandle, engine: SearchEngine, query: &str) -> Vec<S
     }
 
     let results = curate(raw);
-    log::info!("search: webview {engine:?} → {} result(s)", results.len());
+    // log::info!("search: webview {engine:?} → {} result(s)", results.len());
+    log::info!("search: webview {engine:?} → {:?}", results);
     results
 }
 
@@ -157,7 +158,7 @@ pub async fn search(app: &AppHandle, engine: SearchEngine, query: &str) -> Vec<S
 /// snippet + title so the model sees the datum, not boilerplate. Pure — testable.
 fn curate(raw: Vec<RawResult>) -> Vec<SearchResult> {
     let mut out: Vec<SearchResult> = Vec::new();
-    let mut seen_hosts: Vec<String> = Vec::new();
+    let mut seen: Vec<String> = Vec::new();
     for r in raw {
         let title = clean_snippet(&r.title);
         let snippet = clean_snippet(&r.snippet);
@@ -165,12 +166,12 @@ fn curate(raw: Vec<RawResult>) -> Vec<SearchResult> {
         if title.is_empty() || !r.url.starts_with("http") {
             continue;
         }
-        let host = host_of(&r.url);
-        if !host.is_empty() && seen_hosts.iter().any(|h| h == &host) {
-            continue; // one hit per host — avoid the same source repeated
+        let key = dedup_key(&r.url);
+        if !key.is_empty() && seen.iter().any(|h| h == &key) {
+            continue; // one hit per source — avoid the same source repeated
         }
-        if !host.is_empty() {
-            seen_hosts.push(host);
+        if !key.is_empty() {
+            seen.push(key);
         }
         out.push(SearchResult { title, url: r.url, snippet });
         if out.len() >= MAX_RESULTS {
@@ -178,6 +179,19 @@ fn curate(raw: Vec<RawResult>) -> Vec<SearchResult> {
         }
     }
     out
+}
+
+/// De-duplication key for a result URL. Normally the registrable host, so the
+/// same source isn't repeated. **But** Baidu proxies every hit through
+/// `www.baidu.com/link?url=<token>` — an identical host for every row — so plain
+/// host-dedup collapses a whole Baidu SERP to a single result. For such redirect
+/// wrappers, key on the unique redirect token instead, so distinct destinations
+/// survive. Pure — unit-tested.
+fn dedup_key(url: &str) -> String {
+    if let Some(pos) = url.find("/link?url=") {
+        return url[pos..].to_string();
+    }
+    host_of(url)
 }
 
 /// Collapse whitespace, strip common SERP boilerplate, and cap length so a
@@ -305,6 +319,33 @@ mod tests {
         assert_eq!(host_of("https://www.Weather.com.cn/xyz?q=1"), "weather.com.cn");
         assert_eq!(host_of("http://tianqi.com/"), "tianqi.com");
         assert_eq!(host_of("not a url"), "not a url");
+    }
+
+    #[test]
+    fn dedup_key_uses_redirect_token_else_host() {
+        // Baidu redirect → key on the unique token, not the shared host.
+        assert_eq!(dedup_key("http://www.baidu.com/link?url=XYZ"), "/link?url=XYZ");
+        // Ordinary URL → registrable host.
+        assert_eq!(dedup_key("https://www.example.com/page"), "example.com");
+    }
+
+    #[test]
+    fn curate_keeps_distinct_baidu_redirects_not_collapsed_by_host() {
+        // Baidu wraps every hit in www.baidu.com/link?url=<token>; host-dedup would
+        // collapse them all to one (the "only 1 Baidu result" bug). Distinct tokens
+        // must survive.
+        let raw = vec![
+            RawResult { title: "汇率卡片".into(), url: "http://www.baidu.com/link?url=AAA".into(), snippet: "".into() },
+            RawResult { title: "东方财富 实时汇率".into(), url: "http://www.baidu.com/link?url=BBB".into(), snippet: "1 CNY ≈ 21 JPY".into() },
+        ];
+        assert_eq!(curate(raw).len(), 2, "distinct baidu redirects must not be host-collapsed");
+
+        // Same redirect token → still deduped to one.
+        let dup = vec![
+            RawResult { title: "a".into(), url: "http://www.baidu.com/link?url=SAME".into(), snippet: "".into() },
+            RawResult { title: "b".into(), url: "http://www.baidu.com/link?url=SAME".into(), snippet: "".into() },
+        ];
+        assert_eq!(curate(dup).len(), 1, "identical redirect token deduped");
     }
 
     // ── parse_rendered: per-engine coverage on rendered-style HTML ──────────
