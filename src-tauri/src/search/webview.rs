@@ -480,7 +480,12 @@ mod real {
     /// persist for the window's session (it's long-lived + reused), which is all
     /// the manual-solve backstop needs.
     fn build_window(app: &AppHandle, url: tauri::Url) -> Result<(), String> {
-        let visible = std::env::var("MUTSUMI_SERP_VISIBLE").is_ok(); // debugging aid
+        // MUTSUMI_SERP_VISIBLE shows the rendered fetch page so you can watch what
+        // an engine actually returns. Devtools is a *separate* opt-in
+        // (MUTSUMI_SERP_DEVTOOLS) so the console doesn't cover the page you're
+        // trying to see.
+        let visible = std::env::var("MUTSUMI_SERP_VISIBLE").is_ok();
+        let devtools = std::env::var("MUTSUMI_SERP_DEVTOOLS").is_ok();
 
         let built = WebviewWindowBuilder::new(app, SERP_WINDOW, WebviewUrl::External(url))
             .title("search")
@@ -492,7 +497,7 @@ mod real {
             .build()
             .map_err(|e| format!("build: {e}"))?;
         #[cfg(debug_assertions)]
-        if visible {
+        if devtools {
             built.open_devtools();
         }
         let _ = built;
