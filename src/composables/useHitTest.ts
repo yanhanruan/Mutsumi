@@ -99,6 +99,15 @@ export function useHitTest(
    * elements (e.g. the panel) are interactive; everything else is click-through.
    */
   isOverlayActive?: () => boolean,
+  /**
+   * Optional predicate: true while the sprite is horizontally mirrored
+   * (CSS `scaleX(-1)`, e.g. a preserved right-facing heading). The frame is
+   * still drawn un-mirrored into the sampling canvas, so when this is true we
+   * flip the sample x about the window centre to keep click-through aligned
+   * with what the user sees. The DOM overlay (badge) check is left unflipped —
+   * those elements are positioned normally, not mirrored.
+   */
+  isMirrored?: () => boolean,
 ) {
   const canvas = document.createElement('canvas')
   const ctx    = canvas.getContext('2d', { willReadFrequently: true })!
@@ -205,9 +214,11 @@ export function useHitTest(
       return
     }
 
-    // Otherwise sample the current frame's alpha.
+    // Otherwise sample the current frame's alpha. When the sprite is mirrored,
+    // flip the sample x about the canvas centre to match the flipped visual.
     redrawCurrentFrame()
-    const alpha = sampleMaxAlpha(Math.floor(cssX), Math.floor(cssY))
+    const sampleX = isMirrored?.() ? canvas.width - cssX : cssX
+    const alpha = sampleMaxAlpha(Math.floor(sampleX), Math.floor(cssY))
     const next  = shouldIgnore(ignoring, alpha)
     void setIgnore(next)
   }

@@ -67,10 +67,17 @@ const sysStateActive = ref(false)
 // Any full-window overlay is open — gates pet interaction + sprite/badge display.
 const overlayOpen = computed(() => tarotActive.value || chatActive.value || sysStateActive.value)
 
+// Persistent character heading. Updated by `balloon-facing` events during
+// flight and NOT reset on landing, so the orientation she last flew in carries
+// over to idle and every other animation. Only left-facing frames exist, so a
+// 'right' heading mirrors the sprite (scaleX(-1)); the hit-test below flips its
+// alpha sampling to match so click-through stays aligned.
+const heading = ref<'left' | 'right'>('left')
+
 // Per-pixel click-through: transparent regions of the pet pass clicks
 // through to whatever is behind the window. While an overlay is open, only the
 // overlay's panel is interactive; the area around it stays click-through.
-useHitTest(getCurrentImage, () => overlayOpen.value)
+useHitTest(getCurrentImage, () => overlayOpen.value, () => heading.value === 'right')
 
 // TODO re-enable click animation — see onMouseUp:
 // Animations that must not be interrupted by a click (bubble still shows).
@@ -389,12 +396,20 @@ let unlistenFacing: UnlistenFn | null = null
 // Rust owns when flight happens (idle detector / flight controller) and
 // emits `toggle-balloon-mode` on transitions; the animator plays the
 // idle↔fly morphs + flying loop on the pet's own <img> while flight.rs
-// glides the window. Only left-facing frames exist, so `balloon-facing`
-// mirrors the sprite (scaleX(-1)) whenever she flies rightward.
-const flightFacing = ref<'left' | 'right'>('left')
+// glides the window. `balloon-facing` updates `heading` (declared above),
+// which mirrors the sprite and persists after landing.
 // Stops the per-frame collision-insets poller (useFlightCollision); the
 // poller only runs while she is airborne.
 let stopInsetsSync: (() => void) | null = null
+
+// The window must hold still while the fly_enter morph plays and only start
+// gliding once the flying loop begins. The animator hands off fly_enter →
+// flying by name, so that transition is the cue to let Rust move the window.
+watch(currentName, name => {
+  if (name === 'flying') {
+    void invoke('flight_begin_motion').catch(() => {})
+  }
+})
 
 onMounted(async () => {
   // Sync persisted chat settings to the backend so saved choices survive restarts
@@ -441,7 +456,7 @@ onMounted(async () => {
     }
   })
   unlistenFacing = await listen<{ facing: 'left' | 'right' }>('balloon-facing', e => {
-    flightFacing.value = e.payload.facing
+    heading.value = e.payload.facing
   })
 })
 
@@ -468,7 +483,7 @@ onUnmounted(() => {
       v-show="ready && !overlayOpen"
       ref="imgRef"
       class="frame"
-      :class="{ mirrored: flying && flightFacing === 'right' }"
+      :class="{ mirrored: heading === 'right' }"
       :style="{ opacity: spriteOpacity }"
       draggable="false"
     />
@@ -509,8 +524,9 @@ onUnmounted(() => {
      useAnimator.ts. */
   transition: opacity 220ms ease;
 }
-/* Only left-facing flying frames exist — mirror the sprite while she flies
-   rightward (driven by `balloon-facing` events from flight.rs). */
+/* Only left-facing frames exist — mirror the whole sprite for a right-facing
+   heading (from `balloon-facing`), which persists across idle and every other
+   animation, not just flight. */
 .frame.mirrored {
   transform: scaleX(-1);
 }

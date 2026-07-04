@@ -12,14 +12,24 @@
 //! Flight can be requested by the idle screensaver (idle.rs +
 //! flying-screensaver settings) or toggled manually with Ctrl+Alt+F; the
 //! mode-coordination section below owns that decision and the
-//! `toggle-balloon-mode` event. While active, a movement thread runs (and on
-//! stop restores the window to where the user had it). The thread:
+//! `toggle-balloon-mode` event.
+//!
+//! The window does NOT start gliding the instant flight activates: the
+//! frontend plays an idle→fly morph first, and the window must hold still
+//! until that finishes. So `set_active(true)` only arms flight; the frontend
+//! calls `flight_begin_motion` when its `fly_enter` clip ends, and only then
+//! does the movement thread spawn. The thread:
 //!   - samples the window's monitor work area once at start,
+//!   - takes off in the last-faced horizontal direction (persisted across
+//!     flights) so a takeoff continues the orientation she landed in,
 //!   - advances a slow, mostly-horizontal velocity every TICK_MS, with a
 //!     gentle sine bob overlaid on the vertical axis for a balloon-like feel,
 //!   - bounces off the work-area edges (pure `step_flight`, unit-tested),
 //!   - emits `balloon-facing { facing: "left"|"right" }` at start and on every
 //!     horizontal bounce so the frontend can mirror the left-only frames.
+//!
+//! On landing the window is left exactly where it stopped (no snap-back), so
+//! she stays put through the fly→idle morph.
 //!
 //! Window movement uses Tauri's `WebviewWindow::set_position`, which is safe
 //! to call from any thread (it dispatches to the event loop). Only position
@@ -67,6 +77,26 @@ fn facing_of(vx: f64) -> &'static str {
 #[derive(Serialize, Clone, Copy)]
 struct BalloonModePayload {
     active: bool,
+}
+
+/// Last horizontal facing, persisted across flights. `false` = left, which is
+/// the native (un-mirrored) frame orientation and the first-ever takeoff
+/// direction. Each landing leaves this at whatever direction she last flew,
+/// so the next takeoff — and the fly_enter morph the frontend mirrors from
+/// its persistent `heading` — continue that orientation.
+static LAST_FACING_RIGHT: AtomicBool = AtomicBool::new(false);
+
+/// Signed cruise horizontal velocity for a takeoff facing, given the vertical
+/// component. Pure — magnitude keeps |v| == SPEED_PX_PER_SEC. Unit-tested.
+fn cruise_vx(facing_right: bool, vy: f64) -> f64 {
+    let horiz = (SPEED_PX_PER_SEC * SPEED_PX_PER_SEC - vy * vy).max(0.0).sqrt();
+    if facing_right { horiz } else { -horiz }
+}
+
+/// Persist the facing implied by `vx` and tell the frontend to mirror to match.
+fn set_facing(app: &AppHandle, vx: f64) {
+    LAST_FACING_RIGHT.store(vx > 0.0, Ordering::Relaxed);
+    let _ = app.emit("balloon-facing", FacingPayload { facing: facing_of(vx) });
 }
 
 // ── Flight mode coordination ───────────────────────────────────────
@@ -301,23 +331,42 @@ fn slot() -> &'static Mutex<Option<Arc<AtomicBool>>> {
     SLOT.get_or_init(|| Mutex::new(None))
 }
 
-/// Starts or stops the window-flight thread. Called only by refresh() on
-/// effective-state transitions.
-fn set_active(app: &AppHandle, active: bool) {
-    let mut guard = slot().lock().unwrap();
-
-    // Stop any running flight first (also the "deactivate" path — the thread
-    // restores the window's original position on its way out).
-    if let Some(stop) = guard.take() {
+/// Stops the window-flight thread if one is running. Called by refresh() on
+/// every effective-state transition. Deactivating this way leaves the window
+/// wherever it stopped — she does not snap back.
+///
+/// Note this does NOT start motion when flight activates: the window must
+/// hold still until the frontend's fly_enter morph finishes, at which point
+/// it calls `flight_begin_motion` (below).
+fn set_active(_app: &AppHandle, _active: bool) {
+    if let Some(stop) = slot().lock().unwrap().take() {
         stop.store(true, Ordering::Relaxed);
     }
+}
 
-    if active {
-        let stop = Arc::new(AtomicBool::new(false));
-        *guard = Some(stop.clone());
-        let app = app.clone();
-        thread::spawn(move || run_flight(app, stop));
+/// Frontend signal: the fly_enter morph has finished, so the window may now
+/// begin gliding. Spawns the movement thread — but only if flight is still
+/// active (the user may have moved the mouse mid-morph) and not already
+/// moving (idempotent against the animator re-arming the flying loop).
+///
+/// Holds the `mode_slot` lock across the whole check-and-spawn so it is
+/// atomic against a concurrent `set_active(false)` — otherwise a deactivation
+/// landing between the active check and the spawn would orphan a moving
+/// thread. Safe from deadlock: `set_active` locks only `slot`, and no path
+/// ever locks `slot` before `mode_slot`.
+#[tauri::command]
+pub fn flight_begin_motion(app: AppHandle) {
+    let mode = mode_slot().lock().unwrap();
+    if !mode.active {
+        return;
     }
+    let mut guard = slot().lock().unwrap();
+    if guard.is_some() {
+        return;
+    }
+    let stop = Arc::new(AtomicBool::new(false));
+    *guard = Some(stop.clone());
+    thread::spawn(move || run_flight(app, stop));
 }
 
 // ── Flight thread ──────────────────────────────────────────────────
@@ -339,21 +388,22 @@ fn run_flight(app: AppHandle, stop: Arc<AtomicBool>) {
     );
     let win = (size.width as f64, size.height as f64);
 
-    // Initial velocity: fly left (the native frame orientation) with a small
-    // pseudo-random vertical drift. No rand crate — clock nanos are plenty.
+    // Initial velocity: take off in the last-faced direction (so a takeoff
+    // continues the orientation she landed in), with a small pseudo-random
+    // vertical drift. No rand crate — clock nanos are plenty.
     let seed = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.subsec_nanos())
         .unwrap_or(0);
     let drift = (seed % 1000) as f64 / 1000.0 * 2.0 - 1.0; // [-1, 1)
     let mut vy = SPEED_PX_PER_SEC * MAX_VERTICAL_RATIO * drift;
-    let mut vx = -(SPEED_PX_PER_SEC * SPEED_PX_PER_SEC - vy * vy).sqrt();
+    let mut vx = cruise_vx(LAST_FACING_RIGHT.load(Ordering::Relaxed), vy);
 
     let mut x = origin.x as f64;
     let mut y = origin.y as f64;
     let (mut last_ix, mut last_iy) = (origin.x, origin.y);
 
-    let _ = app.emit("balloon-facing", FacingPayload { facing: facing_of(vx) });
+    set_facing(&app, vx);
 
     let dt = TICK_MS as f64 / 1000.0;
     let mut t = 0.0_f64;
@@ -380,7 +430,7 @@ fn run_flight(app: AppHandle, stop: Arc<AtomicBool>) {
         vy = s.vy;
 
         if s.flipped_x {
-            let _ = app.emit("balloon-facing", FacingPayload { facing: facing_of(vx) });
+            set_facing(&app, vx);
         }
 
         // Only touch the OS window when the integer position actually moved.
@@ -391,8 +441,8 @@ fn run_flight(app: AppHandle, stop: Arc<AtomicBool>) {
         }
     }
 
-    // Flight over — put the window back where the user had it.
-    let _ = window.set_position(origin);
+    // Flight over: leave the window exactly where it stopped (no snap-back).
+    // LAST_FACING_RIGHT already holds her final heading for the next takeoff.
 }
 
 // ── Unit tests ─────────────────────────────────────────────────────
@@ -506,6 +556,31 @@ mod tests {
     fn nothing_requested_stays_grounded() {
         assert!(!effective_active(false, false, false));
         assert!(!effective_active(false, false, true));
+    }
+
+    // ── cruise_vx (takeoff direction from persisted facing) ────────
+
+    #[test]
+    fn takeoff_left_is_negative_right_is_positive() {
+        assert!(cruise_vx(false, 0.0) < 0.0, "facing left → fly left");
+        assert!(cruise_vx(true, 0.0) > 0.0, "facing right → fly right");
+    }
+
+    #[test]
+    fn takeoff_speed_matches_cruise_speed() {
+        // |(vx, vy)| == SPEED regardless of facing.
+        let vy = 8.0;
+        for facing_right in [false, true] {
+            let vx = cruise_vx(facing_right, vy);
+            let speed = (vx * vx + vy * vy).sqrt();
+            assert!((speed - SPEED_PX_PER_SEC).abs() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn takeoff_horizontal_flips_with_facing_only() {
+        // Same magnitude, opposite sign — the two facings are mirror takeoffs.
+        assert_eq!(cruise_vx(true, 5.0), -cruise_vx(false, 5.0));
     }
 
     #[test]

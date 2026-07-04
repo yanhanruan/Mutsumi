@@ -114,6 +114,7 @@ pub fn run() {
       window_ops::set_window_bounds,
       flight::flight_set_insets,
       flight::flight_set_screensaver,
+      flight::flight_begin_motion,
       card_export::save_card_image,
       card_export::reveal_in_folder,
       services::tts_synthesize,
