@@ -58,6 +58,9 @@ export type AnimationName =
   | 'idle_low_affection' // low affection only
   | 'idle_exhausted'     // both low
   | 'sleep'              // max-priority rest state (assets in progress)
+  | 'flying'             // balloon-mode loop (the window itself glides — flight.rs)
+  | 'fly_enter'          // idle→fly morph (shared transform clip, reversed)
+  | 'fly_exit'           // fly→idle morph (shared transform clip, forward)
   | 'click'
   | 'pat_head'
   | 'headphones_on'
@@ -166,6 +169,16 @@ export function buildPingPongSequence(
   return seq
 }
 
+// ── Flying transform clip ────────────────────────────────────────────
+/**
+ * Frames in public/assets/fly_to_idle/ — the fly→idle morph, left-facing.
+ * ONE shared file set serves both transitions: `fly_exit` plays it forward
+ * (fly→idle) and `fly_enter` plays it reversed (idle→fly). Placeholder 1
+ * until the assets land — update to the real count when the files are added
+ * (a missing folder degrades gracefully: broken frames are never painted).
+ */
+export const FLY_TRANSFORM_COUNT = 1
+
 // ── Default registry (matches Python original) ──────────────────────
 
 export const DEFAULT_ANIMATIONS: Record<AnimationName, AnimationDef> = {
@@ -185,6 +198,18 @@ export const DEFAULT_ANIMATIONS: Record<AnimationName, AnimationDef> = {
   sleep:               { dir: 'sleep',          count: 192, fps: 24, loop: true,
                          holdCycle: { anchors: [1, 68, 133, 144, 192],
                                       holdMinMs: 5 * 60_000, holdMaxMs: 5 * 60_000 + 45_000 } },
+  // ── Flying (balloon mode) ───────────────────────────────────────────────
+  // The window itself glides across the screen (src-tauri/src/flight.rs);
+  // these clips only animate the sprite. Only LEFT-facing frames exist —
+  // rightward flight mirrors the <img> with scaleX(-1) (PetWindow `mirrored`
+  // class, driven by `balloon-facing` events from flight.rs).
+  // `flying` ping-pongs 1 → 192 → 1 … without duplicating the turn frames.
+  flying:              { dir: 'fly_left',       count: 192, fps: 24, loop: true,
+                         buildSequence: f => [...f, ...f.slice(1, -1).reverse()] },
+  fly_enter:           { dir: 'fly_to_idle',    count: FLY_TRANSFORM_COUNT, fps: 24, loop: false,
+                         buildSequence: f => f.slice().reverse() },
+  fly_exit:            { dir: 'fly_to_idle',    count: FLY_TRANSFORM_COUNT, fps: 24, loop: false },
+  // ─────────────────────────────────────────────────────────────────────────
   click:               { dir: 'click_matched',  count: 156, fps: 24, loop: false },
   pat_head:            { dir: 'pat_head',       count: 192, fps: 24, loop: false },
   headphones_on:       { dir: 'headphones_on',  count: 185, fps: 24, loop: false },
@@ -196,6 +221,29 @@ export const DEFAULT_ANIMATIONS: Record<AnimationName, AnimationDef> = {
                          buildSequence: f => buildPingPongSequence(f,  1, 139, even(2)) },
   music4:              { dir: 'music4',         count: 185, fps: 24, loop: false,
                          buildSequence: f => buildPingPongSequence(f, 105, 161, odd(13)) },
+}
+
+// ── Frame preloading (shared) ───────────────────────────────────────
+/**
+ * Load every frame of an animation directory
+ * (`/assets/<dir>/frame_001.webp … frame_NNN.webp`) into Image objects.
+ * Failed frames resolve too (they report naturalWidth === 0) so a missing
+ * file never blocks playback. Swapping an <img>.src to a preloaded frame's
+ * URL is a cache hit, which is what keeps 24 fps playback stutter-free.
+ */
+export function preloadFrames(dir: string, count: number): Promise<HTMLImageElement[]> {
+  const frames: HTMLImageElement[] = []
+  const promises: Promise<void>[]  = []
+  for (let i = 1; i <= count; i++) {
+    const img = new Image()
+    img.src = `/assets/${dir}/frame_${String(i).padStart(3, '0')}.webp`
+    frames.push(img)
+    promises.push(new Promise(res => {
+      img.onload  = () => res()
+      img.onerror = () => res()
+    }))
+  }
+  return Promise.all(promises).then(() => frames)
 }
 
 // ── Sleep crossfade ─────────────────────────────────────────────────
@@ -238,6 +286,10 @@ export function useAnimator(
   // Written only on sleep enter/exit (not the hot path), so plain reactivity
   // is fine.
   const spriteOpacity = ref(1)
+  // Flying (balloon) mode. Like sleep, a max-priority state: while true,
+  // ordinary animation requests are ignored. Set by enterFlight(); drops
+  // when the fly_exit morph finishes (see nextAnimAfterEnd).
+  const flying = ref(false)
 
   // Internal state (not reactive — touched 60+ times/sec)
   let frameIx     = 0
@@ -251,6 +303,8 @@ export function useAnimator(
   let holdDir     = 1
   // Which idle-variant to play. Updated by setIdleVariant() from pet-status events.
   let idleAnimName: AnimationName = 'idle'
+  // Whether she was sleeping when flight started — fly_exit returns there.
+  let wasSleepingBeforeFlight = false
 
   // ── Direct DOM paint (hot path) ────────────────────────────────
   // Writing .src directly on the element is invisible to Vue's scheduler —
@@ -266,18 +320,7 @@ export function useAnimator(
 
   // ── Preload ────────────────────────────────────────────────────
   function preloadAnim(def: AnimationDef): Promise<HTMLImageElement[]> {
-    const frames: HTMLImageElement[] = []
-    const promises: Promise<void>[]  = []
-    for (let i = 1; i <= def.count; i++) {
-      const img = new Image()
-      img.src = `/assets/${def.dir}/frame_${String(i).padStart(3, '0')}.webp`
-      frames.push(img)
-      promises.push(new Promise(res => {
-        img.onload  = () => res()
-        img.onerror = () => res()
-      }))
-    }
-    return Promise.all(promises).then(() =>
+    return preloadFrames(def.dir, def.count).then(frames =>
       def.buildSequence ? def.buildSequence(frames) : frames
     )
   }
@@ -340,22 +383,23 @@ export function useAnimator(
   }
 
   /**
-   * Public animation switch. No-op while sleeping so clicks, pat-head, and
-   * other ad-hoc requests cannot interrupt the rest state. Use exitSleep()
-   * to leave sleep.
+   * Public animation switch. No-op while sleeping or flying so clicks,
+   * pat-head, and other ad-hoc requests cannot interrupt those states.
+   * Use exitSleep() / exitFlight() to leave them.
    */
   function setAnim(name: AnimationName) {
-    if (sleeping.value) return
+    if (sleeping.value || flying.value) return
     applyAnim(name)
   }
 
   /**
    * Queue an animation to start at the natural end of the current loop.
-   * Mirrors `_pending_anim` from the Python original. Ignored while sleeping —
-   * the audio reaction must not schedule headphones/music behind the sleep loop.
+   * Mirrors `_pending_anim` from the Python original. Ignored while sleeping
+   * or flying — the audio reaction must not schedule headphones/music behind
+   * the sleep or flying loop.
    */
   function queueAnim(name: AnimationName) {
-    if (sleeping.value) return
+    if (sleeping.value || flying.value) return
     pendingAnim = name
   }
 
@@ -368,7 +412,7 @@ export function useAnimator(
    * sleeping.
    */
   async function enterSleep() {
-    if (sleeping.value) return
+    if (sleeping.value || flying.value) return
     spriteOpacity.value = 0
     await waitMs(SLEEP_FADE_MS)
     sleeping.value = true
@@ -382,13 +426,40 @@ export function useAnimator(
    * same dip-to-transparent crossfade. No-op if not sleeping.
    */
   async function exitSleep() {
-    if (!sleeping.value) return
+    if (!sleeping.value || flying.value) return
     spriteOpacity.value = 0
     await waitMs(SLEEP_FADE_MS)
     sleeping.value = false
     pendingAnim = null
     applyAnim(idleAnimName)
     spriteOpacity.value = 1
+  }
+
+  // ── Flying (balloon mode, max-priority like sleep) ────────────
+  /**
+   * Enter flying mode: play the idle→fly morph (`fly_enter` — the shared
+   * transform clip reversed), which chains into the `flying` ping-pong loop.
+   * Works from sleep too; the pre-flight sleep state is remembered and
+   * restored when flight ends. No-op if already flying.
+   */
+  function enterFlight() {
+    if (flying.value) return
+    flying.value = true
+    wasSleepingBeforeFlight = sleeping.value
+    pendingAnim = null
+    applyAnim('fly_enter')
+  }
+
+  /**
+   * Leave flying mode: play the fly→idle morph (`fly_exit`) once. When it
+   * ends, the machine returns to sleep (if she was sleeping when flight
+   * started) or the current idle variant, and `flying` drops — see
+   * nextAnimAfterEnd. No-op if not flying.
+   */
+  function exitFlight() {
+    if (!flying.value) return
+    pendingAnim = null
+    applyAnim('fly_exit')
   }
 
   /** Read the currently-pending animation (if any). */
@@ -422,6 +493,13 @@ export function useAnimator(
       return nxt
     }
     const cur = currentName.value
+    // Flying chains. pendingAnim is always null here while flying —
+    // queueAnim is gated and enterFlight/exitFlight clear it.
+    if (cur === 'fly_enter')      return 'flying'
+    if (cur === 'fly_exit') {
+      flying.value = false
+      return wasSleepingBeforeFlight ? 'sleep' : idleAnimName
+    }
     if (cur === 'headphones_on')  return 'music1'
     if (cur === 'music1')         return 'music2'
     if (cur === 'music2')         return 'music3'
@@ -523,11 +601,14 @@ export function useAnimator(
     currentName,
     ready,
     sleeping,
+    flying,
     spriteOpacity,
     queueAnim,
     setAnim,
     enterSleep,
     exitSleep,
+    enterFlight,
+    exitFlight,
     getPending,
     cancelPending,
     getCurrentImage,

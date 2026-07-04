@@ -30,7 +30,6 @@ import ChatBubble from './ChatBubble.vue'
 import PomodoroBadge from './PomodoroBadge.vue'
 import WeatherBadge from './WeatherBadge.vue'
 import MusicBadge from './MusicBadge.vue'
-import BalloonPet from './BalloonPet.vue'
 import SleepZzz from './SleepZzz.vue'
 import TarotCard from './TarotCard.vue'
 import ChatPanel from './ChatPanel.vue'
@@ -43,11 +42,14 @@ const {
   currentName,
   ready,
   sleeping,
+  flying,
   spriteOpacity,
   queueAnim,
   setAnim,
   enterSleep,
   exitSleep,
+  enterFlight,
+  exitFlight,
   getPending,
   cancelPending,
   getCurrentImage,
@@ -379,12 +381,15 @@ let unlistenLateNight: UnlistenFn | null = null
 let unlistenWillHide: UnlistenFn | null = null
 let unlistenShow: UnlistenFn | null = null
 let unlistenBalloon: UnlistenFn | null = null
+let unlistenFacing: UnlistenFn | null = null
 
-// ── Balloon (flying) mode ──────────────────────────────────────────
-// While the idle detector has balloon mode active, BalloonPet's flying
-// sprite replaces the normal pet: hide the pet frame and badges so they
-// don't ride along under the flying animation as flight.rs moves the window.
-const balloonActive = ref(false)
+// ── Flying (balloon) mode ──────────────────────────────────────────
+// Rust owns when flight happens (idle detector / flight controller) and
+// emits `toggle-balloon-mode` on transitions; the animator plays the
+// idle↔fly morphs + flying loop on the pet's own <img> while flight.rs
+// glides the window. Only left-facing frames exist, so `balloon-facing`
+// mirrors the sprite (scaleX(-1)) whenever she flies rightward.
+const flightFacing = ref<'left' | 'right'>('left')
 
 onMounted(async () => {
   // Sync persisted chat settings to the backend so saved choices survive restarts
@@ -412,7 +417,11 @@ onMounted(async () => {
     bubbleRef.value?.show(t.value.lateNightReminder)
   })
   unlistenBalloon = await listen<{ active: boolean }>('toggle-balloon-mode', e => {
-    balloonActive.value = e.payload.active
+    if (e.payload.active) enterFlight()
+    else exitFlight()
+  })
+  unlistenFacing = await listen<{ facing: 'left' | 'right' }>('balloon-facing', e => {
+    flightFacing.value = e.payload.facing
   })
 })
 
@@ -421,6 +430,7 @@ onUnmounted(() => {
   unlistenShow?.()
   unlistenLateNight?.()
   unlistenBalloon?.()
+  unlistenFacing?.()
 })
 </script>
 
@@ -434,18 +444,19 @@ onUnmounted(() => {
     @contextmenu="onContextMenu"
   >
     <img
-      v-show="ready && !overlayOpen && !balloonActive"
+      v-show="ready && !overlayOpen"
       ref="imgRef"
       class="frame"
+      :class="{ mirrored: flying && flightFacing === 'right' }"
       :style="{ opacity: spriteOpacity }"
       draggable="false"
     />
     <Transition name="zzz-fade">
-      <SleepZzz v-if="sleeping && !overlayOpen && !balloonActive && config.showZzz" />
+      <SleepZzz v-if="sleeping && !overlayOpen && !flying && config.showZzz" />
     </Transition>
-    <PomodoroBadge v-if="!overlayOpen && !balloonActive" />
-    <WeatherBadge v-if="!overlayOpen && !balloonActive && config.showWeather && weatherAvailable !== false" />
-    <MusicBadge v-if="!overlayOpen && !balloonActive && config.showMusic" />
+    <PomodoroBadge v-if="!overlayOpen && !flying" />
+    <WeatherBadge v-if="!overlayOpen && !flying && config.showWeather && weatherAvailable !== false" />
+    <MusicBadge v-if="!overlayOpen && !flying && config.showMusic" />
     <div class="bubble-anchor">
       <ChatBubble ref="bubbleRef" />
     </div>
@@ -454,7 +465,6 @@ onUnmounted(() => {
   <TarotCard ref="tarotRef" @close="closeTarot" />
   <ChatPanel ref="chatRef" @close="closeChat" />
   <SystemStateOverlay ref="sysStateRef" @close="closeSysState" />
-  <BalloonPet />
 </template>
 
 <style scoped>
@@ -477,6 +487,11 @@ onUnmounted(() => {
      the animator's spriteOpacity. Keep in sync with SLEEP_FADE_MS in
      useAnimator.ts. */
   transition: opacity 220ms ease;
+}
+/* Only left-facing flying frames exist — mirror the sprite while she flies
+   rightward (driven by `balloon-facing` events from flight.rs). */
+.frame.mirrored {
+  transform: scaleX(-1);
 }
 .bubble-anchor {
   position: absolute;
