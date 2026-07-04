@@ -39,6 +39,8 @@ Mutsumi 是一个静静住在你屏幕角落的小伙伴。
 
 👻 **无感陪伴，穿透点击**：始终悬浮在屏幕最前方，但透明区域完全穿透，绝不遮挡你点击底部的代码或网页。你可以随时把她拖拽到屏幕的任意角落。
 
+🎈 **飞行屏保模式**：当电脑闲置一段时间后（等待时长可在设置中调整，6–30 分钟），睦头会像气球一样轻轻飞起，缓缓地在整个屏幕上飘荡，陪你度过发呆放空的时光；有人回来动一下鼠标，她就会自己落回原地。你也可以随时按 `Ctrl+Alt+F` 让她起飞或降落。可在设置中开关。
+
 🎧 **全局音频感知（无需配置）**：当你开始播放音乐或看视频时，她会立刻戴上耳机跟着节奏晃动；声音停止，她会摘下耳机恢复平静。
 
 🎵 **迷你音乐控制器**：右下角常驻一个会随音乐律动的音响小图标。悬停即可展开控制面板——播放 / 暂停、上一首 / 下一首、快进 / 快退 10 秒、重播、系统音量与静音，并显示当前曲目、歌手和播放进度，点击或拖动进度条即可跳转到任意位置。当多个应用同时在播放时，还能切换音源并自动跟随最新的播放会话。基于 Windows 系统媒体控件（SMTC），能控制任何正在播放的应用：Spotify、网易云音乐、浏览器等（建议下载最新版本）。可在设置中随时开关。
@@ -106,13 +108,13 @@ Mutsumi 是一个静静住在你屏幕角落的小伙伴。
 
 
 
-下个版本即将推出🚀：GPT-SoVITS小睦AI语音、休闲小音游、屏保飞行模式.....
+下个版本即将推出🚀：GPT-SoVITS小睦AI语音、休闲小音游.....
 
 
 
 ### ⚙️ 偏好设置
 
-右键点击系统托盘（右下角）的 Mutsumi 图标，可以自定义：`番茄钟时长` / `角色体型 (小/中/大)` / `天气开关` / `音乐控制器开关` / `界面语言`
+右键点击系统托盘（右下角）的 Mutsumi 图标，可以自定义：`番茄钟时长` / `角色体型 (小/中/大)` / `天气开关` / `音乐控制器开关` / `飞行屏保开关与等待时长` / `界面语言`
 
 <p align="center">
     <img src="docs/images/setting.avif" width="440" alt="Settings window" />
@@ -199,6 +201,9 @@ Mutsumi is a quiet little companion living in the corner of your screen. She min
 👻 **Always There, Never in the Way**
  Stays on top of all your windows, while fully transparent areas let your clicks pass straight through. Your code, browser, and apps remain completely accessible. Drag her anywhere on your screen at any time.
 
+🎈 **Flying Screensaver**
+ After your computer sits idle for a while (the wait is configurable, 6–30 minutes), Mutsumi lifts off like a balloon and drifts gently across the whole screen — a soft, living screensaver for your daydreaming breaks. The moment you touch the mouse again she floats back down where she was. Press `Ctrl+Alt+F` to send her flying (or bring her back down) anytime. Toggle it in Settings.
+
 🎧 **Automatic Audio Awareness**
  Start playing music or a video, and she'll instantly put on her headphones and groove along to the beat. When the audio stops, she'll take them off and quietly return to idle.
 
@@ -283,11 +288,11 @@ npm run tauri dev
 
 ### ⚙️ Settings
 
-Right-click her icon in the system tray (bottom-right corner) to tweak: `Pomodoro Durations` / `Character Size (S/M/L)` / `Weather Toggle` / `Music Controller Toggle` / `Language`
+Right-click her icon in the system tray (bottom-right corner) to tweak: `Pomodoro Durations` / `Character Size (S/M/L)` / `Weather Toggle` / `Music Controller Toggle` / `Flying Screensaver Toggle & Wait Time` / `Language`
 
 <p align="center"><img src="docs/images/setting.avif" width="440" alt="Settings window" /></p>
 
-🚀 Coming soon: Spoken replies (Mutsumi's own voice), Casual Rhythm Game, Flying Screensaver Mode...
+🚀 Coming soon: Spoken replies (Mutsumi's own voice), Casual Rhythm Game...
 
 ### 🛠️ Architecture
 
