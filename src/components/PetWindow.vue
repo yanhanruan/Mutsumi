@@ -399,6 +399,10 @@ onMounted(async () => {
   void invoke('set_search_engine', { engine: config.value.searchEngine }).catch(() => {})
   void invoke('set_search_enabled', { enabled: config.value.searchEnabled }).catch(() => {})
   void invoke('qwen_set_chat_model', { model: config.value.chatModel }).catch(() => {})
+  void invoke('flight_set_screensaver', {
+    enabled: config.value.flyingScreensaver,
+    waitMins: config.value.flyingWaitMins,
+  }).catch(() => {})
 
   // Fade-out: Rust emits "pet-will-hide" before w.hide(); drive the CSS transition.
   unlistenWillHide = await listen('pet-will-hide', () => {

@@ -66,6 +66,11 @@ export interface Translations {
   // ── Sleep "zzz" effect visibility ───────────────────────────────
   showZzz: string
 
+  // ── Flying screensaver ──────────────────────────────────────────
+  flyingScreensaver:     string
+  flyingWaitLabel:       string
+  flyingScreensaverHint: string
+
   // ── Search engine (chat search-enhancement) ─────────────────────
   searchEngine: string
   searchEngines: {
