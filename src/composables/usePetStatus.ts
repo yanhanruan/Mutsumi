@@ -15,7 +15,7 @@
 import { onMounted, onUnmounted, ref } from 'vue'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
-import type { AnimationName } from './useAnimator'
+import type { AnimationName } from '../config/animations'
 
 // ── Types ──────────────────────────────────────────────────────────
 

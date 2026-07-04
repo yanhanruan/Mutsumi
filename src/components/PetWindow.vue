@@ -11,7 +11,8 @@
  *   entire window.
  */
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { useAnimator, DEFAULT_ANIMATIONS, IDLE_VARIANTS } from '../composables/useAnimator'
+import { useAnimator } from '../composables/useAnimator'
+import { DEFAULT_ANIMATIONS, IDLE_VARIANTS } from '../config/animations'
 import { useAudioReaction } from '../composables/useAudioReaction'
 import { useMidnightAutoSleep } from '../composables/useMidnightAutoSleep'
 import { prepareFlightCollision, startFlightInsetsSync } from '../composables/useFlightCollision'

@@ -1,14 +1,22 @@
 /**
- * useAudioReaction — subscribe to backend audio events and queue the
- * matching pet animations.
+ * useAudioReaction — translates the backend's audio events into animator
+ * inputs. That is its whole job; it holds no animation data (classification
+ * sets live in src/config/animations.ts) and makes no playback decisions
+ * (those are the animator's).
  *
- * The Rust side (audio.rs) now does continuity-based detection: it only
- * emits audio-started after 3 s of sustained activity and audio-stopped
- * after 6 s of sustained silence. So this side no longer needs its own
- * debounce — events arrive already filtered.
+ * For every audio transition it does exactly two things:
+ *   1. setAudioActive(…) — update the animator's mirror of the backend
+ *      AudioState, unconditionally. Requests below can be gated (sleep/
+ *      flight) or interrupted (pat_head); the mirror never is, and the
+ *      animator's baseline resolver relies on it to restore music mode when
+ *      those states end.
+ *   2. queue/cancel the matching enter/exit animation for LIVE transitions.
  *
- * What this side still has to do is reconcile against in-flight pending
- * animations. Race example without the cancel-pending guard:
+ * The Rust side (audio.rs) does continuity-based detection: it only emits
+ * audio-started after 3 s of sustained activity and audio-stopped after 6 s
+ * of sustained silence, so no debounce is needed here. What is needed is
+ * reconciling against the pending slot. Race example without the
+ * cancel-pending guard:
  *   1. music playing, user pauses audio for 7 s
  *   2. audio-stopped fires → queueAnim('headphones_off') → pending set
  *   3. user resumes audio before the music loop ends
@@ -16,30 +24,12 @@
  *   5. Without cancelling the pending, the music loop ends, consumes the
  *      stale 'headphones_off', and the pet drops to idle — even though
  *      audio is playing.
- * The two guards below mirror Python's _begin / _end_music_sequence.
- *
- * Besides queueing animations, every event (and the bootstrap pull) also
- * feeds setAudioActive — the animator's always-fresh mirror of the backend
- * AudioState. The queued animations can be gated (sleep/flight) or
- * interrupted (pat_head), but the mirror never is, so the animator's
- * baseline resolver can restore music mode whenever those states end.
+ * The guards below mirror Python's _begin / _end_music_sequence.
  */
 import { onMounted, onUnmounted, type Ref } from 'vue'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
-import type { AnimationName } from './useAnimator'
-
-// Animations that represent "in / entering music mode". headphones_off is
-// intentionally NOT in this set — it's the *exit* animation that leads back
-// to idle. If audio resumes while headphones_off is playing, we DO need to
-// re-enter via headphones_on, not skip it.
-const IN_MUSIC_ANIMS: ReadonlySet<AnimationName> = new Set([
-  'headphones_on',
-  'music1',
-  'music2',
-  'music3',
-  'music4',
-])
+import { MUSIC_MODE_ANIMS, type AnimationName } from '../config/animations'
 
 export function useAudioReaction(
   queueAnim:      (name: AnimationName) => void,
@@ -51,6 +41,35 @@ export function useAudioReaction(
   let unlistenStarted: UnlistenFn | null = null
   let unlistenStopped: UnlistenFn | null = null
 
+  function onAudioStarted() {
+    setAudioActive(true)
+    if (MUSIC_MODE_ANIMS.has(currentName.value)) {
+      // Already in / entering music. A pending 'headphones_off' here means a
+      // stop event fired earlier and is still queued — cancel it so the music
+      // chain doesn't drop out when the current loop ends.
+      if (getPending() === 'headphones_off') {
+        cancelPending()
+      }
+    } else {
+      // In idle, click, or headphones_off (i.e., currently exiting music).
+      // Queue headphones_on to enter / re-enter. The pending slot overrides
+      // the headphones_off ending, so this also correctly handles the
+      // "audio resumed mid-exit" case.
+      queueAnim('headphones_on')
+    }
+  }
+
+  function onAudioStopped() {
+    setAudioActive(false)
+    if (MUSIC_MODE_ANIMS.has(currentName.value)) {
+      queueAnim('headphones_off')
+    } else if (getPending() === 'headphones_on') {
+      // Audio started briefly then stopped before headphones_on landed —
+      // cancel the queued entrance.
+      cancelPending()
+    }
+  }
+
   onMounted(async () => {
     // Pull the cached Rust state first.  If audio-started fired before this
     // listener registered (WebView2 cold-start can take 1-5 s; the tracker
@@ -59,38 +78,12 @@ export function useAudioReaction(
     // AudioState here covers that window.
     const alreadyPlaying = await invoke<boolean>('get_audio_state')
     setAudioActive(alreadyPlaying)
-    if (alreadyPlaying && !IN_MUSIC_ANIMS.has(currentName.value)) {
+    if (alreadyPlaying && !MUSIC_MODE_ANIMS.has(currentName.value)) {
       queueAnim('headphones_on')
     }
 
-    unlistenStarted = await listen('audio-started', () => {
-      setAudioActive(true)
-      if (IN_MUSIC_ANIMS.has(currentName.value)) {
-        // Already in / entering music. A pending 'headphones_off' here
-        // means a stop event fired earlier and is still queued — cancel it
-        // so the music chain doesn't drop out when the current loop ends.
-        if (getPending() === 'headphones_off') {
-          cancelPending()
-        }
-      } else {
-        // In idle, click, or headphones_off (i.e., currently exiting music).
-        // Queue headphones_on to enter / re-enter. The pending-anim slot
-        // overrides the hardwired headphones_off → idle chain, so this also
-        // correctly handles the "audio resumed mid-exit" case.
-        queueAnim('headphones_on')
-      }
-    })
-
-    unlistenStopped = await listen('audio-stopped', () => {
-      setAudioActive(false)
-      if (IN_MUSIC_ANIMS.has(currentName.value)) {
-        queueAnim('headphones_off')
-      } else if (getPending() === 'headphones_on') {
-        // Audio started briefly then stopped before headphones_on landed —
-        // cancel the queued entrance.
-        cancelPending()
-      }
-    })
+    unlistenStarted = await listen('audio-started', onAudioStarted)
+    unlistenStopped = await listen('audio-stopped', onAudioStopped)
   })
 
   onUnmounted(() => {

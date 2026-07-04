@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent, h, ref } from 'vue'
 import { mount } from '@vue/test-utils'
 
-import type { AnimationName } from './useAnimator'
+import type { AnimationName } from '../config/animations'
 
 // ── Mock @tauri-apps/api/core ──────────────────────────────────────
 // `invoke('get_audio_state')` returns false by default (no audio).

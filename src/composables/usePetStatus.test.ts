@@ -12,7 +12,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { defineComponent } from 'vue'
 import { usePetStatus } from './usePetStatus'
 import type { IdleVariantName, PetStatusSnapshot } from './usePetStatus'
-import type { AnimationName } from './useAnimator'
+import type { AnimationName } from '../config/animations'
 
 // ── Tauri mocks ────────────────────────────────────────────────────────────
 
