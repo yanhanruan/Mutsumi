@@ -78,6 +78,11 @@ export const en: Translations = {
   // ── Sleep "zzz" effect visibility ─────────────────────────────────
   showZzz: 'Show Sleep "zzz"',
 
+  // ── Flying screensaver ────────────────────────────────────────────
+  flyingScreensaver:     'Flying Screensaver',
+  flyingWaitLabel:       'Start after',
+  flyingScreensaverHint: 'She floats around the screen after the computer sits idle for a while. Ctrl+Alt+F toggles flight anytime.',
+
   // ── Search engine ─────────────────────────────────────────────────
   searchEngine: 'Search Engine',
   searchEngines: {

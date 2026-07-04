@@ -31,6 +31,10 @@ export interface AppConfig {
   showMusic:     boolean
   /** Show the drifting "zzz" effect while she sleeps. */
   showZzz:       boolean
+  /** Flying-mode screensaver: fly after `flyingWaitMins` of system idle. */
+  flyingScreensaver: boolean
+  /** Idle wait before the flying screensaver starts, in minutes (6–30). */
+  flyingWaitMins:    number
   /**
    * Manually-chosen UI language. `null` (the default) means "follow the
    * system" — the app uses navigator.language detection. Setting a locale
@@ -44,6 +48,15 @@ export interface AppConfig {
   /** Active chat model (applied to the backend at startup + on change). */
   chatModel:     ChatModelKey
 }
+
+// ── Flying screensaver bounds ────────────────────────────────────────
+
+/**
+ * Allowed flying-screensaver wait range in minutes. Kept in sync with the
+ * clamp in src-tauri/src/flight.rs (flight_set_screensaver).
+ */
+export const FLYING_WAIT_MIN_MINS = 6
+export const FLYING_WAIT_MAX_MINS = 30
 
 // ── Size dimensions ──────────────────────────────────────────────────
 
@@ -80,6 +93,8 @@ const DEFAULT_CONFIG: AppConfig = {
   showWeather:   true,
   showMusic:     true,
   showZzz:       true,
+  flyingScreensaver: true,
+  flyingWaitMins:    10,   // matches flight::DEFAULT_WAIT_SECS (600 s)
   language:      null,          // null → follow system locale
   searchEngine:  'bing-cn',     // renders fully + reachable from CN (matches Rust default)
   searchEnabled: true,          // web search on by default (matches prior behavior)

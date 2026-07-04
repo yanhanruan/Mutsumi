@@ -1,76 +1,35 @@
 /**
- * useAnimator — animation state machine.
+ * useAnimator — the HOW of the animation system: playback engine + state
+ * machine. The WHAT (registry, chains, classification sets, baseline policy)
+ * is data in src/config/animations.ts.
  *
- * Mirrors the Python original's design in pet.py:
- *   - A registry of named animations (frames, fps, loop)
- *   - A current animation + frame index
- *   - A "pending" slot that's consumed at the natural end of the current loop
- *   - Hardwired chains: headphones_on → music1 → music2 → music3 → music4 → music1 → …
+ * Playback engine (non-reactive hot path, mirrors the Python original):
+ *   - preloads every frame, then advances on a locked-step clock with a 2×
+ *     lag clamp — the pattern that fixed smoothness/catch-up in the original
+ *   - paints by writing <img>.src directly via the optional imgRef, bypassing
+ *     Vue's reactive proxy so the scheduler never runs on a frame advance
+ *   - anchored-hold ping-pong playback for holdCycle clips (sleep)
  *
- * Timing uses a locked-step clock with a 2× lag clamp, the same pattern that
- * fixed the smoothness/catch-up issues in the Python original.
- *
- * Rendering writes directly to the <img> element's .src property via an
- * optional imgRef parameter — bypasses Vue's reactive proxy on the hot path
- * so the scheduler never runs on a frame advance.
+ * State machine (reactive surface):
+ *   - current animation + a single "pending" slot consumed at loop end
+ *   - two max-priority modes — sleep and flying — that gate ordinary requests
+ *   - synchronized inputs mirroring backend-owned facts (setIdleVariant ←
+ *     pet status, setAudioActive ← audio state)
+ *   - every natural ending resolves the same way: pending slot first, then
+ *     ANIM_CHAINS, then re-loop, then the shared resolveBaseline rule
  */
 import { onMounted, onUnmounted, ref, shallowRef, type Ref } from 'vue'
+import {
+  ANIM_CHAINS,
+  DEFAULT_ANIMATIONS,
+  IDLE_VARIANTS,
+  resolveBaseline,
+  type AnimationDef,
+  type AnimationName,
+  type HoldCycle,
+} from '../config/animations'
 
-// ── Types ───────────────────────────────────────────────────────────
-
-export interface AnimationDef {
-  /** Frame URLs relative to `/assets/`. */
-  dir:       string
-  /** Number of source files on disk (frame_001.webp … frame_NNN.webp). */
-  count:     number
-  fps:       number
-  loop:      boolean
-  /**
-   * Optional post-load transform. When provided, the raw loaded frames are
-   * passed in and the returned array becomes the actual playback sequence.
-   * Use this to build ping-pong, intro+loop, or other non-linear orderings
-   * without changing the tick loop.
-   */
-  buildSequence?: (frames: HTMLImageElement[]) => HTMLImageElement[]
-  /**
-   * Anchored-hold ping-pong playback. When set, the clip does NOT run straight
-   * through: it drifts between the given `anchors`, freezing on each for a
-   * random [holdMinMs, holdMaxMs] before continuing to the next, and reverses
-   * direction at the first/last anchor — an endless, restful ping-pong:
-   *   anchors[0] → … → anchors[n-1] → … → anchors[0] → …
-   * Used by `sleep` (a small shift between long holds). Mutually exclusive with
-   * buildSequence.
-   */
-  holdCycle?: HoldCycle
-}
-
-/** Config for anchored-hold ping-pong playback (see AnimationDef.holdCycle). */
-export interface HoldCycle {
-  /** 1-based frame numbers, ascending. First/last are the turn-around points. */
-  anchors:   number[]
-  holdMinMs: number
-  holdMaxMs: number
-}
-
-export type AnimationName =
-  | 'idle'
-  | 'idle_low_energy'    // low energy only  (placeholder — swap dir when assets arrive)
-  | 'idle_low_affection' // low affection only
-  | 'idle_exhausted'     // both low
-  | 'sleep'              // max-priority rest state (assets in progress)
-  | 'click'
-  | 'pat_head'
-  | 'headphones_on'
-  | 'headphones_off'
-  | 'music1'
-  | 'music2'
-  | 'music3'
-  | 'music4'
-
-/** All animation names that represent an "idle" state (any tier). */
-export const IDLE_VARIANTS: ReadonlySet<AnimationName> = new Set([
-  'idle', 'idle_low_energy', 'idle_low_affection', 'idle_exhausted',
-])
+// ── Runtime representations ─────────────────────────────────────────
 
 interface LoadedAnimation {
   frames:    HTMLImageElement[]
@@ -110,92 +69,27 @@ export function resolveHoldCycle(hc: HoldCycle | undefined, frameCount: number):
   }
 }
 
-// ── Generic ping-pong sequence builder ─────────────────────────────
-//
-// Builds an intro → ping-pong → outro playback sequence from a flat frame
-// array. The three boundary parameters fully determine all three regions:
-//
-//   pingStart — first frame index (0-based, inclusive) of the ping-pong range.
-//               Everything before it is the intro, played once.
-//   pingEnd   — exclusive end index of the ping-pong range.
-//               Everything from pingEnd onward is the outro, played once.
-//   passes    — number of directional passes over [pingStart, pingEnd),
-//               alternating fwd/rev and always starting fwd.
-//               An OddNumber ends the sequence on a forward pass; an
-//               EvenNumber ends it on a reverse pass. Construct the value
-//               with the odd() / even() helper to make the parity explicit.
-//
-// Exported so the sequence logic can be unit-tested independently.
-
-declare const _ODD: unique symbol
-/** Branded type for odd integers. Construct via odd(). */
-export type OddNumber = number & { readonly [_ODD]: true }
-
-declare const _EVEN: unique symbol
-/** Branded type for even integers. Construct via even(). */
-export type EvenNumber = number & { readonly [_EVEN]: true }
-
-/** Cast n to OddNumber. Throws a RangeError at runtime if n is even. */
-export function odd(n: number): OddNumber {
-  if (n % 2 === 0) throw new RangeError(`passes must be odd, got ${n}`)
-  return n as OddNumber
-}
-
-/** Cast n to EvenNumber. Throws a RangeError at runtime if n is odd. */
-export function even(n: number): EvenNumber {
-  if (n % 2 !== 0) throw new RangeError(`passes must be even, got ${n}`)
-  return n as EvenNumber
-}
-
-export function buildPingPongSequence(
-  frames:    HTMLImageElement[],
-  pingStart: number,
-  pingEnd:   number,
-  passes:    OddNumber | EvenNumber,
-): HTMLImageElement[] {
-  const intro = frames.slice(0, pingStart)
-  const fwd   = frames.slice(pingStart, pingEnd)
-  const rev   = fwd.slice().reverse()
-  const outro = frames.slice(pingEnd)
-
-  const seq: HTMLImageElement[] = [...intro]
-  for (let i = 0; i < passes; i++) {
-    seq.push(...(i % 2 === 0 ? fwd : rev))
+// ── Frame preloading ────────────────────────────────────────────────
+/**
+ * Load every frame of an animation directory
+ * (`/assets/<dir>/frame_001.webp … frame_NNN.webp`) into Image objects.
+ * Failed frames resolve too (they report naturalWidth === 0) so a missing
+ * file never blocks playback. Swapping an <img>.src to a preloaded frame's
+ * URL is a cache hit, which is what keeps 24 fps playback stutter-free.
+ */
+export function preloadFrames(dir: string, count: number): Promise<HTMLImageElement[]> {
+  const frames: HTMLImageElement[] = []
+  const promises: Promise<void>[]  = []
+  for (let i = 1; i <= count; i++) {
+    const img = new Image()
+    img.src = `/assets/${dir}/frame_${String(i).padStart(3, '0')}.webp`
+    frames.push(img)
+    promises.push(new Promise(res => {
+      img.onload  = () => res()
+      img.onerror = () => res()
+    }))
   }
-  seq.push(...outro)
-  return seq
-}
-
-// ── Default registry (matches Python original) ──────────────────────
-
-export const DEFAULT_ANIMATIONS: Record<AnimationName, AnimationDef> = {
-  idle:                { dir: 'idle',           count: 426, fps: 24, loop: true  },
-  // ── Idle-variant placeholders ──────────────────────────────────────────
-  // These fall back to the normal `idle` directory until dedicated animation
-  // assets are added. To activate: update `dir` (and `count` if different).
-  // Kept in sync with `idle` (426) so they loop on the same seamless boundary.
-  idle_low_energy:    { dir: 'idle',           count: 426, fps: 24, loop: true  },
-  idle_low_affection: { dir: 'idle',           count: 426, fps: 24, loop: true  },
-  idle_exhausted:     { dir: 'idle',           count: 426, fps: 24, loop: true  },
-  // ─────────────────────────────────────────────────────────────────────
-  // ── Sleep ───────────────────────────────────────────────────────────────
-  // Anchored-hold ping-pong: drift 1→68→133→144→192 then back, resting on each
-  // anchor for ~5 min (+ a little jitter) before the next small shift. `loop` is
-  // moot under holdCycle (it never runs to the end) but kept true for safety.
-  sleep:               { dir: 'sleep',          count: 192, fps: 24, loop: true,
-                         holdCycle: { anchors: [1, 68, 133, 144, 192],
-                                      holdMinMs: 5 * 60_000, holdMaxMs: 5 * 60_000 + 45_000 } },
-  click:               { dir: 'click_matched',  count: 156, fps: 24, loop: false },
-  pat_head:            { dir: 'pat_head',       count: 192, fps: 24, loop: false },
-  headphones_on:       { dir: 'headphones_on',  count: 185, fps: 24, loop: false },
-  headphones_off:      { dir: 'headphones_off', count: 185, fps: 24, loop: false },
-  music1:              { dir: 'music1',         count: 185, fps: 24, loop: true  },
-  music2:              { dir: 'music2',         count: 185, fps: 24, loop: false,
-                         buildSequence: f => buildPingPongSequence(f,  81, 104, odd(31)) },
-  music3:              { dir: 'music3',         count: 139, fps: 18, loop: false,
-                         buildSequence: f => buildPingPongSequence(f,  1, 139, even(2)) },
-  music4:              { dir: 'music4',         count: 185, fps: 24, loop: false,
-                         buildSequence: f => buildPingPongSequence(f, 105, 161, odd(13)) },
+  return Promise.all(promises).then(() => frames)
 }
 
 // ── Sleep crossfade ─────────────────────────────────────────────────
@@ -225,7 +119,7 @@ export function useAnimator(
   // doesn't try to deeply proxy the image arrays.
   const loaded = shallowRef<Partial<Record<AnimationName, LoadedAnimation>>>({})
 
-  // Current state
+  // ── Reactive state ─────────────────────────────────────────────
   const currentName = ref<AnimationName>('idle')
   const ready       = ref(false)
   // Max-priority rest state. While true, ordinary animation requests
@@ -233,13 +127,17 @@ export function useAnimator(
   // can leave it. See enterSleep / exitSleep and the guards on setAnim /
   // queueAnim below.
   const sleeping    = ref(false)
+  // Flying (balloon) mode. Like sleep, a max-priority state: while true,
+  // ordinary animation requests are ignored. Set by enterFlight(); drops
+  // when the fly_exit morph finishes (see nextAnimAfterEnd).
+  const flying = ref(false)
   // Sprite opacity, driving the idle↔sleep crossfade. The animator owns this
   // transition since it owns the <img>'s frame swaps; PetWindow just binds it.
   // Written only on sleep enter/exit (not the hot path), so plain reactivity
   // is fine.
   const spriteOpacity = ref(1)
 
-  // Internal state (not reactive — touched 60+ times/sec)
+  // ── Non-reactive state (touched 60+ times/sec) ─────────────────
   let frameIx     = 0
   let pendingAnim: AnimationName | null = null
   let lastFrameT  = 0
@@ -249,8 +147,20 @@ export function useAnimator(
   //   holdDir       → ping-pong direction (+1 forward / -1 reverse).
   let holdUntil   = 0
   let holdDir     = 1
+
+  // ── Synchronized inputs (backend-owned facts, mirrored here) ───
   // Which idle-variant to play. Updated by setIdleVariant() from pet-status events.
   let idleAnimName: AnimationName = 'idle'
+  // Whether the backend reports audio playing. Updated by setAudioActive()
+  // (useAudioReaction mirrors the Rust AudioState here). Unlike the
+  // event-driven queueAnim calls — which are gated while sleeping/flying —
+  // this mirror is ALWAYS kept fresh, so the baseline resolver can restore
+  // music mode after any state that swallowed the transition events.
+  let audioActive = false
+
+  // ════════════════════════════════════════════════════════════════
+  // Playback engine
+  // ════════════════════════════════════════════════════════════════
 
   // ── Direct DOM paint (hot path) ────────────────────────────────
   // Writing .src directly on the element is invisible to Vue's scheduler —
@@ -258,26 +168,15 @@ export function useAnimator(
   //
   // Frames that failed to load report naturalWidth === 0; we skip painting
   // them so a missing asset never replaces a good frame with the browser's
-  // broken-image glyph. This is what lets the not-yet-authored `sleep`
-  // animation degrade gracefully (it just holds the last drawn pose).
+  // broken-image glyph. This is what lets a not-yet-authored animation
+  // degrade gracefully (it just holds the last drawn pose).
   function paintFrame(img: HTMLImageElement): void {
     if (imgRef?.value && img.naturalWidth > 0) imgRef.value.src = img.src
   }
 
   // ── Preload ────────────────────────────────────────────────────
   function preloadAnim(def: AnimationDef): Promise<HTMLImageElement[]> {
-    const frames: HTMLImageElement[] = []
-    const promises: Promise<void>[]  = []
-    for (let i = 1; i <= def.count; i++) {
-      const img = new Image()
-      img.src = `/assets/${def.dir}/frame_${String(i).padStart(3, '0')}.webp`
-      frames.push(img)
-      promises.push(new Promise(res => {
-        img.onload  = () => res()
-        img.onerror = () => res()
-      }))
-    }
-    return Promise.all(promises).then(() =>
+    return preloadFrames(def.dir, def.count).then(frames =>
       def.buildSequence ? def.buildSequence(frames) : frames
     )
   }
@@ -319,134 +218,6 @@ export function useAnimator(
           } }
         }),
     ])
-  }
-
-  // ── State machine ─────────────────────────────────────────────
-  // Unconditional switch. Used internally by the tick loop and by the sleep
-  // transitions, which must be able to set animations the public setAnim guard
-  // would otherwise block.
-  function applyAnim(name: AnimationName) {
-    const def = loaded.value[name]
-    if (!def) return                 // not loaded yet — silently ignore
-    currentName.value = name
-    frameIx = 0
-    const now = performance.now()
-    lastFrameT = now
-    // Arm anchored-hold playback: frame 0 is the first anchor, so start by
-    // resting there. Cleared (holdUntil = 0) for ordinary animations.
-    holdDir   = 1
-    holdUntil = def.holdCycle ? now + randBetween(def.holdCycle.holdMinMs, def.holdCycle.holdMaxMs) : 0
-    paintFrame(def.frames[0])        // direct DOM write — no reactive overhead
-  }
-
-  /**
-   * Public animation switch. No-op while sleeping so clicks, pat-head, and
-   * other ad-hoc requests cannot interrupt the rest state. Use exitSleep()
-   * to leave sleep.
-   */
-  function setAnim(name: AnimationName) {
-    if (sleeping.value) return
-    applyAnim(name)
-  }
-
-  /**
-   * Queue an animation to start at the natural end of the current loop.
-   * Mirrors `_pending_anim` from the Python original. Ignored while sleeping —
-   * the audio reaction must not schedule headphones/music behind the sleep loop.
-   */
-  function queueAnim(name: AnimationName) {
-    if (sleeping.value) return
-    pendingAnim = name
-  }
-
-  // ── Sleep (max-priority rest state) ───────────────────────────
-  /**
-   * Enter the rest state. Fades the sprite out, swaps to the sleep loop, then
-   * fades back in — so the idle→sleep switch dips through transparent instead
-   * of hard-cutting. Drops any pending animation. Once set, only exitSleep()
-   * can leave it — see the guards on setAnim / queueAnim. No-op if already
-   * sleeping.
-   */
-  async function enterSleep() {
-    if (sleeping.value) return
-    spriteOpacity.value = 0
-    await waitMs(SLEEP_FADE_MS)
-    sleeping.value = true
-    pendingAnim = null
-    applyAnim('sleep')
-    spriteOpacity.value = 1
-  }
-
-  /**
-   * Leave the rest state and fall back to the current idle variant, with the
-   * same dip-to-transparent crossfade. No-op if not sleeping.
-   */
-  async function exitSleep() {
-    if (!sleeping.value) return
-    spriteOpacity.value = 0
-    await waitMs(SLEEP_FADE_MS)
-    sleeping.value = false
-    pendingAnim = null
-    applyAnim(idleAnimName)
-    spriteOpacity.value = 1
-  }
-
-  /** Read the currently-pending animation (if any). */
-  function getPending(): AnimationName | null {
-    return pendingAnim
-  }
-
-  /** Clear the pending animation. No-op if already null. */
-  function cancelPending() {
-    pendingAnim = null
-  }
-
-  /**
-   * Return the Image element currently being displayed, if loaded.
-   * Used by hit testing to sample alpha at the cursor position.
-   */
-  function getCurrentImage(): HTMLImageElement | null {
-    const def = loaded.value[currentName.value]
-    if (!def) return null
-    return def.frames[frameIx] ?? null
-  }
-
-  /**
-   * Resolve the next animation when the current one ends (StopIteration
-   * equivalent — the iterator is exhausted).
-   */
-  function nextAnimAfterEnd(): AnimationName {
-    if (pendingAnim) {
-      const nxt = pendingAnim
-      pendingAnim = null
-      return nxt
-    }
-    const cur = currentName.value
-    if (cur === 'headphones_on')  return 'music1'
-    if (cur === 'music1')         return 'music2'
-    if (cur === 'music2')         return 'music3'
-    if (cur === 'music3')         return 'music4'
-    if (cur === 'music4')         return 'music1'
-    // Exit animations and one-shots fall back to the current idle variant.
-    if (cur === 'headphones_off') return idleAnimName
-    const def = loaded.value[cur]
-    if (def?.loop) return cur
-    return idleAnimName
-  }
-
-  /**
-   * Update which idle-variant animation to play.
-   * Called by usePetStatus when the backend reports a pet-state-update.
-   *
-   * If the pet is currently in any idle variant, immediately switches to
-   * the new variant. Does nothing while in music/click/headphones animations
-   * — idleAnimName is simply remembered and used when those end.
-   */
-  function setIdleVariant(name: AnimationName) {
-    idleAnimName = name
-    if (IDLE_VARIANTS.has(currentName.value) && currentName.value !== name) {
-      setAnim(name)
-    }
   }
 
   // ── Anchored-hold ping-pong (holdCycle animations) ────────────
@@ -501,11 +272,205 @@ export function useAnimator(
     if (frameIx >= def.frames.length) {
       // End of animation — pick next. Use applyAnim (not setAnim) so the sleep
       // loop can re-arm itself; setAnim is gated while sleeping.
-      const nxt = nextAnimAfterEnd()
-      applyAnim(nxt)
+      applyAnim(nextAnimAfterEnd())
     } else {
       paintFrame(def.frames[frameIx])  // direct DOM write, no Vue overhead
     }
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // State machine
+  // ════════════════════════════════════════════════════════════════
+
+  // Unconditional switch. Used internally by the tick loop and by the
+  // sleep/flight transitions, which must be able to set animations the
+  // public setAnim guard would otherwise block.
+  function applyAnim(name: AnimationName) {
+    const def = loaded.value[name]
+    if (!def) return                 // not loaded yet — silently ignore
+    currentName.value = name
+    frameIx = 0
+    const now = performance.now()
+    lastFrameT = now
+    // Arm anchored-hold playback: frame 0 is the first anchor, so start by
+    // resting there. Cleared (holdUntil = 0) for ordinary animations.
+    holdDir   = 1
+    holdUntil = def.holdCycle ? now + randBetween(def.holdCycle.holdMinMs, def.holdCycle.holdMaxMs) : 0
+    paintFrame(def.frames[0])        // direct DOM write — no reactive overhead
+  }
+
+  /** The shared return-to-rest rule (see resolveBaseline). */
+  function baselineAnim(): AnimationName {
+    return resolveBaseline(sleeping.value, audioActive, idleAnimName)
+  }
+
+  /**
+   * Resolve the next animation when the current one ends (StopIteration
+   * equivalent — the iterator is exhausted). One uniform cascade:
+   * pending slot → fly_exit landing → declared chain → re-loop → baseline.
+   */
+  function nextAnimAfterEnd(): AnimationName {
+    if (pendingAnim) {
+      const nxt = pendingAnim
+      pendingAnim = null
+      return nxt
+    }
+    const cur = currentName.value
+    // Landing is the one ending with a side effect: flight mode drops here.
+    // pendingAnim is always null while flying — queueAnim is gated and
+    // enterFlight/exitFlight clear it.
+    if (cur === 'fly_exit') {
+      flying.value = false
+      return baselineAnim()
+    }
+    // Declared chains (music cycle, fly_enter → flying).
+    const chained = ANIM_CHAINS[cur]
+    if (chained) return chained
+    // Loops re-arm; everything else — one-shots like pat_head, click,
+    // headphones_off — falls back through the shared baseline rule.
+    if (loaded.value[cur]?.loop) return cur
+    return baselineAnim()
+  }
+
+  /**
+   * Public animation switch. No-op while sleeping or flying so clicks,
+   * pat-head, and other ad-hoc requests cannot interrupt those states.
+   * Use exitSleep() / exitFlight() to leave them.
+   */
+  function setAnim(name: AnimationName) {
+    if (sleeping.value || flying.value) return
+    applyAnim(name)
+  }
+
+  /**
+   * Queue an animation to start at the natural end of the current loop.
+   * Mirrors `_pending_anim` from the Python original. Ignored while sleeping
+   * or flying — the audio reaction must not schedule headphones/music behind
+   * the sleep or flying loop.
+   */
+  function queueAnim(name: AnimationName) {
+    if (sleeping.value || flying.value) return
+    pendingAnim = name
+  }
+
+  /** Read the currently-pending animation (if any). */
+  function getPending(): AnimationName | null {
+    return pendingAnim
+  }
+
+  /** Clear the pending animation. No-op if already null. */
+  function cancelPending() {
+    pendingAnim = null
+  }
+
+  // ── Sleep (max-priority rest state) ───────────────────────────
+  /**
+   * Enter the rest state. Fades the sprite out, swaps to the sleep loop, then
+   * fades back in — so the idle→sleep switch dips through transparent instead
+   * of hard-cutting. Drops any pending animation. Once set, only exitSleep()
+   * can leave it — see the guards on setAnim / queueAnim. No-op if already
+   * sleeping.
+   */
+  async function enterSleep() {
+    if (sleeping.value || flying.value) return
+    spriteOpacity.value = 0
+    await waitMs(SLEEP_FADE_MS)
+    sleeping.value = true
+    pendingAnim = null
+    applyAnim('sleep')
+    spriteOpacity.value = 1
+  }
+
+  /**
+   * Leave the rest state and fall back to the baseline (music mode if audio
+   * kept playing while she slept, else the current idle variant), with the
+   * same dip-to-transparent crossfade. No-op if not sleeping.
+   */
+  async function exitSleep() {
+    if (!sleeping.value || flying.value) return
+    spriteOpacity.value = 0
+    await waitMs(SLEEP_FADE_MS)
+    sleeping.value = false
+    pendingAnim = null
+    applyAnim(baselineAnim())
+    spriteOpacity.value = 1
+  }
+
+  // ── Flying (balloon mode, max-priority like sleep) ────────────
+  /**
+   * Enter flying mode: play the idle→fly morph (`fly_enter` — the shared
+   * transform clip reversed), which chains into the `flying` ping-pong loop.
+   * Works from sleep too — `sleeping` stays set through the flight (enter/
+   * exitSleep are gated while flying), so the landing baseline returns there.
+   * No-op if already flying.
+   */
+  function enterFlight() {
+    if (flying.value) return
+    flying.value = true
+    pendingAnim = null
+    applyAnim('fly_enter')
+  }
+
+  /**
+   * Leave flying mode: play the fly→idle morph (`fly_exit`) once. When it
+   * ends, the machine returns to the baseline (sleep if she slept before
+   * takeoff, music if audio is playing, else the current idle variant) and
+   * `flying` drops — see nextAnimAfterEnd. No-op if not flying.
+   */
+  function exitFlight() {
+    if (!flying.value) return
+    pendingAnim = null
+    applyAnim('fly_exit')
+  }
+
+  // ── Synchronized inputs ────────────────────────────────────────
+  /**
+   * Update which idle-variant animation to play.
+   * Called by usePetStatus when the backend reports a pet-state-update.
+   *
+   * If the pet is currently in any idle variant, immediately switches to
+   * the new variant. Does nothing while in music/click/headphones animations
+   * — idleAnimName is simply remembered and used when those end.
+   */
+  function setIdleVariant(name: AnimationName) {
+    idleAnimName = name
+    if (IDLE_VARIANTS.has(currentName.value) && currentName.value !== name) {
+      setAnim(name)
+    }
+  }
+
+  /**
+   * Mirror of the backend's AudioState (Rust audio.rs owns the truth).
+   * Called by useAudioReaction on every audio-started / audio-stopped event
+   * and once at bootstrap — never gated, unlike the animation requests those
+   * events also make, so it stays fresh through flight/sleep/one-shots.
+   *
+   * Pure input: it only records the fact. Reacting to it stays where it
+   * always was — live transitions enter/exit via useAudioReaction's queued
+   * animations; endings consult the baseline resolver, which reads this.
+   */
+  function setAudioActive(active: boolean) {
+    audioActive = active
+  }
+
+  // ── Queries (for hit-testing / flight collision) ───────────────
+  /**
+   * Return the Image element currently being displayed, if loaded.
+   * Used by hit testing to sample alpha at the cursor position.
+   */
+  function getCurrentImage(): HTMLImageElement | null {
+    const def = loaded.value[currentName.value]
+    if (!def) return null
+    return def.frames[frameIx] ?? null
+  }
+
+  /**
+   * All loaded frames of an animation (the playback sequence — ping-pong
+   * sequences repeat Image objects). Null until preloaded. Used by the
+   * flight-collision alpha scan (useFlightCollision.ts).
+   */
+  function getAnimFrames(name: AnimationName): HTMLImageElement[] | null {
+    return loaded.value[name]?.frames ?? null
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────
@@ -523,14 +488,19 @@ export function useAnimator(
     currentName,
     ready,
     sleeping,
+    flying,
     spriteOpacity,
     queueAnim,
     setAnim,
     enterSleep,
     exitSleep,
+    enterFlight,
+    exitFlight,
     getPending,
     cancelPending,
     getCurrentImage,
+    getAnimFrames,
     setIdleVariant,
+    setAudioActive,
   }
 }

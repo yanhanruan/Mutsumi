@@ -78,6 +78,11 @@ export const ja: Translations = {
   // ── Sleep "zzz" effect visibility ─────────────────────────────────
   showZzz: '寝るときの zzz を表示',
 
+  // ── Flying screensaver ────────────────────────────────────────────
+  flyingScreensaver:     'フライングスクリーンセーバー',
+  flyingWaitLabel:       '開始までの待機時間',
+  flyingScreensaverHint: 'パソコンをしばらく操作しないと、画面の中をふわふわ飛び回ります。Ctrl+Alt+F でいつでも切り替えできます。',
+
   // ── Search engine ─────────────────────────────────────────────────
   searchEngine: '検索エンジン',
   searchEngines: {

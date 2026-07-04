@@ -78,6 +78,11 @@ export const zh: Translations = {
   // ── Sleep "zzz" effect visibility ─────────────────────────────────
   showZzz: '显示睡眠 zzz 效果',
 
+  // ── Flying screensaver ────────────────────────────────────────────
+  flyingScreensaver:     '飞行屏保',
+  flyingWaitLabel:       '闲置多久后开始',
+  flyingScreensaverHint: '电脑闲置一段时间后，她会在屏幕上飘来飘去。随时按 Ctrl+Alt+F 切换飞行。',
+
   // ── Search engine ─────────────────────────────────────────────────
   searchEngine: '搜索引擎',
   searchEngines: {

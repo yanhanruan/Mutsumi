@@ -11,9 +11,11 @@
  *   entire window.
  */
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { useAnimator, DEFAULT_ANIMATIONS, IDLE_VARIANTS } from '../composables/useAnimator'
+import { useAnimator } from '../composables/useAnimator'
+import { DEFAULT_ANIMATIONS, IDLE_VARIANTS } from '../config/animations'
 import { useAudioReaction } from '../composables/useAudioReaction'
 import { useMidnightAutoSleep } from '../composables/useMidnightAutoSleep'
+import { prepareFlightCollision, startFlightInsetsSync } from '../composables/useFlightCollision'
 import { useHitTest } from '../composables/useHitTest'
 import { usePetStatus } from '../composables/usePetStatus'
 import { useI18n } from '../i18n'
@@ -30,7 +32,6 @@ import ChatBubble from './ChatBubble.vue'
 import PomodoroBadge from './PomodoroBadge.vue'
 import WeatherBadge from './WeatherBadge.vue'
 import MusicBadge from './MusicBadge.vue'
-import BalloonPet from './BalloonPet.vue'
 import SleepZzz from './SleepZzz.vue'
 import TarotCard from './TarotCard.vue'
 import ChatPanel from './ChatPanel.vue'
@@ -43,17 +44,22 @@ const {
   currentName,
   ready,
   sleeping,
+  flying,
   spriteOpacity,
   queueAnim,
   setAnim,
   enterSleep,
   exitSleep,
+  enterFlight,
+  exitFlight,
   getPending,
   cancelPending,
   getCurrentImage,
+  getAnimFrames,
   setIdleVariant,
+  setAudioActive,
 } = useAnimator(DEFAULT_ANIMATIONS, imgRef)
-useAudioReaction(queueAnim, currentName, getPending, cancelPending)
+useAudioReaction(queueAnim, currentName, getPending, cancelPending, setAudioActive)
 usePetStatus(setIdleVariant)
 // True while a full-window overlay (tarot card / chat / system state panel) is
 // open. Declared before useHitTest (which reads them) and the size watch below.
@@ -63,10 +69,29 @@ const sysStateActive = ref(false)
 // Any full-window overlay is open — gates pet interaction + sprite/badge display.
 const overlayOpen = computed(() => tarotActive.value || chatActive.value || sysStateActive.value)
 
+// Persistent character heading. Updated by `balloon-facing` events during
+// flight and NOT reset on landing, so the orientation she last flew in carries
+// over to idle and every other animation. Only left-facing frames exist, so a
+// 'right' heading mirrors the sprite (scaleX(-1)); the hit-test below flips its
+// alpha sampling to match so click-through stays aligned.
+const heading = ref<'left' | 'right'>('left')
+
 // Per-pixel click-through: transparent regions of the pet pass clicks
 // through to whatever is behind the window. While an overlay is open, only the
 // overlay's panel is interactive; the area around it stays click-through.
-useHitTest(getCurrentImage, () => overlayOpen.value)
+useHitTest(getCurrentImage, () => overlayOpen.value, () => heading.value === 'right')
+
+// The flying art (fly_left + fly_to_idle) is graded a touch brighter and less
+// saturated than the idle frames, so the fly↔idle handoff shows a colour pop.
+// A light CSS filter (see .fly-graded) pulls those frames back to the idle
+// look. Applied to all three fly clips so the whole sequence — and both idle
+// boundaries — stay consistent. Filter values were fitted against the
+// same-pose pair idle/001 vs fly_to_idle/186; brightness/saturate don't touch
+// alpha, so hit-testing and flight collision are unaffected.
+const flyGraded = computed(() =>
+  currentName.value === 'flying' ||
+  currentName.value === 'fly_enter' ||
+  currentName.value === 'fly_exit')
 
 // TODO re-enable click animation — see onMouseUp:
 // Animations that must not be interrupted by a click (bubble still shows).
@@ -378,6 +403,27 @@ async function onContextAction(action: MenuAction) {
 let unlistenLateNight: UnlistenFn | null = null
 let unlistenWillHide: UnlistenFn | null = null
 let unlistenShow: UnlistenFn | null = null
+let unlistenBalloon: UnlistenFn | null = null
+let unlistenFacing: UnlistenFn | null = null
+
+// ── Flying (balloon) mode ──────────────────────────────────────────
+// Rust owns when flight happens (idle detector / flight controller) and
+// emits `toggle-balloon-mode` on transitions; the animator plays the
+// idle↔fly morphs + flying loop on the pet's own <img> while flight.rs
+// glides the window. `balloon-facing` updates `heading` (declared above),
+// which mirrors the sprite and persists after landing.
+// Stops the per-frame collision-insets poller (useFlightCollision); the
+// poller only runs while she is airborne.
+let stopInsetsSync: (() => void) | null = null
+
+// The window must hold still while the fly_enter morph plays and only start
+// gliding once the flying loop begins. The animator hands off fly_enter →
+// flying by name, so that transition is the cue to let Rust move the window.
+watch(currentName, name => {
+  if (name === 'flying') {
+    void invoke('flight_begin_motion').catch(() => {})
+  }
+})
 
 onMounted(async () => {
   // Sync persisted chat settings to the backend so saved choices survive restarts
@@ -385,6 +431,10 @@ onMounted(async () => {
   void invoke('set_search_engine', { engine: config.value.searchEngine }).catch(() => {})
   void invoke('set_search_enabled', { enabled: config.value.searchEnabled }).catch(() => {})
   void invoke('qwen_set_chat_model', { model: config.value.chatModel }).catch(() => {})
+  void invoke('flight_set_screensaver', {
+    enabled: config.value.flyingScreensaver,
+    waitMins: config.value.flyingWaitMins,
+  }).catch(() => {})
 
   // Fade-out: Rust emits "pet-will-hide" before w.hide(); drive the CSS transition.
   unlistenWillHide = await listen('pet-will-hide', () => {
@@ -404,12 +454,33 @@ onMounted(async () => {
   unlistenLateNight = await listen('late-night-reminder', () => {
     bubbleRef.value?.show(t.value.lateNightReminder)
   })
+  unlistenBalloon = await listen<{ active: boolean }>('toggle-balloon-mode', e => {
+    if (e.payload.active) {
+      enterFlight()
+      // Pixel-perfect bounces: scan the frames' alpha once (chunked,
+      // cached), then report the displayed frame's margins to Rust as
+      // playback advances — see useFlightCollision.
+      void prepareFlightCollision(getAnimFrames('flying'))
+      stopInsetsSync?.()
+      stopInsetsSync = startFlightInsetsSync(getCurrentImage)
+    } else {
+      exitFlight()
+      stopInsetsSync?.()
+      stopInsetsSync = null
+    }
+  })
+  unlistenFacing = await listen<{ facing: 'left' | 'right' }>('balloon-facing', e => {
+    heading.value = e.payload.facing
+  })
 })
 
 onUnmounted(() => {
   unlistenWillHide?.()
   unlistenShow?.()
   unlistenLateNight?.()
+  unlistenBalloon?.()
+  unlistenFacing?.()
+  stopInsetsSync?.()
 })
 </script>
 
@@ -426,15 +497,16 @@ onUnmounted(() => {
       v-show="ready && !overlayOpen"
       ref="imgRef"
       class="frame"
+      :class="{ mirrored: heading === 'right', 'fly-graded': flyGraded }"
       :style="{ opacity: spriteOpacity }"
       draggable="false"
     />
     <Transition name="zzz-fade">
-      <SleepZzz v-if="sleeping && !overlayOpen && config.showZzz" />
+      <SleepZzz v-if="sleeping && !overlayOpen && !flying && config.showZzz" />
     </Transition>
-    <PomodoroBadge v-if="!overlayOpen" />
-    <WeatherBadge v-if="!overlayOpen && config.showWeather && weatherAvailable !== false" />
-    <MusicBadge v-if="!overlayOpen && config.showMusic" />
+    <PomodoroBadge v-if="!overlayOpen && !flying" />
+    <WeatherBadge v-if="!overlayOpen && !flying && config.showWeather && weatherAvailable !== false" />
+    <MusicBadge v-if="!overlayOpen && !flying && config.showMusic" />
     <div class="bubble-anchor">
       <ChatBubble ref="bubbleRef" />
     </div>
@@ -443,7 +515,6 @@ onUnmounted(() => {
   <TarotCard ref="tarotRef" @close="closeTarot" />
   <ChatPanel ref="chatRef" @close="closeChat" />
   <SystemStateOverlay ref="sysStateRef" @close="closeSysState" />
-  <BalloonPet />
 </template>
 
 <style scoped>
@@ -466,6 +537,19 @@ onUnmounted(() => {
      the animator's spriteOpacity. Keep in sync with SLEEP_FADE_MS in
      useAnimator.ts. */
   transition: opacity 220ms ease;
+}
+/* Only left-facing frames exist — mirror the whole sprite for a right-facing
+   heading (from `balloon-facing`), which persists across idle and every other
+   animation, not just flight. */
+.frame.mirrored {
+  transform: scaleX(-1);
+}
+/* Colour-match the flying art to the idle frames (fitted: idle/001 vs
+   fly_to_idle/186). brightness+saturate commute, so order is irrelevant; both
+   leave alpha untouched. Toggled instantly (no transition) so the graded fly
+   frame lines up exactly with the idle frame at the handoff. */
+.frame.fly-graded {
+  filter: brightness(0.98) saturate(1.08);
 }
 .bubble-anchor {
   position: absolute;

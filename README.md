@@ -33,11 +33,15 @@
 <p align="center"><i>就算是黄瓜,也需要时间才能长大，好事不能着急 🌱</i></p>
 
 Mutsumi 是一个静静住在你屏幕角落的小伙伴。
-她不会打扰你工作，只是自顾自地待在那里。当你播放音乐时，她会默默戴上耳机感受节奏；当你感到疲惫时，可以戳戳她、喂杯茶。得益于 **Tauri 2 + Rust** 的底层驱动，她非常轻量（几十 MB），几乎不占用系统资源。
+她不会打扰你工作，只是自顾自地待在那里。当你播放音乐时，她会默默戴上耳机感受节奏；当你感到疲惫时，可以戳戳她、喂杯茶。得益于 **Tauri 2 + Rust** 的底层驱动，她非常轻量，几乎不占用系统资源。
 
 ### ✨ 核心体验
 
 👻 **无感陪伴，穿透点击**：始终悬浮在屏幕最前方，但透明区域完全穿透，绝不遮挡你点击底部的代码或网页。你可以随时把她拖拽到屏幕的任意角落。
+
+🎈 **飞行屏保模式**：当电脑闲置一段时间后（等待时长可在设置中调整，6–30 分钟），睦头会带上黄瓜小气球轻轻飞起，缓缓地在整个屏幕上飘荡（顺便保护屏幕）。支持在设置中开关。
+
+<p align="center"><img src="docs/images/flying.avif" width="100%" alt="flying mode" /></p>
 
 🎧 **全局音频感知（无需配置）**：当你开始播放音乐或看视频时，她会立刻戴上耳机跟着节奏晃动；声音停止，她会摘下耳机恢复平静。
 
@@ -106,13 +110,13 @@ Mutsumi 是一个静静住在你屏幕角落的小伙伴。
 
 
 
-下个版本即将推出🚀：GPT-SoVITS小睦AI语音、休闲小音游、屏保飞行模式.....
+下个版本即将推出🚀：屏保飞行模式（于1.5.0版本推出✔）、GPT-SoVITS小睦AI语音、休闲小音游.....
 
 
 
 ### ⚙️ 偏好设置
 
-右键点击系统托盘（右下角）的 Mutsumi 图标，可以自定义：`番茄钟时长` / `角色体型 (小/中/大)` / `天气开关` / `音乐控制器开关` / `界面语言`
+右键点击系统托盘（右下角）的 Mutsumi 图标，可以自定义：`番茄钟时长` / `角色体型 (小/中/大)` / `天气开关` / `音乐控制器开关` / `飞行屏保开关与等待时长` / `界面语言`
 
 <p align="center">
     <img src="docs/images/setting.avif" width="440" alt="Settings window" />
@@ -192,12 +196,17 @@ Mutsumi/
 
 <p align="center"><i>If even a cucumber needs time to grow, there's no need to rush. Good things take time 🌱</i></p>
 
-Mutsumi is a quiet little companion living in the corner of your screen. She minds her own business, puts on her headphones when you play some tunes, and reacts when you interact with her. Powered by **Tauri 2 + Rust**, she is exceptionally lightweight (only a few dozen megabytes) and consumes virtually no system resources.
+Mutsumi is a quiet little companion living in the corner of your screen. She minds her own business, puts on her headphones when you play some tunes, and reacts when you interact with her. Powered by **Tauri 2 + Rust**, she is exceptionally lightweight and consumes virtually no system resources.
 
 ### ✨ Core Features
 
 👻 **Always There, Never in the Way**
  Stays on top of all your windows, while fully transparent areas let your clicks pass straight through. Your code, browser, and apps remain completely accessible. Drag her anywhere on your screen at any time.
+
+🎈 **Flying Screensaver**
+After your computer has been idle for a configurable period (6–30 minutes), Muto will take off with a tiny cucumber balloon and gently float around your screen. It’s a fun little screensaver that also helps protect your display. You can enable or disable it anytime in Settings.
+
+<p align="center"><img src="docs/images/flying.avif" width="100%" alt="flying mode" /></p>
 
 🎧 **Automatic Audio Awareness**
  Start playing music or a video, and she'll instantly put on her headphones and groove along to the beat. When the audio stops, she'll take them off and quietly return to idle.
@@ -283,11 +292,11 @@ npm run tauri dev
 
 ### ⚙️ Settings
 
-Right-click her icon in the system tray (bottom-right corner) to tweak: `Pomodoro Durations` / `Character Size (S/M/L)` / `Weather Toggle` / `Music Controller Toggle` / `Language`
+Right-click her icon in the system tray (bottom-right corner) to tweak: `Pomodoro Durations` / `Character Size (S/M/L)` / `Weather Toggle` / `Music Controller Toggle` / `Flying Screensaver Toggle & Wait Time` / `Language`
 
 <p align="center"><img src="docs/images/setting.avif" width="440" alt="Settings window" /></p>
 
-🚀 Coming soon: Spoken replies (Mutsumi's own voice), Casual Rhythm Game, Flying Screensaver Mode...
+🚀 Coming soon: Flying Screensaver Mode( Released in version 1.5.0 ✔), Spoken replies (Mutsumi's own voice), Casual Rhythm Game...
 
 ### 🛠️ Architecture
 

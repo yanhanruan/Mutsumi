@@ -25,6 +25,7 @@ tauri = { version = "2.11.2", features = ["protocol-asset", "tray-icon", "image-
 tauri-plugin-log = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-single-instance = "2"
+tauri-plugin-global-shortcut = "2"      # Ctrl+Alt+F toggles manual flying mode
 tauri-plugin-dialog = "2"               # native file-open picker (image attach)
 tauri-plugin-clipboard-manager = "2"    # read pasted clipboard images
 tauri-plugin-opener = "2"               # open the "how to get a key" tutorial in the system browser

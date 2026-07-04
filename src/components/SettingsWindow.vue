@@ -14,7 +14,11 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import { enable, disable, isEnabled } from '@tauri-apps/plugin-autostart'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { useI18n, setLocale, type Locale } from '../i18n'
-import { useAppConfig, type CharacterSize, type SearchEngineKey, type ChatModelKey } from '../composables/useAppConfig'
+import {
+  useAppConfig,
+  FLYING_WAIT_MIN_MINS, FLYING_WAIT_MAX_MINS,
+  type CharacterSize, type SearchEngineKey, type ChatModelKey,
+} from '../composables/useAppConfig'
 import { useWeatherAvailable } from '../composables/useWeatherAvailable'
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -111,6 +115,23 @@ watch(() => config.value.showZzz, v => { localShowZzz.value = v })
 
 async function toggleZzz() {
   await updateConfig({ showZzz: localShowZzz.value })
+}
+
+// ── Flying screensaver ────────────────────────────────────────────
+const localFlying     = ref<boolean>(config.value.flyingScreensaver)
+const localFlyingWait = ref<number>(config.value.flyingWaitMins)
+
+watch(() => config.value.flyingScreensaver, v => { localFlying.value = v })
+watch(() => config.value.flyingWaitMins,    v => { localFlyingWait.value = v })
+
+async function applyFlying() {
+  // Clamp the wait into the supported range (also enforced Rust-side).
+  const mins = Math.min(FLYING_WAIT_MAX_MINS,
+    Math.max(FLYING_WAIT_MIN_MINS, Math.round(localFlyingWait.value || FLYING_WAIT_MIN_MINS)))
+  localFlyingWait.value = mins
+  await updateConfig({ flyingScreensaver: localFlying.value, flyingWaitMins: mins })
+  try { await invoke('flight_set_screensaver', { enabled: localFlying.value, waitMins: mins }) }
+  catch { /* best-effort; re-synced on next startup */ }
 }
 
 // ── Search engine (chat search-enhancement) ───────────────────────
@@ -443,6 +464,39 @@ onMounted(async () => {
           >
             {{ t[opt.labelKey] }}
           </button>
+        </div>
+      </section>
+
+      <!-- Flying screensaver -->
+      <section class="card">
+        <h2 class="card-title">
+          <span class="card-icon">🎈</span>{{ t.flyingScreensaver }}
+        </h2>
+        <p class="card-hint">{{ t.flyingScreensaverHint }}</p>
+        <div class="field-row">
+          <label for="flying-toggle">{{ t.flyingScreensaver }}</label>
+          <label class="toggle">
+            <input
+              id="flying-toggle"
+              type="checkbox"
+              v-model="localFlying"
+              @change="applyFlying"
+            />
+            <span class="thumb" />
+          </label>
+        </div>
+        <div class="field-row" :style="localFlying ? '' : 'opacity: 0.45; pointer-events: none;'">
+          <label>{{ t.flyingWaitLabel }}</label>
+          <div class="num-input">
+            <input
+              type="number"
+              v-model.number="localFlyingWait"
+              :min="FLYING_WAIT_MIN_MINS"
+              :max="FLYING_WAIT_MAX_MINS"
+              @change="applyFlying"
+            />
+            <span class="unit">{{ t.minuteUnit }}</span>
+          </div>
         </div>
       </section>
 
