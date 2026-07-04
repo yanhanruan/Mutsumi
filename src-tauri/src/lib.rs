@@ -113,6 +113,7 @@ pub fn run() {
       app_state::set_tray_locale,
       window_ops::set_window_bounds,
       flight::flight_set_insets,
+      flight::flight_set_screensaver,
       card_export::save_card_image,
       card_export::reveal_in_folder,
       services::tts_synthesize,
@@ -212,11 +213,28 @@ pub fn run() {
         cursor::spawn(app.handle().clone(), stop_flag);
       }
 
-      // System idle monitor — emits `toggle-balloon-mode` events.
+      // System idle monitor — feeds the flying-screensaver input of the
+      // flight mode controller (flight.rs).
       {
         let stop_flag = Arc::new(AtomicBool::new(false));
         let _ = &stop_flag;
         idle::spawn(app.handle().clone(), stop_flag);
+      }
+
+      // Global shortcut: Ctrl+Alt+F toggles manual flying mode anywhere.
+      #[cfg(desktop)]
+      {
+        use tauri_plugin_global_shortcut::{Builder as ShortcutBuilder, ShortcutState};
+        app.handle().plugin(
+          ShortcutBuilder::new()
+            .with_shortcuts(["ctrl+alt+f"])?
+            .with_handler(|app, _shortcut, event| {
+              if event.state() == ShortcutState::Pressed {
+                flight::toggle_manual(app);
+              }
+            })
+            .build(),
+        )?;
       }
 
       // System state monitor is NOT started here: it runs only while the

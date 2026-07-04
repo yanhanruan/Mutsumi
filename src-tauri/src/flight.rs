@@ -9,8 +9,11 @@
 //! and this module glides the whole OS window across the monitor work area.
 //!
 //! # Design
-//! `set_active(app, true)` spawns a movement thread; `set_active(app, false)`
-//! stops it and restores the window to where the user had it. The thread:
+//! Flight can be requested by the idle screensaver (idle.rs +
+//! flying-screensaver settings) or toggled manually with Ctrl+Alt+F; the
+//! mode-coordination section below owns that decision and the
+//! `toggle-balloon-mode` event. While active, a movement thread runs (and on
+//! stop restores the window to where the user had it). The thread:
 //!   - samples the window's monitor work area once at start,
 //!   - advances a slow, mostly-horizontal velocity every TICK_MS, with a
 //!     gentle sine bob overlaid on the vertical axis for a balloon-like feel,
@@ -23,7 +26,7 @@
 //! changes — no size — so the atomic SetWindowPos path in window_ops.rs is
 //! not needed here.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
@@ -49,7 +52,7 @@ const BOB_PERIOD_SECS: f64 = 6.0;
 /// Movement tick. ~60 Hz keeps the glide smooth; set_position is cheap.
 const TICK_MS: u64 = 16;
 
-// ── Event payload ──────────────────────────────────────────────────
+// ── Event payloads ─────────────────────────────────────────────────
 
 #[derive(Serialize, Clone, Copy)]
 struct FacingPayload {
@@ -59,6 +62,112 @@ struct FacingPayload {
 
 fn facing_of(vx: f64) -> &'static str {
     if vx < 0.0 { "left" } else { "right" }
+}
+
+#[derive(Serialize, Clone, Copy)]
+struct BalloonModePayload {
+    active: bool,
+}
+
+// ── Flight mode coordination ───────────────────────────────────────
+//
+// Three inputs decide whether flight is active:
+//   - manual: the Ctrl+Alt+F global shortcut (toggle)
+//   - idle:   the idle monitor (idle.rs) crossed the screensaver wait
+//   - config: the Flying-Screensaver settings (enabled + wait minutes)
+//
+//   effective = manual || (screensaver_enabled && idle)
+//
+// refresh() recomputes this after every input change; on transitions it
+// starts/stops the window-flight thread and emits `toggle-balloon-mode`
+// so the frontend can play the idle↔fly morphs.
+
+/// Screensaver wait bounds (minutes), enforced on the settings input.
+pub const WAIT_MIN_MINS: u64 = 6;
+pub const WAIT_MAX_MINS: u64 = 30;
+/// Default wait before the flying screensaver starts (10 minutes).
+pub const DEFAULT_WAIT_SECS: u64 = 600;
+
+static SCREENSAVER_ENABLED: AtomicBool = AtomicBool::new(true);
+static SCREENSAVER_WAIT_SECS: AtomicU64 = AtomicU64::new(DEFAULT_WAIT_SECS);
+
+#[derive(Default)]
+struct ModeState {
+    manual: bool,
+    idle: bool,
+    /// Last effective state, for transition detection.
+    active: bool,
+}
+
+fn mode_slot() -> &'static Mutex<ModeState> {
+    static SLOT: OnceLock<Mutex<ModeState>> = OnceLock::new();
+    SLOT.get_or_init(|| Mutex::new(ModeState::default()))
+}
+
+/// Pure effective-state rule: manual always flies; the idle screensaver
+/// only flies while the feature is enabled.
+pub fn effective_active(manual: bool, idle: bool, screensaver_enabled: bool) -> bool {
+    manual || (screensaver_enabled && idle)
+}
+
+/// Recompute the effective flight state; on a transition, start/stop the
+/// window-flight thread and notify the frontend.
+fn refresh(app: &AppHandle) {
+    let (changed, active) = {
+        let mut m = mode_slot().lock().unwrap();
+        let eff = effective_active(m.manual, m.idle, screensaver_enabled());
+        let changed = eff != m.active;
+        m.active = eff;
+        (changed, eff)
+    };
+    if !changed {
+        return;
+    }
+    set_active(app, active);
+    let _ = app.emit("toggle-balloon-mode", BalloonModePayload { active });
+}
+
+/// Idle-monitor input (idle.rs): whether the system has been idle past the
+/// screensaver wait threshold.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn set_idle_active(app: &AppHandle, idle: bool) {
+    mode_slot().lock().unwrap().idle = idle;
+    refresh(app);
+}
+
+/// Ctrl+Alt+F: toggle manual flying mode. Pressing the shortcut is itself
+/// keyboard input, so a concurrent idle-screensaver flight ends within one
+/// idle poll — manual effectively dominates while set.
+#[cfg_attr(not(desktop), allow(dead_code))]
+pub fn toggle_manual(app: &AppHandle) {
+    {
+        let mut m = mode_slot().lock().unwrap();
+        m.manual = !m.manual;
+    }
+    refresh(app);
+}
+
+pub fn screensaver_enabled() -> bool {
+    SCREENSAVER_ENABLED.load(Ordering::Relaxed)
+}
+
+/// Current screensaver wait threshold in seconds (read by idle.rs each poll).
+pub fn screensaver_wait_secs() -> u64 {
+    SCREENSAVER_WAIT_SECS.load(Ordering::Relaxed)
+}
+
+/// Settings input: enable/disable the flying screensaver and set its idle
+/// wait. Minutes are clamped to [WAIT_MIN_MINS, WAIT_MAX_MINS]. Applied
+/// immediately — disabling mid-screensaver-flight lands her unless manual
+/// mode holds.
+#[tauri::command]
+pub fn flight_set_screensaver(app: AppHandle, enabled: bool, wait_mins: u64) {
+    SCREENSAVER_ENABLED.store(enabled, Ordering::Relaxed);
+    SCREENSAVER_WAIT_SECS.store(
+        wait_mins.clamp(WAIT_MIN_MINS, WAIT_MAX_MINS) * 60,
+        Ordering::Relaxed,
+    );
+    refresh(&app);
 }
 
 // ── Pure step function (unit-testable) ─────────────────────────────
@@ -190,11 +299,9 @@ fn slot() -> &'static Mutex<Option<Arc<AtomicBool>>> {
     SLOT.get_or_init(|| Mutex::new(None))
 }
 
-/// Starts or stops the flight thread. Called by the idle monitor on every
-/// balloon-mode transition; only reachable on Windows today, hence the
-/// dead-code allowance for other targets.
-#[cfg_attr(not(windows), allow(dead_code))]
-pub fn set_active(app: &AppHandle, active: bool) {
+/// Starts or stops the window-flight thread. Called only by refresh() on
+/// effective-state transitions.
+fn set_active(app: &AppHandle, active: bool) {
     let mut guard = slot().lock().unwrap();
 
     // Stop any running flight first (also the "deactivate" path — the thread
@@ -375,6 +482,36 @@ mod tests {
     fn speed_is_slow_and_mostly_horizontal() {
         assert!(SPEED_PX_PER_SEC <= 60.0, "flight should stay slow and natural");
         assert!(MAX_VERTICAL_RATIO < 0.5, "flight should stay mostly horizontal");
+    }
+
+    // ── effective_active (mode coordination rule) ──────────────────
+
+    #[test]
+    fn manual_flies_regardless_of_screensaver() {
+        assert!(effective_active(true, false, false));
+        assert!(effective_active(true, false, true));
+        assert!(effective_active(true, true, false));
+    }
+
+    #[test]
+    fn idle_flies_only_while_screensaver_enabled() {
+        assert!(effective_active(false, true, true));
+        assert!(!effective_active(false, true, false));
+        assert!(!effective_active(false, false, true));
+    }
+
+    #[test]
+    fn nothing_requested_stays_grounded() {
+        assert!(!effective_active(false, false, false));
+        assert!(!effective_active(false, false, true));
+    }
+
+    #[test]
+    fn screensaver_wait_bounds_are_6_to_30_minutes() {
+        assert_eq!(WAIT_MIN_MINS, 6);
+        assert_eq!(WAIT_MAX_MINS, 30);
+        assert_eq!(DEFAULT_WAIT_SECS, 600);
+        assert!((WAIT_MIN_MINS * 60..=WAIT_MAX_MINS * 60).contains(&DEFAULT_WAIT_SECS));
     }
 
     // ── effective_bounds (pixel-perfect collision margins) ─────────
