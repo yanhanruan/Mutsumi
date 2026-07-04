@@ -196,9 +196,9 @@ export const DEFAULT_ANIMATIONS: Record<AnimationName, AnimationDef> = {
   // `flying` ping-pongs 1 → 192 → 1 … without duplicating the turn frames.
   flying:              { dir: 'fly_left',       count: 192, fps: 24, loop: true,
                          buildSequence: f => [...f, ...f.slice(1, -1).reverse()] },
-  fly_enter:           { dir: 'fly_to_idle',    count: 192, fps: 24, loop: false,
+  fly_enter:           { dir: 'fly_to_idle',    count: 185, fps: 24, loop: false,
                          buildSequence: f => f.slice().reverse() },
-  fly_exit:            { dir: 'fly_to_idle',    count: 192, fps: 24, loop: false },
+  fly_exit:            { dir: 'fly_to_idle',    count: 185, fps: 24, loop: false },
   // ─────────────────────────────────────────────────────────────────────────
   click:               { dir: 'click_matched',  count: 156, fps: 24, loop: false },
   pat_head:            { dir: 'pat_head',       count: 192, fps: 24, loop: false },
