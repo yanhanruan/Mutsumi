@@ -79,6 +79,18 @@ const heading = ref<'left' | 'right'>('left')
 // overlay's panel is interactive; the area around it stays click-through.
 useHitTest(getCurrentImage, () => overlayOpen.value, () => heading.value === 'right')
 
+// The flying art (fly_left + fly_to_idle) is graded a touch brighter and less
+// saturated than the idle frames, so the fly↔idle handoff shows a colour pop.
+// A light CSS filter (see .fly-graded) pulls those frames back to the idle
+// look. Applied to all three fly clips so the whole sequence — and both idle
+// boundaries — stay consistent. Filter values were fitted against the
+// same-pose pair idle/001 vs fly_to_idle/186; brightness/saturate don't touch
+// alpha, so hit-testing and flight collision are unaffected.
+const flyGraded = computed(() =>
+  currentName.value === 'flying' ||
+  currentName.value === 'fly_enter' ||
+  currentName.value === 'fly_exit')
+
 // TODO re-enable click animation — see onMouseUp:
 // Animations that must not be interrupted by a click (bubble still shows).
 // pat_head: mid-animation abort would look jarring.
@@ -483,7 +495,7 @@ onUnmounted(() => {
       v-show="ready && !overlayOpen"
       ref="imgRef"
       class="frame"
-      :class="{ mirrored: heading === 'right' }"
+      :class="{ mirrored: heading === 'right', 'fly-graded': flyGraded }"
       :style="{ opacity: spriteOpacity }"
       draggable="false"
     />
@@ -529,6 +541,13 @@ onUnmounted(() => {
    animation, not just flight. */
 .frame.mirrored {
   transform: scaleX(-1);
+}
+/* Colour-match the flying art to the idle frames (fitted: idle/001 vs
+   fly_to_idle/186). brightness+saturate commute, so order is irrelevant; both
+   leave alpha untouched. Toggled instantly (no transition) so the graded fly
+   frame lines up exactly with the idle frame at the handoff. */
+.frame.fly-graded {
+  filter: brightness(0.98) saturate(1.08);
 }
 .bubble-anchor {
   position: absolute;
