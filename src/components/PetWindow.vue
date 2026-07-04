@@ -56,8 +56,9 @@ const {
   getCurrentImage,
   getAnimFrames,
   setIdleVariant,
+  setAudioActive,
 } = useAnimator(DEFAULT_ANIMATIONS, imgRef)
-useAudioReaction(queueAnim, currentName, getPending, cancelPending)
+useAudioReaction(queueAnim, currentName, getPending, cancelPending, setAudioActive)
 usePetStatus(setIdleVariant)
 // True while a full-window overlay (tarot card / chat / system state panel) is
 // open. Declared before useHitTest (which reads them) and the size watch below.

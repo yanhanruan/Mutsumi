@@ -15,7 +15,7 @@
  *   outro  = frames[pingEnd ..]                  played once
  */
 import { describe, it, expect } from 'vitest'
-import { buildPingPongSequence, odd, randBetween, resolveHoldCycle } from './useAnimator'
+import { buildPingPongSequence, odd, randBetween, resolveBaseline, resolveHoldCycle } from './useAnimator'
 
 // ── helpers ────────────────────────────────────────────────────────
 
@@ -217,5 +217,33 @@ describe('buildPingPongSequence — music4 outro (frames after pingEnd)', () => 
   it('seq[184] is source index 184', () => expect(seq[184]).toBe(frames[184]))
   it('all 24 outro frames are in ascending order', () => {
     for (let i = 0; i < 24; i++) expect(seq[161 + i]).toBe(frames[161 + i])
+  })
+})
+
+// ── resolveBaseline ─────────────────────────────────────────────────
+// The single "what should she return to?" rule shared by every ending:
+// fly_exit landings, exitSleep wakes, and one-shots like pat_head or
+// headphones_off. Priority: sleep > live audio > idle variant.
+
+describe('resolveBaseline()', () => {
+  it('returns the idle variant when nothing else is going on', () => {
+    expect(resolveBaseline(false, false, 'idle')).toBe('idle')
+    expect(resolveBaseline(false, false, 'idle_low_energy')).toBe('idle_low_energy')
+  })
+
+  it('re-enters music via headphones_on when audio is playing', () => {
+    // The fix for: fly/sleep/pat_head during music used to strand her in
+    // idle afterwards, because audio events are edge-triggered and had
+    // already fired.
+    expect(resolveBaseline(false, true, 'idle')).toBe('headphones_on')
+  })
+
+  it('sleep outranks audio — waking is the user\'s call, not the music\'s', () => {
+    expect(resolveBaseline(true, true, 'idle')).toBe('sleep')
+    expect(resolveBaseline(true, false, 'idle')).toBe('sleep')
+  })
+
+  it('audio outranks the idle variant regardless of tier', () => {
+    expect(resolveBaseline(false, true, 'idle_exhausted')).toBe('headphones_on')
   })
 })

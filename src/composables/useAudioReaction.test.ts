@@ -48,23 +48,25 @@ import { useAudioReaction } from './useAudioReaction'
 
 // ── Test harness ───────────────────────────────────────────────────
 interface Harness {
-  queueAnim:     ReturnType<typeof vi.fn>
-  cancelPending: ReturnType<typeof vi.fn>
-  setCurrent:    (n: AnimationName) => void
-  setPending:    (n: AnimationName | null) => void
+  queueAnim:      ReturnType<typeof vi.fn>
+  cancelPending:  ReturnType<typeof vi.fn>
+  setAudioActive: ReturnType<typeof vi.fn>
+  setCurrent:     (n: AnimationName) => void
+  setPending:     (n: AnimationName | null) => void
 }
 
 async function mountReaction(initial: AnimationName = 'idle'): Promise<Harness> {
   const currentName = ref<AnimationName>(initial)
   let pending: AnimationName | null = null
 
-  const queueAnim     = vi.fn((n: AnimationName) => { pending = n })
-  const cancelPending = vi.fn(() => { pending = null })
-  const getPending    = () => pending
+  const queueAnim      = vi.fn((n: AnimationName) => { pending = n })
+  const cancelPending  = vi.fn(() => { pending = null })
+  const setAudioActive = vi.fn()
+  const getPending     = () => pending
 
   const Comp = defineComponent({
     setup() {
-      useAudioReaction(queueAnim, currentName, getPending, cancelPending)
+      useAudioReaction(queueAnim, currentName, getPending, cancelPending, setAudioActive)
       return () => h('div')
     },
   })
@@ -77,6 +79,7 @@ async function mountReaction(initial: AnimationName = 'idle'): Promise<Harness> 
   return {
     queueAnim,
     cancelPending,
+    setAudioActive,
     setCurrent: n => { currentName.value = n },
     setPending: n => { pending = n },
   }
@@ -328,5 +331,49 @@ describe('useAudioReaction → initial-state bootstrap (get_audio_state)', () =>
     fire('audio-started')
     expect(hx.queueAnim).toHaveBeenCalledWith('headphones_on')
     expect(hx.queueAnim).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('useAudioReaction → setAudioActive mirror', () => {
+  // The animator's baseline resolver depends on this mirror staying fresh
+  // even when the queued animations are gated (flight/sleep) or interrupted
+  // (pat_head). Every event and the bootstrap pull must feed it,
+  // unconditionally — regardless of what animation is current.
+
+  it('mirrors true at bootstrap when audio is already playing', async () => {
+    mockInvokeAudioState(true)
+    const hx = await mountReaction('idle')
+    expect(hx.setAudioActive).toHaveBeenCalledWith(true)
+  })
+
+  it('mirrors false at bootstrap when no audio is playing', async () => {
+    mockInvokeAudioState(false)
+    const hx = await mountReaction('idle')
+    expect(hx.setAudioActive).toHaveBeenCalledWith(false)
+  })
+
+  it('mirrors true on audio-started', async () => {
+    const hx = await mountReaction('idle')
+    hx.setAudioActive.mockClear()   // ignore the bootstrap call
+    fire('audio-started')
+    expect(hx.setAudioActive).toHaveBeenCalledWith(true)
+  })
+
+  it('mirrors false on audio-stopped', async () => {
+    const hx = await mountReaction('music1')
+    hx.setAudioActive.mockClear()
+    fire('audio-stopped')
+    expect(hx.setAudioActive).toHaveBeenCalledWith(false)
+  })
+
+  it('mirrors even when the animation side takes no action (already in music)', async () => {
+    // currentName is music1, so audio-started queues nothing — but the
+    // mirror must still be updated: this is exactly the case where a later
+    // ending (landing, waking, pat_head finishing) relies on it.
+    const hx = await mountReaction('music1')
+    hx.setAudioActive.mockClear()
+    fire('audio-started')
+    expect(hx.queueAnim).not.toHaveBeenCalled()
+    expect(hx.setAudioActive).toHaveBeenCalledWith(true)
   })
 })

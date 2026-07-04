@@ -17,6 +17,12 @@
  *      stale 'headphones_off', and the pet drops to idle — even though
  *      audio is playing.
  * The two guards below mirror Python's _begin / _end_music_sequence.
+ *
+ * Besides queueing animations, every event (and the bootstrap pull) also
+ * feeds setAudioActive — the animator's always-fresh mirror of the backend
+ * AudioState. The queued animations can be gated (sleep/flight) or
+ * interrupted (pat_head), but the mirror never is, so the animator's
+ * baseline resolver can restore music mode whenever those states end.
  */
 import { onMounted, onUnmounted, type Ref } from 'vue'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
@@ -36,10 +42,11 @@ const IN_MUSIC_ANIMS: ReadonlySet<AnimationName> = new Set([
 ])
 
 export function useAudioReaction(
-  queueAnim:     (name: AnimationName) => void,
-  currentName:   Ref<AnimationName>,
-  getPending:    () => AnimationName | null,
-  cancelPending: () => void,
+  queueAnim:      (name: AnimationName) => void,
+  currentName:    Ref<AnimationName>,
+  getPending:     () => AnimationName | null,
+  cancelPending:  () => void,
+  setAudioActive: (active: boolean) => void,
 ) {
   let unlistenStarted: UnlistenFn | null = null
   let unlistenStopped: UnlistenFn | null = null
@@ -51,11 +58,13 @@ export function useAudioReaction(
     // ContinuityTracker will never re-emit it.  Reading the managed
     // AudioState here covers that window.
     const alreadyPlaying = await invoke<boolean>('get_audio_state')
+    setAudioActive(alreadyPlaying)
     if (alreadyPlaying && !IN_MUSIC_ANIMS.has(currentName.value)) {
       queueAnim('headphones_on')
     }
 
     unlistenStarted = await listen('audio-started', () => {
+      setAudioActive(true)
       if (IN_MUSIC_ANIMS.has(currentName.value)) {
         // Already in / entering music. A pending 'headphones_off' here
         // means a stop event fired earlier and is still queued — cancel it
@@ -73,6 +82,7 @@ export function useAudioReaction(
     })
 
     unlistenStopped = await listen('audio-stopped', () => {
+      setAudioActive(false)
       if (IN_MUSIC_ANIMS.has(currentName.value)) {
         queueAnim('headphones_off')
       } else if (getPending() === 'headphones_on') {

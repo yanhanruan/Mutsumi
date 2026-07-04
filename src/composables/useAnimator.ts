@@ -75,6 +75,30 @@ export const IDLE_VARIANTS: ReadonlySet<AnimationName> = new Set([
   'idle', 'idle_low_energy', 'idle_low_affection', 'idle_exhausted',
 ])
 
+/**
+ * Baseline resolver — THE shared "what should she return to?" rule, applied
+ * whenever any animation or max-priority state ends (fly_exit landing, waking
+ * from sleep, pat_head/click one-shots, headphones_off, …). Instead of each
+ * ending hardcoding its own fallback, they all converge here, so state that
+ * changed *while* something else was playing (e.g. music kept playing through
+ * a whole flight) is never lost.
+ *
+ * Priority: sleep (max-priority rest) > live audio (enter the music chain via
+ * its canonical headphones_on entrance) > the current idle variant.
+ *
+ * Pure — the composable feeds it the synchronized inputs it tracks
+ * (setAudioActive / setIdleVariant mirror backend-owned facts). Unit-tested.
+ */
+export function resolveBaseline(
+  sleeping:    boolean,
+  audioActive: boolean,
+  idleVariant: AnimationName,
+): AnimationName {
+  if (sleeping) return 'sleep'
+  if (audioActive) return 'headphones_on'
+  return idleVariant
+}
+
 interface LoadedAnimation {
   frames:    HTMLImageElement[]
   fps:       number
@@ -293,8 +317,12 @@ export function useAnimator(
   let holdDir     = 1
   // Which idle-variant to play. Updated by setIdleVariant() from pet-status events.
   let idleAnimName: AnimationName = 'idle'
-  // Whether she was sleeping when flight started — fly_exit returns there.
-  let wasSleepingBeforeFlight = false
+  // Whether the backend reports audio playing. Updated by setAudioActive()
+  // (useAudioReaction mirrors the Rust AudioState here). Unlike the
+  // event-driven queueAnim calls — which are gated while sleeping/flying —
+  // this mirror is ALWAYS kept fresh, so the baseline resolver can restore
+  // music mode after any state that swallowed the transition events.
+  let audioActive = false
 
   // ── Direct DOM paint (hot path) ────────────────────────────────
   // Writing .src directly on the element is invisible to Vue's scheduler —
@@ -412,7 +440,8 @@ export function useAnimator(
   }
 
   /**
-   * Leave the rest state and fall back to the current idle variant, with the
+   * Leave the rest state and fall back to the baseline (music mode if audio
+   * kept playing while she slept, else the current idle variant), with the
    * same dip-to-transparent crossfade. No-op if not sleeping.
    */
   async function exitSleep() {
@@ -421,7 +450,7 @@ export function useAnimator(
     await waitMs(SLEEP_FADE_MS)
     sleeping.value = false
     pendingAnim = null
-    applyAnim(idleAnimName)
+    applyAnim(baselineAnim())
     spriteOpacity.value = 1
   }
 
@@ -429,22 +458,22 @@ export function useAnimator(
   /**
    * Enter flying mode: play the idle→fly morph (`fly_enter` — the shared
    * transform clip reversed), which chains into the `flying` ping-pong loop.
-   * Works from sleep too; the pre-flight sleep state is remembered and
-   * restored when flight ends. No-op if already flying.
+   * Works from sleep too — `sleeping` stays set through the flight (enter/
+   * exitSleep are gated while flying), so the landing baseline returns there.
+   * No-op if already flying.
    */
   function enterFlight() {
     if (flying.value) return
     flying.value = true
-    wasSleepingBeforeFlight = sleeping.value
     pendingAnim = null
     applyAnim('fly_enter')
   }
 
   /**
    * Leave flying mode: play the fly→idle morph (`fly_exit`) once. When it
-   * ends, the machine returns to sleep (if she was sleeping when flight
-   * started) or the current idle variant, and `flying` drops — see
-   * nextAnimAfterEnd. No-op if not flying.
+   * ends, the machine returns to the baseline (sleep if she slept before
+   * takeoff, music if audio is playing, else the current idle variant) and
+   * `flying` drops — see nextAnimAfterEnd. No-op if not flying.
    */
   function exitFlight() {
     if (!flying.value) return
@@ -481,6 +510,11 @@ export function useAnimator(
     return loaded.value[name]?.frames ?? null
   }
 
+  /** The shared return-to-rest rule (see resolveBaseline). */
+  function baselineAnim(): AnimationName {
+    return resolveBaseline(sleeping.value, audioActive, idleAnimName)
+  }
+
   /**
    * Resolve the next animation when the current one ends (StopIteration
    * equivalent — the iterator is exhausted).
@@ -497,18 +531,20 @@ export function useAnimator(
     if (cur === 'fly_enter')      return 'flying'
     if (cur === 'fly_exit') {
       flying.value = false
-      return wasSleepingBeforeFlight ? 'sleep' : idleAnimName
+      return baselineAnim()
     }
     if (cur === 'headphones_on')  return 'music1'
     if (cur === 'music1')         return 'music2'
     if (cur === 'music2')         return 'music3'
     if (cur === 'music3')         return 'music4'
     if (cur === 'music4')         return 'music1'
-    // Exit animations and one-shots fall back to the current idle variant.
-    if (cur === 'headphones_off') return idleAnimName
+    // Everything that ends — exit animations, one-shots like pat_head/click —
+    // falls back through the SAME baseline rule, so no ending needs (or gets)
+    // its own bespoke "where to next" patch.
+    if (cur === 'headphones_off') return baselineAnim()
     const def = loaded.value[cur]
     if (def?.loop) return cur
-    return idleAnimName
+    return baselineAnim()
   }
 
   /**
@@ -524,6 +560,20 @@ export function useAnimator(
     if (IDLE_VARIANTS.has(currentName.value) && currentName.value !== name) {
       setAnim(name)
     }
+  }
+
+  /**
+   * Mirror of the backend's AudioState (Rust audio.rs owns the truth).
+   * Called by useAudioReaction on every audio-started / audio-stopped event
+   * and once at bootstrap — never gated, unlike the animation requests those
+   * events also make, so it stays fresh through flight/sleep/one-shots.
+   *
+   * Pure input: it only records the fact. Reacting to it stays where it
+   * always was — live transitions enter/exit via useAudioReaction's queued
+   * animations; endings consult the baseline resolver, which reads this.
+   */
+  function setAudioActive(active: boolean) {
+    audioActive = active
   }
 
   // ── Anchored-hold ping-pong (holdCycle animations) ────────────
@@ -613,5 +663,6 @@ export function useAnimator(
     getCurrentImage,
     getAnimFrames,
     setIdleVariant,
+    setAudioActive,
   }
 }
