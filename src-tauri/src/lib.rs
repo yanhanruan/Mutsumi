@@ -112,6 +112,7 @@ pub fn run() {
       media::media_select,
       app_state::set_tray_locale,
       window_ops::set_window_bounds,
+      flight::flight_set_insets,
       card_export::save_card_image,
       card_export::reveal_in_folder,
       services::tts_synthesize,

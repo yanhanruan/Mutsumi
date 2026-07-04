@@ -483,6 +483,15 @@ export function useAnimator(
   }
 
   /**
+   * All loaded frames of an animation (the playback sequence — ping-pong
+   * sequences repeat Image objects). Null until preloaded. Used by the
+   * flight-collision alpha scan (useFlightCollision.ts).
+   */
+  function getAnimFrames(name: AnimationName): HTMLImageElement[] | null {
+    return loaded.value[name]?.frames ?? null
+  }
+
+  /**
    * Resolve the next animation when the current one ends (StopIteration
    * equivalent — the iterator is exhausted).
    */
@@ -612,6 +621,7 @@ export function useAnimator(
     getPending,
     cancelPending,
     getCurrentImage,
+    getAnimFrames,
     setIdleVariant,
   }
 }

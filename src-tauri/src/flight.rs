@@ -123,6 +123,65 @@ pub fn step_flight(
     FlightStep { x: nx, y: ny, vx: nvx, vy: nvy, flipped_x }
 }
 
+// ── Pixel-perfect collision insets ─────────────────────────────────
+
+/// Transparent margins around the sprite's opaque pixels, as FRACTIONS of the
+/// window size (0.0–1.0, DPI-independent). Reported by the frontend, which
+/// alpha-scans the flying frames once (src/composables/useFlightCollision.ts).
+/// Left/right describe the un-mirrored (left-facing) sprite; the flight loop
+/// swaps them while she faces right (the sprite is mirrored with scaleX(-1)).
+/// Zero insets — the default until the frontend reports — fall back to
+/// window-rect collision.
+#[derive(Clone, Copy, Default)]
+struct Insets {
+    left: f64,
+    top: f64,
+    right: f64,
+    bottom: f64,
+}
+
+fn insets_slot() -> &'static Mutex<Insets> {
+    static SLOT: OnceLock<Mutex<Insets>> = OnceLock::new();
+    SLOT.get_or_init(|| Mutex::new(Insets::default()))
+}
+
+/// Frontend-reported sprite margins. Each value is the transparent gap
+/// between a window edge and the nearest opaque pixel, as a fraction of the
+/// window size. Clamped defensively — a bogus report must never make the
+/// collision rect degenerate.
+#[tauri::command]
+pub fn flight_set_insets(left: f64, top: f64, right: f64, bottom: f64) {
+    let c = |v: f64| if v.is_finite() { v.clamp(0.0, 0.45) } else { 0.0 };
+    *insets_slot().lock().unwrap() = Insets {
+        left: c(left),
+        top: c(top),
+        right: c(right),
+        bottom: c(bottom),
+    };
+}
+
+/// Expands the work-area bounds by the sprite's transparent margins so that
+/// `step_flight`'s window-rect collision fires exactly when an opaque pixel
+/// reaches the real work-area edge. `facing_right` swaps the horizontal
+/// margins because the sprite is mirrored while flying right.
+///
+/// `insets` is (left, top, right, bottom) as fractions of the window size.
+/// Pure — no OS calls.
+pub fn effective_bounds(
+    bounds: (f64, f64, f64, f64),
+    win: (f64, f64),
+    insets: (f64, f64, f64, f64),
+    facing_right: bool,
+) -> (f64, f64, f64, f64) {
+    let (l, t, r, b) = bounds;
+    let (w, h) = win;
+    let (mut il, it, mut ir, ib) = (insets.0 * w, insets.1 * h, insets.2 * w, insets.3 * h);
+    if facing_right {
+        std::mem::swap(&mut il, &mut ir);
+    }
+    (l - il, t - it, r + ir, b + ib)
+}
+
 // ── Controller (start / stop) ──────────────────────────────────────
 
 /// Stop flag of the currently running flight thread, if any.
@@ -196,7 +255,16 @@ fn run_flight(app: AppHandle, stop: Arc<AtomicBool>) {
 
         let bob = BOB_AMP_PX_PER_SEC
             * (t * std::f64::consts::TAU / BOB_PERIOD_SECS).sin();
-        let s = step_flight(x, y, vx, vy, dt, bob, bounds, win);
+        // Bounce on the sprite's opaque pixels, not the window rect: widen
+        // the bounds by the transparent margins the frontend reported.
+        let ins = *insets_slot().lock().unwrap();
+        let eff = effective_bounds(
+            bounds,
+            win,
+            (ins.left, ins.top, ins.right, ins.bottom),
+            vx > 0.0,
+        );
+        let s = step_flight(x, y, vx, vy, dt, bob, eff, win);
         x = s.x;
         y = s.y;
         vx = s.vx;
@@ -307,5 +375,51 @@ mod tests {
     fn speed_is_slow_and_mostly_horizontal() {
         assert!(SPEED_PX_PER_SEC <= 60.0, "flight should stay slow and natural");
         assert!(MAX_VERTICAL_RATIO < 0.5, "flight should stay mostly horizontal");
+    }
+
+    // ── effective_bounds (pixel-perfect collision margins) ─────────
+
+    #[test]
+    fn zero_insets_leave_bounds_unchanged() {
+        let eff = effective_bounds(BOUNDS, WIN, (0.0, 0.0, 0.0, 0.0), false);
+        assert_eq!(eff, BOUNDS);
+    }
+
+    #[test]
+    fn insets_widen_bounds_by_window_scaled_margins() {
+        // 10% left margin of a 170-wide window = 17 px of transparent gap:
+        // the window may overshoot the left edge by exactly that much before
+        // an opaque pixel touches it.
+        let eff = effective_bounds(BOUNDS, WIN, (0.1, 0.1, 0.2, 0.2), false);
+        assert_eq!(eff.0, 0.0 - 0.1 * 170.0);
+        assert_eq!(eff.1, 0.0 - 0.1 * 289.0);
+        assert_eq!(eff.2, 1920.0 + 0.2 * 170.0);
+        assert_eq!(eff.3, 1040.0 + 0.2 * 289.0);
+    }
+
+    #[test]
+    fn facing_right_swaps_horizontal_insets_only() {
+        let left  = effective_bounds(BOUNDS, WIN, (0.1, 0.05, 0.2, 0.15), false);
+        let right = effective_bounds(BOUNDS, WIN, (0.1, 0.05, 0.2, 0.15), true);
+        // Horizontal margins swap (the sprite is mirrored)…
+        assert_eq!(right.0, 0.0 - 0.2 * 170.0);
+        assert_eq!(right.2, 1920.0 + 0.1 * 170.0);
+        // …vertical margins do not.
+        assert_eq!(right.1, left.1);
+        assert_eq!(right.3, left.3);
+    }
+
+    #[test]
+    fn opaque_pixel_bounce_happens_past_the_window_edge() {
+        // Sprite with a 10% transparent left margin (17 px of a 170-wide
+        // window) flying left: the window may cross x=0 and only bounces
+        // once the opaque pixels arrive at the work-area edge.
+        let eff = effective_bounds(BOUNDS, WIN, (0.1, 0.0, 0.0, 0.0), false);
+        let past_window_edge = step_flight(-3.0, 400.0, -40.0, 0.0, 0.1, 0.0, eff, WIN);
+        assert!(!past_window_edge.flipped_x, "no bounce while only transparent px overhang");
+        assert_eq!(past_window_edge.x, -7.0);
+        let at_opaque_edge = step_flight(-14.0, 400.0, -40.0, 0.0, 0.1, 0.0, eff, WIN);
+        assert!(at_opaque_edge.flipped_x, "bounce once the opaque box reaches the edge");
+        assert_eq!(at_opaque_edge.x, -17.0); // clamped so opaque pixels sit on x=0
     }
 }

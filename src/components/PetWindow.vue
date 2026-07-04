@@ -14,6 +14,7 @@ import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useAnimator, DEFAULT_ANIMATIONS, IDLE_VARIANTS } from '../composables/useAnimator'
 import { useAudioReaction } from '../composables/useAudioReaction'
 import { useMidnightAutoSleep } from '../composables/useMidnightAutoSleep'
+import { sendFlightInsets } from '../composables/useFlightCollision'
 import { useHitTest } from '../composables/useHitTest'
 import { usePetStatus } from '../composables/usePetStatus'
 import { useI18n } from '../i18n'
@@ -53,6 +54,7 @@ const {
   getPending,
   cancelPending,
   getCurrentImage,
+  getAnimFrames,
   setIdleVariant,
 } = useAnimator(DEFAULT_ANIMATIONS, imgRef)
 useAudioReaction(queueAnim, currentName, getPending, cancelPending)
@@ -417,8 +419,14 @@ onMounted(async () => {
     bubbleRef.value?.show(t.value.lateNightReminder)
   })
   unlistenBalloon = await listen<{ active: boolean }>('toggle-balloon-mode', e => {
-    if (e.payload.active) enterFlight()
-    else exitFlight()
+    if (e.payload.active) {
+      enterFlight()
+      // Report the sprite's transparent margins so edge bounces are
+      // pixel-perfect (scanned once, then cached — see useFlightCollision).
+      void sendFlightInsets(getAnimFrames('flying'))
+    } else {
+      exitFlight()
+    }
   })
   unlistenFacing = await listen<{ facing: 'left' | 'right' }>('balloon-facing', e => {
     flightFacing.value = e.payload.facing
