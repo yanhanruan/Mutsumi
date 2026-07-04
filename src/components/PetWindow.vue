@@ -14,7 +14,7 @@ import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useAnimator, DEFAULT_ANIMATIONS, IDLE_VARIANTS } from '../composables/useAnimator'
 import { useAudioReaction } from '../composables/useAudioReaction'
 import { useMidnightAutoSleep } from '../composables/useMidnightAutoSleep'
-import { sendFlightInsets } from '../composables/useFlightCollision'
+import { prepareFlightCollision, startFlightInsetsSync } from '../composables/useFlightCollision'
 import { useHitTest } from '../composables/useHitTest'
 import { usePetStatus } from '../composables/usePetStatus'
 import { useI18n } from '../i18n'
@@ -392,6 +392,9 @@ let unlistenFacing: UnlistenFn | null = null
 // glides the window. Only left-facing frames exist, so `balloon-facing`
 // mirrors the sprite (scaleX(-1)) whenever she flies rightward.
 const flightFacing = ref<'left' | 'right'>('left')
+// Stops the per-frame collision-insets poller (useFlightCollision); the
+// poller only runs while she is airborne.
+let stopInsetsSync: (() => void) | null = null
 
 onMounted(async () => {
   // Sync persisted chat settings to the backend so saved choices survive restarts
@@ -425,11 +428,16 @@ onMounted(async () => {
   unlistenBalloon = await listen<{ active: boolean }>('toggle-balloon-mode', e => {
     if (e.payload.active) {
       enterFlight()
-      // Report the sprite's transparent margins so edge bounces are
-      // pixel-perfect (scanned once, then cached — see useFlightCollision).
-      void sendFlightInsets(getAnimFrames('flying'))
+      // Pixel-perfect bounces: scan the frames' alpha once (chunked,
+      // cached), then report the displayed frame's margins to Rust as
+      // playback advances — see useFlightCollision.
+      void prepareFlightCollision(getAnimFrames('flying'))
+      stopInsetsSync?.()
+      stopInsetsSync = startFlightInsetsSync(getCurrentImage)
     } else {
       exitFlight()
+      stopInsetsSync?.()
+      stopInsetsSync = null
     }
   })
   unlistenFacing = await listen<{ facing: 'left' | 'right' }>('balloon-facing', e => {
@@ -443,6 +451,7 @@ onUnmounted(() => {
   unlistenLateNight?.()
   unlistenBalloon?.()
   unlistenFacing?.()
+  stopInsetsSync?.()
 })
 </script>
 

@@ -4,7 +4,13 @@
  * happy-dom has no real 2D raster context.)
  */
 import { describe, it, expect } from 'vitest'
-import { boxToWindowInsets, type OpaqueBox } from './useFlightCollision'
+import {
+  boxToWindowInsets,
+  insetsDiffer,
+  SEND_EPSILON,
+  type OpaqueBox,
+  type EdgeInsets,
+} from './useFlightCollision'
 
 const FULL: OpaqueBox = { x0: 0, y0: 0, x1: 1, y1: 1 }
 
@@ -55,5 +61,28 @@ describe('boxToWindowInsets', () => {
     const ins = boxToWindowInsets(box, 100, 100, 400, 200)
     expect(ins.left).toBeCloseTo(0.3)
     expect(ins.right).toBeCloseTo(0.25)
+  })
+})
+
+describe('insetsDiffer', () => {
+  const BASE: EdgeInsets = { left: 0.1, top: 0.2, right: 0.1, bottom: 0.05 }
+
+  it('identical insets are not worth resending', () => {
+    expect(insetsDiffer(BASE, { ...BASE })).toBe(false)
+  })
+
+  it('sub-epsilon jitter on every edge is not worth resending', () => {
+    const jitter = SEND_EPSILON / 2
+    expect(insetsDiffer(BASE, {
+      left:   BASE.left + jitter,
+      top:    BASE.top - jitter,
+      right:  BASE.right + jitter,
+      bottom: BASE.bottom - jitter,
+    })).toBe(false)
+  })
+
+  it('a single edge moving by epsilon triggers a resend', () => {
+    expect(insetsDiffer(BASE, { ...BASE, left: BASE.left + SEND_EPSILON })).toBe(true)
+    expect(insetsDiffer(BASE, { ...BASE, bottom: BASE.bottom - SEND_EPSILON })).toBe(true)
   })
 })

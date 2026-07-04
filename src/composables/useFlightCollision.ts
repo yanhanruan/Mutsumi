@@ -4,15 +4,19 @@
  * The Rust flight controller (src-tauri/src/flight.rs) bounces the pet
  * window off the monitor work-area edges. The window rect includes the
  * transparent padding around the drawn sprite, so rect-based bounces make
- * her appear to turn around in mid-air. This module alpha-scans the flying
- * frames once, takes the union opaque bounding box across every frame,
- * converts it to per-edge margins (fractions of the window, accounting for
- * the <img>'s object-fit: contain letterboxing) and reports them to Rust
- * via `flight_set_insets`, so bounces fire exactly when a visible pixel
- * reaches the edge.
+ * her appear to turn around in mid-air.
  *
- * The union across frames (rather than per-frame boxes) keeps the physics
- * stable: the collision envelope doesn't pulse with the wing-flap cycle.
+ * Collision therefore tracks the CURRENT frame: every flying frame is
+ * alpha-scanned once (chunked so the scan never blocks a paint, cached for
+ * the app lifetime), and while flying a light poller watches which frame is
+ * displayed and reports that frame's margins to Rust (`flight_set_insets`)
+ * whenever they change materially. Rust re-reads the margins every movement
+ * tick, so the collision envelope follows the wing-flap cycle.
+ *
+ * Note: a single union box across all frames is NOT good enough — the flying
+ * clip has up to ~26% of the frame width of baked-in horizontal travel, so a
+ * union hugs the window rect and bounces fire while the visible pixels are
+ * still far from the edge.
  */
 import { invoke } from '@tauri-apps/api/core'
 
@@ -24,7 +28,7 @@ export interface OpaqueBox { x0: number; y0: number; x1: number; y1: number }
 /** Per-edge transparent margins as fractions of the window size. */
 export interface EdgeInsets { left: number; top: number; right: number; bottom: number }
 
-// ── Scan configuration ──────────────────────────────────────────────
+// ── Configuration ───────────────────────────────────────────────────
 
 /** Frames are scanned downscaled to this width — margin accuracy of a few
  *  device pixels, ~200× cheaper than scanning at native resolution. */
@@ -33,45 +37,72 @@ export const SCAN_WIDTH = 160
 /** Alpha (0-255) at or above which a pixel counts as visible. */
 export const ALPHA_MIN = 16
 
-// ── Alpha scan (canvas — not unit-tested, kept minimal) ─────────────
+/** How often the sync poller checks which frame is displayed (ms). Frames
+ *  advance every ~42 ms at 24 fps, so this lags at most ~1 px of drift at
+ *  flight speed. */
+export const SYNC_INTERVAL_MS = 30
 
-/**
- * Union opaque bounding box across all distinct frames, as fractions of the
- * frame image. Returns null when nothing is loaded or everything is
- * transparent. One-time cost per frame set; callers should cache.
- */
-export function unionOpaqueBox(frames: readonly HTMLImageElement[]): OpaqueBox | null {
-  const unique = [...new Set(frames)].filter(f => f.naturalWidth > 0)
-  const first = unique[0]
-  if (!first) return null
+/** Minimum per-edge change (fraction of the window) worth an IPC message. */
+export const SEND_EPSILON = 0.003
 
+/** Frames scanned per chunk before yielding back to the event loop. */
+const SCAN_CHUNK = 8
+
+// ── Per-frame alpha scan (canvas; cached) ───────────────────────────
+
+const boxCache = new Map<HTMLImageElement, OpaqueBox | null>()
+let scanCtx: CanvasRenderingContext2D | null = null
+
+function opaqueBoxOf(img: HTMLImageElement): OpaqueBox | null {
+  if (img.naturalWidth === 0) return null
   const sw = SCAN_WIDTH
-  const sh = Math.max(1, Math.round(first.naturalHeight * (sw / first.naturalWidth)))
-  const canvas = document.createElement('canvas')
-  canvas.width  = sw
-  canvas.height = sh
-  const ctx = canvas.getContext('2d', { willReadFrequently: true })
-  if (!ctx) return null
-
+  const sh = Math.max(1, Math.round(img.naturalHeight * (sw / img.naturalWidth)))
+  if (!scanCtx || scanCtx.canvas.width !== sw || scanCtx.canvas.height !== sh) {
+    const canvas = document.createElement('canvas')
+    canvas.width  = sw
+    canvas.height = sh
+    scanCtx = canvas.getContext('2d', { willReadFrequently: true })
+    if (!scanCtx) return null
+  }
+  scanCtx.clearRect(0, 0, sw, sh)
+  scanCtx.drawImage(img, 0, 0, sw, sh)
+  const a = scanCtx.getImageData(0, 0, sw, sh).data
   let minX = sw, minY = sh, maxX = -1, maxY = -1
-  for (const f of unique) {
-    ctx.clearRect(0, 0, sw, sh)
-    ctx.drawImage(f, 0, 0, sw, sh)
-    const a = ctx.getImageData(0, 0, sw, sh).data
-    for (let y = 0; y < sh; y++) {
-      for (let x = 0; x < sw; x++) {
-        if (a[(y * sw + x) * 4 + 3] >= ALPHA_MIN) {
-          if (x < minX) minX = x
-          if (x > maxX) maxX = x
-          if (y < minY) minY = y
-          if (y > maxY) maxY = y
-        }
+  for (let y = 0; y < sh; y++) {
+    for (let x = 0; x < sw; x++) {
+      if (a[(y * sw + x) * 4 + 3] >= ALPHA_MIN) {
+        if (x < minX) minX = x
+        if (x > maxX) maxX = x
+        if (y < minY) minY = y
+        if (y > maxY) maxY = y
       }
     }
   }
   if (maxX < 0) return null
   // +1: max indices are inclusive pixel coordinates.
   return { x0: minX / sw, y0: minY / sh, x1: (maxX + 1) / sw, y1: (maxY + 1) / sh }
+}
+
+let scanPromise: Promise<void> | null = null
+
+/**
+ * Alpha-scan all (unique, not yet cached) frames, a few per event-loop turn
+ * so a flight start never hitches the enter morph. Idempotent; safe to call
+ * on every flight activation. Until a frame is scanned the poller simply
+ * keeps the previous margins (first flight: window-rect fallback in Rust).
+ */
+export function prepareFlightCollision(frames: readonly HTMLImageElement[] | null): Promise<void> {
+  if (scanPromise) return scanPromise
+  const pending = frames ? [...new Set(frames)].filter(f => !boxCache.has(f)) : []
+  if (pending.length === 0) return Promise.resolve()
+  scanPromise = (async () => {
+    for (let i = 0; i < pending.length; i++) {
+      boxCache.set(pending[i], opaqueBoxOf(pending[i]))
+      if ((i + 1) % SCAN_CHUNK === 0) await new Promise<void>(r => setTimeout(r))
+    }
+    scanPromise = null
+  })()
+  return scanPromise
 }
 
 // ── Pure mapping (unit-tested) ──────────────────────────────────────
@@ -100,30 +131,43 @@ export function boxToWindowInsets(
   }
 }
 
-// ── Orchestrator ────────────────────────────────────────────────────
+/** True when any edge differs by at least `eps` — i.e. worth resending. */
+export function insetsDiffer(a: EdgeInsets, b: EdgeInsets, eps: number = SEND_EPSILON): boolean {
+  return (
+    Math.abs(a.left - b.left)     >= eps ||
+    Math.abs(a.top - b.top)       >= eps ||
+    Math.abs(a.right - b.right)   >= eps ||
+    Math.abs(a.bottom - b.bottom) >= eps
+  )
+}
 
-let cachedBox: OpaqueBox | null = null
-let cachedFrames: readonly HTMLImageElement[] | null = null
+// ── Sync poller (runs only while flying) ────────────────────────────
 
 /**
- * Scan (once, cached per frame set) and report the flying sprite's margins
- * to the Rust flight controller. Call on each flight activation — the
- * mapping is recomputed against the current window size. Silently no-ops
- * when frames aren't loaded yet; Rust then falls back to window-rect
- * collision for that flight.
+ * Start reporting the displayed frame's margins to Rust. `getImage` is the
+ * animator's current-frame accessor. Returns a stop function — call it when
+ * flight ends. Frames without a cached box (still scanning, or a morph
+ * clip's frames) keep the previous margins.
  */
-export async function sendFlightInsets(frames: readonly HTMLImageElement[] | null): Promise<void> {
-  if (!frames || frames.length === 0) return
-  if (cachedFrames !== frames) {
-    cachedBox = unionOpaqueBox(frames)
-    cachedFrames = frames
-  }
-  const first = frames.find(f => f.naturalWidth > 0)
-  if (!cachedBox || !first) return
-  const insets = boxToWindowInsets(
-    cachedBox,
-    first.naturalWidth, first.naturalHeight,
-    window.innerWidth, window.innerHeight,
-  )
-  await invoke('flight_set_insets', { ...insets }).catch(() => {})
+export function startFlightInsetsSync(
+  getImage: () => HTMLImageElement | null,
+): () => void {
+  let lastImg: HTMLImageElement | null = null
+  let lastSent: EdgeInsets | null = null
+  const timer = setInterval(() => {
+    const img = getImage()
+    if (!img || img === lastImg) return
+    lastImg = img
+    const box = boxCache.get(img)
+    if (!box) return
+    const ins = boxToWindowInsets(
+      box,
+      img.naturalWidth, img.naturalHeight,
+      window.innerWidth, window.innerHeight,
+    )
+    if (lastSent && !insetsDiffer(ins, lastSent)) return
+    lastSent = ins
+    void invoke('flight_set_insets', { ...ins }).catch(() => {})
+  }, SYNC_INTERVAL_MS)
+  return () => clearInterval(timer)
 }

@@ -235,10 +235,12 @@ pub fn step_flight(
 // ── Pixel-perfect collision insets ─────────────────────────────────
 
 /// Transparent margins around the sprite's opaque pixels, as FRACTIONS of the
-/// window size (0.0–1.0, DPI-independent). Reported by the frontend, which
-/// alpha-scans the flying frames once (src/composables/useFlightCollision.ts).
-/// Left/right describe the un-mirrored (left-facing) sprite; the flight loop
-/// swaps them while she faces right (the sprite is mirrored with scaleX(-1)).
+/// window size (0.0–1.0, DPI-independent). Reported by the frontend for the
+/// CURRENTLY DISPLAYED frame and re-sent as playback advances (the flying
+/// clip has large baked-in travel, so a static envelope is too loose — see
+/// src/composables/useFlightCollision.ts). The flight loop re-reads this
+/// every movement tick. Left/right describe the un-mirrored (left-facing)
+/// sprite; the loop swaps them while she faces right (mirrored scaleX(-1)).
 /// Zero insets — the default until the frontend reports — fall back to
 /// window-rect collision.
 #[derive(Clone, Copy, Default)]
@@ -544,6 +546,57 @@ mod tests {
         // …vertical margins do not.
         assert_eq!(right.1, left.1);
         assert_eq!(right.3, left.3);
+    }
+
+    /// Diagnostic (ignored): measure the per-frame opaque bounding boxes of
+    /// the real flying frames and compare them with their union — shows how
+    /// much slack a union-based collision envelope has per frame.
+    /// Run: cargo test --lib flight::tests::diag -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn diag_flying_frame_opaque_boxes() {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../public/assets/fly_left");
+        let mut per_frame: Vec<(f64, f64, f64, f64)> = Vec::new(); // l,t,r,b fractions
+        for i in 1..=192 {
+            let path = format!("{dir}/frame_{i:03}.webp");
+            let img = match image::open(&path) {
+                Ok(i) => i.to_rgba8(),
+                Err(e) => { println!("skip {path}: {e}"); continue }
+            };
+            let (w, h) = img.dimensions();
+            let (mut minx, mut miny, mut maxx, mut maxy) = (w, h, 0u32, 0u32);
+            for (x, y, p) in img.enumerate_pixels() {
+                if p.0[3] >= 16 {
+                    if x < minx { minx = x }
+                    if x > maxx { maxx = x }
+                    if y < miny { miny = y }
+                    if y > maxy { maxy = y }
+                }
+            }
+            if maxx == 0 && minx == w { continue }
+            per_frame.push((
+                minx as f64 / w as f64,
+                miny as f64 / h as f64,
+                (maxx + 1) as f64 / w as f64,
+                (maxy + 1) as f64 / h as f64,
+            ));
+        }
+        assert!(!per_frame.is_empty(), "no frames scanned");
+        let union = per_frame.iter().fold((1.0f64, 1.0f64, 0.0f64, 0.0f64), |u, b| {
+            (u.0.min(b.0), u.1.min(b.1), u.2.max(b.2), u.3.max(b.3))
+        });
+        let (mut sl, mut st, mut sr, mut sb) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
+        for b in &per_frame {
+            sl = sl.max(b.0 - union.0);       // frame's extra left slack vs union
+            st = st.max(b.1 - union.1);
+            sr = sr.max(union.2 - b.2);
+            sb = sb.max(union.3 - b.3);
+        }
+        println!("frames scanned: {}", per_frame.len());
+        println!("union box (fractions): l={:.3} t={:.3} r={:.3} b={:.3}", union.0, union.1, union.2, union.3);
+        println!("max per-frame slack vs union: l={:.3} t={:.3} r={:.3} b={:.3}", sl, st, sr, sb);
+        println!("first frame box: {:?}", per_frame[0]);
+        println!("mid frame box:   {:?}", per_frame[per_frame.len() / 2]);
     }
 
     #[test]
