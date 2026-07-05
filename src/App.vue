@@ -13,6 +13,7 @@ import { invoke } from '@tauri-apps/api/core'
 import PetWindow from './components/PetWindow.vue'
 import SettingsWindow from './components/SettingsWindow.vue'
 import AboutWindow from './components/AboutWindow.vue'
+import UpdateWindow from './components/UpdateWindow.vue'
 import { detectLocale, setLocale, useI18n } from './i18n'
 import { useAppConfig } from './composables/useAppConfig'
 
@@ -27,6 +28,10 @@ const isSettings = computed(() => {
 
 const isAbout = computed(() => {
   return windowKind.value === 'about'
+})
+
+const isUpdate = computed(() => {
+  return windowKind.value === 'update'
 })
 
 const { locale } = useI18n()
@@ -58,5 +63,6 @@ watch(
 <template>
   <SettingsWindow v-if="isSettings" />
   <AboutWindow v-else-if="isAbout" />
+  <UpdateWindow v-else-if="isUpdate" />
   <PetWindow v-else />
 </template>

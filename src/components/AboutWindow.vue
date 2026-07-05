@@ -2,12 +2,14 @@
 /**
  * AboutWindow — small frameless information window opened from the tray.
  */
-import { watch } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { getVersion } from '@tauri-apps/api/app'
+import { invoke } from '@tauri-apps/api/core'
 import { detectLocale, setLocale, useI18n } from '../i18n'
 import { useAppConfig } from '../composables/useAppConfig'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const { config } = useAppConfig()
 const win = getCurrentWindow()
 
@@ -15,13 +17,42 @@ const yohoUrl = 'https://github.com/yanhanruan'
 const mutsumiHeadUrl = 'https://github.com/qichengwang408-lab'
 const releasesUrl = 'https://github.com/yanhanruan/Mutsumi/releases'
 const sourceUrl = 'https://github.com/yanhanruan/Mutsumi'
-const appVersion = 'v1.4.0'
+
+// Version comes from the built app (tauri.conf.json) at runtime — no hardcoding,
+// so About is always correct after a release without editing this file.
+const appVersion = ref('')
+
+const lastChecked = computed(() => {
+  const iso = config.value.updateLastCheck
+  if (!iso) return t.value.aboutLastCheckedNever
+  const ms = Date.parse(iso)
+  if (Number.isNaN(ms)) return t.value.aboutLastCheckedNever
+  try {
+    return new Intl.DateTimeFormat(locale.value, { dateStyle: 'medium', timeStyle: 'short' }).format(ms)
+  } catch {
+    return new Date(ms).toLocaleString()
+  }
+})
 
 watch(
   () => config.value.language,
   lang => setLocale(lang ?? detectLocale()),
   { immediate: true },
 )
+
+onMounted(async () => {
+  try {
+    appVersion.value = await getVersion()
+  } catch { /* getVersion should not fail; leave blank if it does */ }
+})
+
+// Manual "Check for updates" — opens the pop-up with no pre-fetched metadata,
+// so it checks for itself (bypasses the daily throttle + snooze).
+async function checkForUpdates() {
+  try {
+    await invoke('open_update_window')
+  } catch { /* best-effort */ }
+}
 
 function closeWindow() { win.close() }
 </script>
@@ -61,7 +92,11 @@ function closeWindow() { win.close() }
 
       <section class="card">
         <h2 class="card-title">{{ t.aboutVersionInfo }}</h2>
-        <p class="value"><span class="strong">{{ appVersion }}</span></p>
+        <div class="version-row">
+          <p class="value"><span class="strong">v{{ appVersion }}</span></p>
+          <button class="check-btn" @click="checkForUpdates">{{ t.aboutCheckUpdates }}</button>
+        </div>
+        <p class="last-checked">{{ t.aboutLastChecked }}: {{ lastChecked }}</p>
       </section>
 
       <section class="card">
@@ -343,6 +378,39 @@ function closeWindow() { win.close() }
   font-size: 16px;
   font-weight: 750;
   color: #1a3a1a;
+}
+
+.version-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.check-btn {
+  flex-shrink: 0;
+  padding: 5px 12px;
+  border: 1px solid rgba(119, 153, 119, 0.40);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.55);
+  font-size: 11.5px;
+  font-weight: 650;
+  color: #275f43;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, transform 80ms ease;
+}
+
+.check-btn:hover {
+  background: rgba(255, 255, 255, 0.80);
+  border-color: rgba(49, 95, 71, 0.55);
+}
+
+.check-btn:active { transform: scale(0.95); }
+
+.last-checked {
+  margin: 7px 0 0;
+  font-size: 11px;
+  color: rgba(45, 85, 45, 0.60);
 }
 
 .empty {

@@ -25,6 +25,7 @@ mod search;
 mod services;
 mod state;
 mod tray;
+mod update_window;
 mod weather;
 mod window_ops;
 mod sys_state;
@@ -77,7 +78,10 @@ pub fn run() {
     .plugin(tauri_plugin_dialog::init())
     .plugin(tauri_plugin_clipboard_manager::init())
     .plugin(tauri_plugin_opener::init())
+    .plugin(tauri_plugin_updater::Builder::new().build())
+    .plugin(tauri_plugin_process::init())
     .manage(shared.clone())
+    .manage(update_window::PendingUpdateState::default())
     .manage(weather_state)
     .manage(audio_state)
     .manage(media_state)
@@ -136,6 +140,8 @@ pub fn run() {
       hardware::get_hardware_info,
       sys_state::sys_monitor_start,
       sys_state::sys_monitor_stop,
+      update_window::open_update_window,
+      update_window::get_pending_update,
       hide_pet,
     ])
     .setup(move |app| {

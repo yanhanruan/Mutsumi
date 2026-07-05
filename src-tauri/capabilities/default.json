@@ -5,10 +5,14 @@
   "windows": [
     "main",
     "settings",
-    "about"
+    "about",
+    "update"
   ],
   "permissions": [
     "core:default",
+    "core:app:allow-version",
+    "updater:default",
+    "process:allow-restart",
     "dialog:allow-open",
     "clipboard-manager:allow-read-image",
     {

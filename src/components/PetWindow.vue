@@ -14,6 +14,7 @@ import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useAnimator } from '../composables/useAnimator'
 import { DEFAULT_ANIMATIONS, IDLE_VARIANTS } from '../config/animations'
 import { useAudioReaction } from '../composables/useAudioReaction'
+import { useUpdateCheck } from '../composables/useUpdateCheck'
 import { useMidnightAutoSleep } from '../composables/useMidnightAutoSleep'
 import { prepareFlightCollision, startFlightInsetsSync } from '../composables/useFlightCollision'
 import { useHitTest } from '../composables/useHitTest'
@@ -61,6 +62,8 @@ const {
 } = useAnimator(DEFAULT_ANIMATIONS, imgRef)
 useAudioReaction(queueAnim, currentName, getPending, cancelPending, setAudioActive)
 usePetStatus(setIdleVariant)
+// Daily background check for a newer release; opens the update pop-up if found.
+useUpdateCheck()
 // True while a full-window overlay (tarot card / chat / system state panel) is
 // open. Declared before useHitTest (which reads them) and the size watch below.
 const tarotActive = ref(false)
