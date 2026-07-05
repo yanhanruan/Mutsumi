@@ -1,0 +1,75 @@
+# Auto-release: on a pushed `vX.Y.Z` tag, build + sign the Windows installer and
+# publish a GitHub Release with the NSIS `.exe` and the updater manifest
+# (`latest.json`). The in-app auto-updater reads that manifest from
+# `releases/latest/download/latest.json`.
+#
+# One-time setup required before the first signed release (see docs/RELEASING.md):
+#   - repo secrets TAURI_SIGNING_PRIVATE_KEY + TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+#   - the matching public key in src-tauri/tauri.conf.json -> plugins.updater.pubkey
+#
+# Release ritual:  npm run release X.Y.Z  ->  commit  ->  git tag -a vX.Y.Z  ->  git push --follow-tags
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write   # create the GitHub Release with the built assets
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # need full tags so the annotated tag message is available
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Read tag metadata
+        id: tag
+        shell: bash
+        run: |
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          # Annotated-tag message becomes the release body AND the updater notes.
+          {
+            echo "notes<<__EOF__"
+            git tag -l --format='%(contents)' "$GITHUB_REF_NAME"
+            echo "__EOF__"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Verify the tag matches the committed version
+        shell: bash
+        run: |
+          conf_version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          if [ "$conf_version" != "${{ steps.tag.outputs.version }}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match tauri.conf.json version v${conf_version}. Run 'npm run release ${{ steps.tag.outputs.version }}' and commit before tagging."
+            exit 1
+          fi
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Mutsumi ${{ github.ref_name }}'
+          releaseBody: ${{ steps.tag.outputs.notes }}
+          releaseDraft: false
+          prerelease: false
+          includeUpdaterJson: true

@@ -1,0 +1,70 @@
+# Releasing Mutsumi
+
+Mutsumi ships as a signed Windows NSIS installer. Releases are automated by the
+GitHub Actions workflow [`.github/workflows/release.yml`](../.github/workflows/release.yml):
+push a `vX.Y.Z` tag and CI builds, signs, and publishes a GitHub Release with
+the installer and the updater manifest (`latest.json`). The running app checks
+that manifest once a day and offers an in-app update.
+
+## One-time setup (before the first signed release)
+
+The auto-updater verifies every download against a signing key, so you must
+generate a keypair once and wire it up. **The private key is a secret — never
+commit it.**
+
+1. **Generate the keypair** (writes a private key file, prints the public key):
+
+   ```bash
+   npm run tauri signer generate -- -w "$HOME/.tauri/mutsumi.key"
+   ```
+
+   You'll set a password when prompted — remember it for step 2.
+
+2. **Add two GitHub repo secrets** (Settings → Secrets and variables → Actions):
+
+   | Secret | Value |
+   | --- | --- |
+   | `TAURI_SIGNING_PRIVATE_KEY` | the full contents of `~/.tauri/mutsumi.key` |
+   | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | the password you chose in step 1 |
+
+3. **Paste the public key** into
+   [`src-tauri/tauri.conf.json`](../src-tauri/tauri.conf.json) →
+   `plugins.updater.pubkey`, replacing the
+   `REPLACE_WITH_MINISIGN_PUBLIC_KEY_FROM_TAURI_SIGNER_GENERATE` placeholder with
+   the public key printed in step 1 (also saved as `~/.tauri/mutsumi.key.pub`).
+   Commit this change.
+
+Until this is done the app still builds and runs; it just can't verify updates,
+and the daily check fails quietly (there is no `latest.json` to fetch yet).
+
+## Cutting a release
+
+The version lives in exactly two files, kept in sync by one script — you never
+hand-edit them, and the About window reads the version at runtime.
+
+```bash
+npm run release 1.5.0                 # writes 1.5.0 into tauri.conf.json + Cargo.toml
+git commit -am "chore(release): v1.5.0"
+git tag -a v1.5.0 -m "What's new:
+- Fixed the flying-mode ↔ music-mode transition
+- Added the in-app auto-updater"
+git push --follow-tags
+```
+
+- The **annotated tag message** becomes the GitHub Release body **and** the
+  release notes shown in the in-app update pop-up. Write it for users.
+- CI **fails fast** if the tag (`v1.5.0`) doesn't match the committed version
+  (`1.5.0`), so a mistagged release can't ship.
+- A lightweight tag (`git tag v1.5.0`) also works, but then the release body is
+  empty — prefer an annotated tag so users see real notes.
+
+## How the in-app updater consumes this
+
+- `plugins.updater.endpoints` points at
+  `https://github.com/yanhanruan/Mutsumi/releases/latest/download/latest.json`,
+  which always resolves to the newest published release.
+- `tauri-action` generates `latest.json` (version, signature, download URL, and
+  `notes` = the release body) and attaches it to the release.
+- The pet window checks once a day (see `src/composables/useUpdateCheck.ts`);
+  the pop-up (`src/components/UpdateWindow.vue`) shows the notes and lets the
+  user install now or snooze 1–30 days.
