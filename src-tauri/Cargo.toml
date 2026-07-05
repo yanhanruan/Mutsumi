@@ -1,6 +1,6 @@
 [package]
 name = "Mutsumi"
-version = "1.1.0"
+version = "1.4.0"
 description = "Mutsumi desktop companion"
 authors = ["yOHO"]
 license = ""
@@ -29,6 +29,8 @@ tauri-plugin-global-shortcut = "2"      # Ctrl+Alt+F toggles manual flying mode
 tauri-plugin-dialog = "2"               # native file-open picker (image attach)
 tauri-plugin-clipboard-manager = "2"    # read pasted clipboard images
 tauri-plugin-opener = "2"               # open the "how to get a key" tutorial in the system browser
+tauri-plugin-updater = "2"              # in-app auto-update (checks GitHub Releases latest.json)
+tauri-plugin-process = "2"              # relaunch() after an update installs
 # OS credential store for the user's Qwen/百炼 API key (Windows Credential
 # Manager / macOS Keychain / Linux Secret Service) — never plaintext on disk.
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }

@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "mutsumi",
-  "version": "1.1.0",
+  "version": "1.4.0",
   "identifier": "com.mutsumi.app",
   "build": {
     "frontendDist": "../dist",
@@ -38,6 +38,17 @@
           "$DOCUMENT/**",
           "$HOME/**"
         ]
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/yanhanruan/Mutsumi/releases/latest/download/latest.json"
+      ],
+      "pubkey": "REPLACE_WITH_MINISIGN_PUBLIC_KEY_FROM_TAURI_SIGNER_GENERATE",
+      "windows": {
+        "installMode": "passive"
       }
     }
   },
