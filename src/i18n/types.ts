@@ -47,6 +47,31 @@ export interface Translations {
   aboutDevRolePromo:         string
   aboutDevPromo:             string
   aboutCopyrightMit:         string
+  /** "Check for updates" button in the About window. */
+  aboutCheckUpdates:         string
+  /** "Last checked" label preceding the last update-check timestamp. */
+  aboutLastChecked:          string
+  /** Shown in place of a timestamp when the app has never checked. */
+  aboutLastCheckedNever:     string
+
+  // ── Update pop-up (auto-update) ─────────────────────────────────
+  updateWindowTitle:          string
+  updateAvailableTitle:       string
+  updateCurrentVersionLabel:  string
+  updateNewVersionLabel:      string
+  updateReleaseNotesTitle:    string
+  updateNowBtn:               string
+  updateRemindLaterBtn:       string
+  updateSnoozeDaysLabel:      string
+  /** Reminder that the About page can update anytime, shown after snoozing. */
+  updateSnoozeHint:           string
+  /** Download progress line; contains a `{percent}` placeholder. */
+  updateDownloading:          string
+  updateInstalling:           string
+  updateUpToDate:             string
+  updateCheckFailed:          string
+  /** Settings toggle: check for updates automatically. */
+  updateAutoCheck:            string
 
   // ── Character size (Task 3) ─────────────────────────────────────
   characterSize:   string

@@ -52,6 +52,9 @@ export const en: Translations = {
   aboutDevRolePromo:         'Outreach',
   aboutDevPromo:             '可爱睦子米-_',
   aboutCopyright:            'Copyright',
+  aboutCheckUpdates:         'Check for updates',
+  aboutLastChecked:          'Last checked',
+  aboutLastCheckedNever:     'Never',
   aboutLatestReleaseLead:    'Download the latest version from',
   aboutSourceCodeLead:       'Source code is available on',
   aboutLatestReleaseLink:    'GitHub Releases',
@@ -59,6 +62,22 @@ export const en: Translations = {
   aboutDeveloperYoho:        'yOHO',
   aboutDeveloperMutsumiHead: '-睦头人おれ.',
   aboutCopyrightMit:         'MIT License',
+
+  // ── Update pop-up (auto-update) ───────────────────────────────────
+  updateWindowTitle:          'update',
+  updateAvailableTitle:       'A new version is available',
+  updateCurrentVersionLabel:  'Current',
+  updateNewVersionLabel:      'New',
+  updateReleaseNotesTitle:    "What's new",
+  updateNowBtn:               'Update now',
+  updateRemindLaterBtn:       'Remind me later',
+  updateSnoozeDaysLabel:      "Don't remind me for (days)",
+  updateSnoozeHint:           'You can update anytime from the About page — just open it and visit the official release page.',
+  updateDownloading:          'Downloading… {percent}%',
+  updateInstalling:           'Installing…',
+  updateUpToDate:             "You're on the latest version.",
+  updateCheckFailed:          "Couldn't check for updates. Please try again later.",
+  updateAutoCheck:            'Check for updates automatically',
 
   // ── Character size ────────────────────────────────────────────────
   characterSize:   'Character Size',
