@@ -97,7 +97,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          prev=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)
+          prev=$(git describe --tags --exclude staging --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)
           echo "previous tag: ${prev:-<none - first release>}"
           gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
             -f tag_name="$GITHUB_REF_NAME" \
