@@ -68,8 +68,16 @@ export interface Translations {
   /** Download progress line; contains a `{percent}` placeholder. */
   updateDownloading:          string
   updateInstalling:           string
+  /** Shown after a successful install, just before the app relaunches. */
+  updateInstalledRestarting:  string
   updateUpToDate:             string
   updateCheckFailed:          string
+  /** Retry button on the failed view (re-check or re-offer the install). */
+  updateRetryBtn:             string
+  /** Status word appended to About's "last checked" when the check succeeded. */
+  aboutCheckStatusSuccess:    string
+  /** Status word appended to About's "last checked" when the check failed. */
+  aboutCheckStatusError:      string
   /** Settings toggle: check for updates automatically. */
   updateAutoCheck:            string
 

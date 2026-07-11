@@ -59,6 +59,12 @@ export interface AppConfig {
    * `null` when not snoozed. Set when the user defers an available update.
    */
   updateSnoozeUntil: string | null
+  /**
+   * Outcome of the last update check: `'success'` (reached the server, whether
+   * or not an update was found) or `'error'` (network/updater failure), or
+   * `null` if never checked. Shown in the About window next to the timestamp.
+   */
+  updateLastCheckStatus: 'success' | 'error' | null
 }
 
 // ── Flying screensaver bounds ────────────────────────────────────────
@@ -114,6 +120,7 @@ const DEFAULT_CONFIG: AppConfig = {
   updateAutoCheck:   true,      // check for new versions once a day by default
   updateLastCheck:   null,      // never checked yet
   updateSnoozeUntil: null,      // not snoozed
+  updateLastCheckStatus: null,  // no check recorded yet
 }
 
 function loadConfig(): AppConfig {

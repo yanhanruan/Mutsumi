@@ -71,12 +71,16 @@ export const ja: Translations = {
   updateReleaseNotesTitle:    '更新内容',
   updateNowBtn:               '今すぐ更新',
   updateRemindLaterBtn:       '後で通知',
-  updateSnoozeDaysLabel:      '通知しない日数（日）',
+  updateSnoozeDaysLabel:      '通知しない日数（1–30日）',
   updateSnoozeHint:           '「このアプリについて」ページからいつでも公式リリースページを開いて更新できます。',
   updateDownloading:          'ダウンロード中… {percent}%',
   updateInstalling:           'インストール中…',
+  updateInstalledRestarting:  '更新完了！再起動しています…',
   updateUpToDate:             '最新バージョンです。',
   updateCheckFailed:          'アップデートを確認できませんでした。しばらくしてからもう一度お試しください。',
+  updateRetryBtn:             '再試行',
+  aboutCheckStatusSuccess:    '成功',
+  aboutCheckStatusError:      '失敗',
   updateAutoCheck:            'アップデートを自動で確認',
 
   // ── Character size ────────────────────────────────────────────────

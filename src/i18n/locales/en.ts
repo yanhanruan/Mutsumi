@@ -71,12 +71,16 @@ export const en: Translations = {
   updateReleaseNotesTitle:    "What's new",
   updateNowBtn:               'Update now',
   updateRemindLaterBtn:       'Remind me later',
-  updateSnoozeDaysLabel:      "Don't remind me for (days)",
+  updateSnoozeDaysLabel:      "Don't remind me for (1–30 days)",
   updateSnoozeHint:           'You can update anytime from the About page — just open it and visit the official release page.',
   updateDownloading:          'Downloading… {percent}%',
   updateInstalling:           'Installing…',
+  updateInstalledRestarting:  'Updated! Restarting…',
   updateUpToDate:             "You're on the latest version.",
   updateCheckFailed:          "Couldn't check for updates. Please try again later.",
+  updateRetryBtn:             'Retry',
+  aboutCheckStatusSuccess:    'ok',
+  aboutCheckStatusError:      'failed',
   updateAutoCheck:            'Check for updates automatically',
 
   // ── Character size ────────────────────────────────────────────────

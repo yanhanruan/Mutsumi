@@ -2,12 +2,18 @@
 /**
  * UpdateWindow — the "update available" pop-up (?window=update).
  *
+ * All lifecycle logic lives in the pure state machine
+ * (src/config/updateFlow.ts); this component only dispatches events into it
+ * and renders the resulting phase. That split is what guarantees ordering
+ * safety (e.g. an interrupted download can never display as installed) — see
+ * updateFlow.test.ts for the full failure-mode table.
+ *
  * Two entry paths (see update_window.rs):
  *   • Daily check: the pet window pre-fetched the update and stashed display
  *     metadata; we read it via get_pending_update and render immediately — no
  *     network re-check here.
  *   • Manual "Check for updates" (from About): no metadata, so we run check()
- *     ourselves and show either the update or an "up to date" message.
+ *     ourselves and record the outcome (About shows "last checked" + status).
  *
  * The updater's Update object can't cross windows, so when the user actually
  * installs we call check() once more to obtain a fresh object to download.
@@ -16,6 +22,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { getVersion } from '@tauri-apps/api/app'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { LogicalSize } from '@tauri-apps/api/dpi'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { check } from '@tauri-apps/plugin-updater'
 import { relaunch } from '@tauri-apps/plugin-process'
@@ -27,29 +34,50 @@ import {
   clampSnoozeDays,
   computeSnoozeUntil,
 } from '../config/updatePolicy'
+import {
+  INITIAL_UPDATE_FLOW,
+  transition,
+  type UpdateFlowEvent,
+  type UpdateFlowState,
+  type UpdatePhase,
+} from '../config/updateFlow'
 
 interface PendingUpdate {
   version: string
   notes: string
 }
 
-type View = 'checking' | 'available' | 'up-to-date' | 'downloading' | 'installing' | 'error'
-
 const { t } = useI18n()
 const { config, updateConfig } = useAppConfig()
 const win = getCurrentWindow()
 
-const view = ref<View>('checking')
-const currentVersion = ref('')
-const newVersion = ref('')
-const notes = ref('')
-const percent = ref(0)
+// ── State machine ────────────────────────────────────────────────────
+
+const flow = ref<UpdateFlowState>({ ...INITIAL_UPDATE_FLOW })
+
+function dispatch(event: UpdateFlowEvent): void {
+  flow.value = transition(flow.value, event)
+}
+
+const currentVersion = ref('') // installed version — context, not flow state
 const snoozeDays = ref(SNOOZE_MIN_DAYS)
 
 let unlistenPending: UnlistenFn | null = null
 
+/** Record the outcome of a check so the About window can show it. */
+function recordCheck(status: 'success' | 'error'): Promise<void> {
+  return updateConfig({
+    updateLastCheck: new Date().toISOString(),
+    updateLastCheckStatus: status,
+  })
+}
+
+function errMsg(e: unknown): string {
+  return e instanceof Error ? e.message : String(e ?? '')
+}
+
 /** Reject if `p` doesn't settle within `ms`, so a stalled network check surfaces
- *  as the error view instead of spinning forever. */
+ *  as the failed view instead of spinning forever. */
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   return Promise.race([
     p,
@@ -58,6 +86,104 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 }
 const CHECK_TIMEOUT_MS = 20000
 
+// ── Window sizing ────────────────────────────────────────────────────
+// The window is created compact (400×250, see update_window.rs); grow it only
+// for the content-heavy "available" view so the one-line states aren't
+// swimming in empty space.
+
+const SIZE_FULL: [number, number] = [440, 520]
+const SIZE_FAILED: [number, number] = [420, 320]
+const SIZE_COMPACT: [number, number] = [400, 250]
+
+function sizeForPhase(p: UpdatePhase): [number, number] {
+  if (p === 'available') return SIZE_FULL
+  if (p === 'failed') return SIZE_FAILED
+  return SIZE_COMPACT
+}
+
+let lastSize: [number, number] = SIZE_COMPACT
+async function applyWindowSize(p: UpdatePhase): Promise<void> {
+  const [w, h] = sizeForPhase(p)
+  if (w === lastSize[0] && h === lastSize[1]) return // no-op if unchanged
+  lastSize = [w, h]
+  try {
+    await win.setSize(new LogicalSize(w, h))
+    await win.center()
+  } catch { /* geometry is best-effort */ }
+}
+
+watch(() => flow.value.phase, p => { void applyWindowSize(p) })
+
+// ── Dev mock harness (dev builds only) ───────────────────────────────
+// Guarded by import.meta.env.DEV, so all of this is dead-code-eliminated from
+// production bundles. To force a scenario, run in ANY window's devtools (all
+// windows share the same origin/localStorage):
+//
+//   localStorage.setItem('mutsumi-update-mock', 'available')
+//
+// values: 'available' | 'available:install-fail' | 'uptodate' | 'error'
+// then reopen the pop-up (About → "Check for updates"). Remove the key to
+// restore the real updater:
+//
+//   localStorage.removeItem('mutsumi-update-mock')
+
+const MOCK_KEY = 'mutsumi-update-mock'
+
+function devMockMode(): string | null {
+  return import.meta.env.DEV ? localStorage.getItem(MOCK_KEY) : null
+}
+
+/** Simulate the check outcome. Returns true when a mock scenario is active. */
+function devMockCheck(): boolean {
+  const mode = devMockMode()
+  if (!mode) return false
+  if (mode.startsWith('available')) {
+    void recordCheck('success')
+    dispatch({
+      type: 'CHECK_FOUND',
+      version: '9.9.9-mock',
+      notes: [
+        "What's new in 9.9.9-mock (dev mock)",
+        '',
+        '- In-app auto-update: get notified when a new version is out',
+        '- Fixed the flying-mode ↔ music-mode transition',
+        '- Various performance and stability improvements',
+      ].join('\n'),
+    })
+  } else if (mode === 'uptodate') {
+    void recordCheck('success')
+    dispatch({ type: 'CHECK_NONE' })
+  } else {
+    void recordCheck('error')
+    dispatch({ type: 'CHECK_FAIL', detail: `mock: simulated check failure (${MOCK_KEY}=${mode})` })
+  }
+  return true
+}
+
+/** Simulate the download/install flow. Returns true when mocking is active. */
+function devMockInstall(): boolean {
+  const mode = devMockMode()
+  if (!mode) return false
+  const failAt = mode === 'available:install-fail' ? 56 : Infinity
+  const timer = setInterval(() => {
+    const next = flow.value.percent + 8
+    if (next >= failAt) {
+      clearInterval(timer)
+      dispatch({ type: 'FAIL', detail: `mock: download interrupted at ${flow.value.percent}% (simulated)` })
+      return
+    }
+    if (next >= 100) {
+      clearInterval(timer)
+      dispatch({ type: 'DOWNLOAD_DONE' })
+      setTimeout(() => dispatch({ type: 'INSTALL_DONE' }), 900) // no relaunch in mock
+      return
+    }
+    dispatch({ type: 'PROGRESS', percent: next })
+  }, 160)
+  return true
+}
+
+// ── Locale ───────────────────────────────────────────────────────────
 // Keep this window localised like every other (manual choice wins, else system).
 watch(
   () => config.value.language,
@@ -66,49 +192,56 @@ watch(
 )
 
 const downloadingLabel = computed(() =>
-  t.value.updateDownloading.replace('{percent}', String(percent.value)),
+  t.value.updateDownloading.replace('{percent}', String(flow.value.percent)),
 )
+
+// ── Actions ──────────────────────────────────────────────────────────
 
 /** Populate the view from stashed metadata, or check() when there is none. */
 async function load(): Promise<void> {
-  view.value = 'checking'
+  dispatch({ type: 'CHECK_START' })
   try {
     currentVersion.value = await getVersion()
   } catch {
     /* getVersion should not fail; leave blank if it does */
   }
 
+  if (devMockCheck()) return
+
   const pending = await invoke<PendingUpdate | null>('get_pending_update')
   if (pending) {
-    newVersion.value = pending.version
-    notes.value = pending.notes
-    view.value = 'available'
+    // Pre-fetched by the daily check, which already recorded the timestamp.
+    dispatch({ type: 'CHECK_FOUND', version: pending.version, notes: pending.notes })
     return
   }
 
-  // Manual path — no pre-fetched update, so check ourselves.
+  // Manual path — no pre-fetched update, so check ourselves and record it.
   try {
     const update = await withTimeout(check(), CHECK_TIMEOUT_MS)
+    await recordCheck('success')
     if (update) {
-      newVersion.value = update.version
-      notes.value = update.body ?? ''
-      view.value = 'available'
+      dispatch({ type: 'CHECK_FOUND', version: update.version, notes: update.body ?? '' })
     } else {
-      view.value = 'up-to-date'
+      dispatch({ type: 'CHECK_NONE' })
     }
-  } catch {
-    view.value = 'error'
+  } catch (e) {
+    await recordCheck('error')
+    dispatch({ type: 'CHECK_FAIL', detail: errMsg(e) })
   }
 }
 
 async function updateNow(): Promise<void> {
-  view.value = 'downloading'
-  percent.value = 0
+  dispatch({ type: 'INSTALL_START' })
+
+  if (devMockInstall()) return
+
   try {
     const update = await withTimeout(check(), CHECK_TIMEOUT_MS)
     if (!update) {
-      // The release vanished between the check and now — nothing to install.
-      view.value = 'up-to-date'
+      // The release vanished between the offer and the install click. Surface
+      // it as an install failure (with the reason) rather than silently
+      // flipping to "up to date" mid-download.
+      dispatch({ type: 'FAIL', detail: 'the release is no longer available on the server' })
       return
     }
 
@@ -122,19 +255,30 @@ async function updateNow(): Promise<void> {
           break
         case 'Progress':
           downloaded += event.data.chunkLength
-          percent.value = total > 0 ? Math.min(100, Math.round((downloaded / total) * 100)) : 0
+          dispatch({
+            type: 'PROGRESS',
+            percent: total > 0 ? (downloaded / total) * 100 : 0,
+          })
           break
         case 'Finished':
-          percent.value = 100
+          dispatch({ type: 'DOWNLOAD_DONE' })
           break
       }
     })
 
-    view.value = 'installing'
+    dispatch({ type: 'INSTALL_DONE' })
     await relaunch()
-  } catch {
-    view.value = 'error'
+  } catch (e) {
+    dispatch({ type: 'FAIL', detail: errMsg(e) })
   }
+}
+
+/** Retry after a failure: a failed check re-checks; a failed download/install
+ *  returns to the offer so "Update now" can be pressed again. */
+function retry(): void {
+  const during = flow.value.failedDuring
+  dispatch({ type: 'RETRY' })
+  if (during === 'check') void load()
 }
 
 async function remindLater(): Promise<void> {
@@ -144,8 +288,13 @@ async function remindLater(): Promise<void> {
 }
 
 function onSnoozeInput(e: Event): void {
-  const raw = Number((e.target as HTMLInputElement).value)
-  snoozeDays.value = clampSnoozeDays(raw)
+  const el = e.target as HTMLInputElement
+  const clamped = clampSnoozeDays(Number(el.value))
+  snoozeDays.value = clamped
+  // Force the field to show the clamped value when the typed number is out of
+  // range. Vue's diff skips the DOM patch when the clamped number is unchanged
+  // (e.g. 300 and 30 both clamp to 30), which is how "309999" appeared to stick.
+  if (Number(el.value) !== clamped) el.value = String(clamped)
 }
 
 function closeWindow(): void {
@@ -154,6 +303,7 @@ function closeWindow(): void {
 
 onMounted(async () => {
   await load()
+  await applyWindowSize(flow.value.phase) // size to whatever load() resolved to
   // If the window is already open and the pet window refreshes the metadata,
   // re-read it (open_update_window emits this after re-stashing).
   unlistenPending = await listen('pending-update-changed', () => {
@@ -191,30 +341,38 @@ onUnmounted(() => {
 
     <main class="content">
       <!-- Checking ------------------------------------------------------->
-      <section v-if="view === 'checking'" class="center-state">
+      <section v-if="flow.phase === 'checking'" class="center-state">
         <div class="spinner" />
       </section>
 
       <!-- Up to date ----------------------------------------------------->
-      <section v-else-if="view === 'up-to-date'" class="center-state">
-        <div class="big-mark">✓</div>
+      <section v-else-if="flow.phase === 'notAvailable'" class="center-state">
+        <div class="state-emoji">🌿</div>
         <p class="state-text">{{ t.updateUpToDate }}</p>
       </section>
 
-      <!-- Error ---------------------------------------------------------->
-      <section v-else-if="view === 'error'" class="center-state">
-        <div class="big-mark warn">!</div>
+      <!-- Failed (with the underlying reason + retry) --------------------->
+      <section v-else-if="flow.phase === 'failed'" class="center-state">
+        <div class="state-emoji">🥺</div>
         <p class="state-text">{{ t.updateCheckFailed }}</p>
+        <p v-if="flow.errorDetail" class="error-detail">{{ flow.errorDetail }}</p>
+        <button class="btn btn-ghost" @click="retry">{{ t.updateRetryBtn }}</button>
+      </section>
+
+      <!-- Installed — brief, right before relaunch ----------------------->
+      <section v-else-if="flow.phase === 'installed'" class="center-state">
+        <div class="state-emoji">🎉</div>
+        <p class="state-text">{{ t.updateInstalledRestarting }}</p>
       </section>
 
       <!-- Downloading / installing --------------------------------------->
-      <section v-else-if="view === 'downloading' || view === 'installing'" class="center-state">
+      <section v-else-if="flow.phase === 'downloading' || flow.phase === 'installing'" class="center-state">
         <div class="progress-wrap">
           <div class="progress-track">
-            <div class="progress-fill" :style="{ width: percent + '%' }" />
+            <div class="progress-fill" :style="{ width: flow.percent + '%' }" />
           </div>
           <p class="state-text">
-            {{ view === 'installing' ? t.updateInstalling : downloadingLabel }}
+            {{ flow.phase === 'installing' ? t.updateInstalling : downloadingLabel }}
           </p>
         </div>
       </section>
@@ -228,14 +386,14 @@ onUnmounted(() => {
             <p class="version-line">
               <span class="v-old">{{ t.updateCurrentVersionLabel }} v{{ currentVersion }}</span>
               <span class="v-arrow">→</span>
-              <span class="v-new">{{ t.updateNewVersionLabel }} v{{ newVersion }}</span>
+              <span class="v-new">{{ t.updateNewVersionLabel }} v{{ flow.version }}</span>
             </p>
           </div>
         </section>
 
         <section class="card notes-card">
           <h2 class="card-title">{{ t.updateReleaseNotesTitle }}</h2>
-          <pre class="notes">{{ notes }}</pre>
+          <pre class="notes">{{ flow.notes }}</pre>
         </section>
 
         <section class="actions">
@@ -479,25 +637,28 @@ onUnmounted(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 14px;
+  gap: 12px;
   text-align: center;
-  padding: 24px;
+  padding: 20px;
 }
-.state-text { margin: 0; font-size: 13px; line-height: 1.5; color: #2c4e2c; }
+.state-text { margin: 0; font-size: 13.5px; line-height: 1.5; color: #2c4e2c; font-weight: 600; }
 
-.big-mark {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 52px;
-  height: 52px;
-  border-radius: 50%;
-  font-size: 26px;
-  font-weight: 700;
-  color: white;
-  background: linear-gradient(135deg, #4c9a6f, #327a52);
+.state-emoji {
+  font-size: 46px;
+  line-height: 1;
+  filter: drop-shadow(0 2px 6px rgba(50, 90, 50, 0.18));
+  animation: pop 260ms cubic-bezier(0.34, 1.56, 0.64, 1);
 }
-.big-mark.warn { background: linear-gradient(135deg, #d8a23c, #c67f2e); }
+@keyframes pop { from { transform: scale(0.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+.error-detail {
+  margin: 0;
+  max-width: 320px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: rgba(120, 70, 50, 0.72);
+  word-break: break-word;
+}
 
 .progress-wrap { width: 100%; max-width: 300px; display: flex; flex-direction: column; gap: 10px; }
 .progress-track {

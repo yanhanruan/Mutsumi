@@ -23,7 +23,7 @@ function makeCtx(over: Partial<UpdateCheckContext> = {}): UpdateCheckContext {
     snoozeUntilMs: null,
     check: vi.fn(async (): Promise<UpdateInfo | null> => null),
     openUpdateWindow: vi.fn(async () => {}),
-    markChecked: vi.fn(async () => {}),
+    markChecked: vi.fn(async (_iso: string, _status: 'success' | 'error') => {}),
     ...over,
   }
 }
@@ -55,10 +55,10 @@ describe('runUpdateCheck()', () => {
     expect(ctx.check).toHaveBeenCalledOnce()
   })
 
-  it('records the check but opens nothing when already up to date', async () => {
+  it('records success but opens nothing when already up to date', async () => {
     const ctx = makeCtx({ check: vi.fn(async () => null) })
     expect(await runUpdateCheck(ctx)).toBe('checked-none')
-    expect(ctx.markChecked).toHaveBeenCalledOnce()
+    expect(ctx.markChecked).toHaveBeenCalledWith(expect.any(String), 'success')
     expect(ctx.openUpdateWindow).not.toHaveBeenCalled()
   })
 
@@ -67,7 +67,7 @@ describe('runUpdateCheck()', () => {
       check: vi.fn(async () => ({ version: '1.5.0', body: 'Fixed things' })),
     })
     expect(await runUpdateCheck(ctx)).toBe('checked-available')
-    expect(ctx.markChecked).toHaveBeenCalledOnce()
+    expect(ctx.markChecked).toHaveBeenCalledWith(expect.any(String), 'success')
     expect(ctx.openUpdateWindow).toHaveBeenCalledWith('1.5.0', 'Fixed things')
   })
 
@@ -77,14 +77,14 @@ describe('runUpdateCheck()', () => {
     expect(ctx.openUpdateWindow).toHaveBeenCalledWith('1.5.0', '')
   })
 
-  it('reports an error and leaves lastCheck untouched when the check throws', async () => {
+  it('records an error status (and opens nothing) when the check throws', async () => {
     const ctx = makeCtx({
       check: vi.fn(async () => {
         throw new Error('offline')
       }),
     })
     expect(await runUpdateCheck(ctx)).toBe('error')
-    expect(ctx.markChecked).not.toHaveBeenCalled() // so the next tick retries
+    expect(ctx.markChecked).toHaveBeenCalledWith(expect.any(String), 'error')
     expect(ctx.openUpdateWindow).not.toHaveBeenCalled()
   })
 })

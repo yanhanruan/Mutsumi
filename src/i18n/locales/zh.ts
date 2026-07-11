@@ -71,12 +71,16 @@ export const zh: Translations = {
   updateReleaseNotesTitle:    '更新内容',
   updateNowBtn:               '立即更新',
   updateRemindLaterBtn:       '稍后提醒',
-  updateSnoozeDaysLabel:      '暂不提醒（天）',
+  updateSnoozeDaysLabel:      '暂不提醒（1–30天）',
   updateSnoozeHint:           '你随时可以在「关于」页面打开官方发布页进行更新。',
   updateDownloading:          '下载中… {percent}%',
   updateInstalling:           '正在安装…',
+  updateInstalledRestarting:  '更新完成！正在重启…',
   updateUpToDate:             '已是最新版本。',
   updateCheckFailed:          '检查更新失败，请稍后再试。',
+  updateRetryBtn:             '重试',
+  aboutCheckStatusSuccess:    '成功',
+  aboutCheckStatusError:      '失败',
   updateAutoCheck:            '自动检查更新',
 
   // ── Character size ────────────────────────────────────────────────

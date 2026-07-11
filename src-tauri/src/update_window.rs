@@ -70,7 +70,10 @@ pub async fn open_update_window<R: Runtime>(
         WebviewUrl::App("index.html?window=update".into()),
     )
     .title("Mutsumi · Update")
-    .inner_size(440.0, 520.0)
+    // Compact by default (checking / up-to-date / error states). The frontend
+    // grows it to the full size only for the "update available" view, so the
+    // one-line states don't open in a cavernous window.
+    .inner_size(400.0, 250.0)
     .resizable(false)
     .decorations(false)
     .transparent(true)

@@ -22,7 +22,7 @@ const sourceUrl = 'https://github.com/yanhanruan/Mutsumi'
 // so About is always correct after a release without editing this file.
 const appVersion = ref('')
 
-const lastChecked = computed(() => {
+const lastCheckedTime = computed(() => {
   const iso = config.value.updateLastCheck
   if (!iso) return t.value.aboutLastCheckedNever
   const ms = Date.parse(iso)
@@ -32,6 +32,18 @@ const lastChecked = computed(() => {
   } catch {
     return new Date(ms).toLocaleString()
   }
+})
+
+// Success/failure of that last check, as a short coloured label (or none when
+// never checked).
+const lastCheckStatus = computed(() => {
+  if (!config.value.updateLastCheck) return null
+  return config.value.updateLastCheckStatus
+})
+const lastCheckStatusLabel = computed(() => {
+  if (lastCheckStatus.value === 'success') return t.value.aboutCheckStatusSuccess
+  if (lastCheckStatus.value === 'error') return t.value.aboutCheckStatusError
+  return ''
 })
 
 watch(
@@ -96,7 +108,14 @@ function closeWindow() { win.close() }
           <p class="value"><span class="strong">v{{ appVersion }}</span></p>
           <button class="check-btn" @click="checkForUpdates">{{ t.aboutCheckUpdates }}</button>
         </div>
-        <p class="last-checked">{{ t.aboutLastChecked }}: {{ lastChecked }}</p>
+        <p class="last-checked">
+          {{ t.aboutLastChecked }}: {{ lastCheckedTime }}
+          <span
+            v-if="lastCheckStatusLabel"
+            class="check-status"
+            :class="lastCheckStatus === 'error' ? 'is-error' : 'is-ok'"
+          >{{ lastCheckStatusLabel }}</span>
+        </p>
       </section>
 
       <section class="card">
@@ -411,6 +430,24 @@ function closeWindow() { win.close() }
   margin: 7px 0 0;
   font-size: 11px;
   color: rgba(45, 85, 45, 0.60);
+}
+
+.check-status {
+  margin-left: 4px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.check-status.is-ok {
+  color: #1f6b3f;
+  background: rgba(76, 154, 111, 0.16);
+}
+.check-status.is-error {
+  color: #b4472e;
+  background: rgba(200, 90, 60, 0.16);
 }
 
 .empty {

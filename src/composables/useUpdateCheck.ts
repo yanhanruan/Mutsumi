@@ -35,7 +35,7 @@ export interface UpdateCheckContext {
   snoozeUntilMs: number | null
   check: () => Promise<UpdateInfo | null>
   openUpdateWindow: (version: string, notes: string) => Promise<void>
-  markChecked: (nowIso: string) => Promise<void>
+  markChecked: (nowIso: string, status: 'success' | 'error') => Promise<void>
 }
 
 /** What a single evaluation decided — surfaced for tests and logging. */
@@ -49,23 +49,28 @@ export type UpdateCheckOutcome =
 
 /**
  * Pure decision + side-effect orchestrator. Gates on auto-check / snooze /
- * throttle, then (if the gate passes) queries the updater. `markChecked` is only
- * recorded on a *successful* query — a network error leaves `updateLastCheck`
- * untouched so the next tick can retry rather than going quiet for a full day.
+ * throttle, then (if the gate passes) queries the updater. Every completed
+ * attempt is recorded via `markChecked` with its outcome ('success' once the
+ * server was reached, 'error' on failure) so the About window can show when we
+ * last checked and whether it worked. Recording an error also advances the
+ * daily throttle; the manual "Check for updates" button (which bypasses the
+ * throttle) is the retry path for a transient failure.
  */
 export async function runUpdateCheck(ctx: UpdateCheckContext): Promise<UpdateCheckOutcome> {
   if (!ctx.autoCheck) return 'skipped-disabled'
   if (isSnoozed(ctx.now, ctx.snoozeUntilMs)) return 'skipped-snoozed'
   if (!shouldCheckNow(ctx.now, ctx.lastCheckMs)) return 'skipped-throttled'
 
+  const nowIso = new Date(ctx.now).toISOString()
   let update: UpdateInfo | null
   try {
     update = await ctx.check()
   } catch {
-    return 'error' // leave lastCheck unchanged → retry on the next tick
+    await ctx.markChecked(nowIso, 'error')
+    return 'error'
   }
 
-  await ctx.markChecked(new Date(ctx.now).toISOString())
+  await ctx.markChecked(nowIso, 'success')
   if (!update) return 'checked-none'
 
   await ctx.openUpdateWindow(update.version, update.body ?? '')
@@ -102,7 +107,8 @@ export function useUpdateCheck() {
         check: () => check(),
         openUpdateWindow: (version, notes) =>
           invoke('open_update_window', { version, notes }),
-        markChecked: (iso) => updateConfig({ updateLastCheck: iso }),
+        markChecked: (iso, status) =>
+          updateConfig({ updateLastCheck: iso, updateLastCheckStatus: status }),
       })
     } finally {
       running = false
