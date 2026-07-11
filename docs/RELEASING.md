@@ -2,9 +2,12 @@
 
 Mutsumi ships as a signed Windows NSIS installer. Releases are automated by the
 GitHub Actions workflow [`.github/workflows/release.yml`](../.github/workflows/release.yml):
-push a `vX.Y.Z` tag and CI builds, signs, and publishes a GitHub Release with
-the installer and the updater manifest (`latest.json`). The running app checks
-that manifest once a day and offers an in-app update.
+push a `vX.Y.Z` tag and CI runs the tests, builds, signs, and creates a **draft**
+GitHub Release with the installer and the updater manifest (`latest.json`),
+then verifies the release is complete and internally consistent. You publish it
+manually after the upgrade smoke test — see the release gate below and
+[`TESTING-UPDATES.md`](TESTING-UPDATES.md). Once published, the running app
+checks the manifest once a day and offers an in-app update.
 
 ## One-time setup (before the first signed release)
 
@@ -37,7 +40,7 @@ commit it.**
 Until this is done the app still builds and runs; it just can't verify updates,
 and the daily check fails quietly (there is no `latest.json` to fetch yet).
 
-## Cutting a release
+## Cutting a release (gated)
 
 The version lives in exactly two files, kept in sync by one script — you never
 hand-edit them, and the About window reads the version at runtime.
@@ -57,6 +60,33 @@ git push --follow-tags
   (`1.5.0`), so a mistagged release can't ship.
 - A lightweight tag (`git tag v1.5.0`) also works, but then the release body is
   empty — prefer an annotated tag so users see real notes.
+
+### The release gate
+
+Pushing the tag does **not** publish anything to users. The full gate is:
+
+```text
+tag push
+  → CI: unit tests
+  → CI: build + sign
+  → CI: create DRAFT release (invisible to the updater endpoint)
+  → CI: verify assets + latest.json contract (scripts/verify-release-assets.mjs)
+  → you: staging upgrade smoke test  (docs/TESTING-UPDATES.md, Layer 4)
+  → you: click "Publish release" on GitHub
+```
+
+- Drafts (and prereleases) never resolve through
+  `releases/latest/download/latest.json`, so an unverified build cannot reach
+  users even though the release object already exists.
+- The verification step blocks the "partial upload" hazard: it fails the
+  workflow unless the draft carries the installer, its `.sig`, and a
+  `latest.json` whose version and download URL match the actually-uploaded
+  assets.
+- For the smoke test (and for exercising failure cases like tampered
+  signatures against a real build), follow
+  [`TESTING-UPDATES.md`](TESTING-UPDATES.md) — it also documents the
+  `staging-release` workflow, which publishes to a rolling `staging`
+  prerelease that production clients can never see.
 
 ## How the in-app updater consumes this
 
