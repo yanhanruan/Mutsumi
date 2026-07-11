@@ -2,7 +2,7 @@
 /**
  * ContextMenu — Vertical Glass Bubble Panel.
  *
- * Five frosted-glass bubbles on the left edge of the window.
+ * Scrollable frosted-glass bubbles on the left edge of the window.
  * Vue <Transition> owns enter/leave timing — no manual closing state,
  * no setTimeout, no !important overrides.
  */
@@ -14,8 +14,8 @@ import { useAppConfig } from '../composables/useAppConfig'
 // ── Types ────────────────────────────────────────────────────────────
 
 export type ContextActionKey = 'pat_head' | 'feed' | 'sleep' | 'fast_learning'
-/** 'tarot', 'chat' and 'hide' are frontend-only actions (no backend command). */
-export type MenuAction = ContextActionKey | 'tarot' | 'sys_state' | 'chat' | 'hide'
+/** 'tarot', 'iching', 'chat' and 'hide' are frontend-only actions (no backend command). */
+export type MenuAction = ContextActionKey | 'tarot' | 'iching' | 'sys_state' | 'chat' | 'hide'
 
 type MenuLabelKey = keyof Translations['contextMenuItems']
 
@@ -38,6 +38,7 @@ const BUBBLE_DEFS: BubbleDef[] = [
   { action: 'sleep',         icon: '💤', sleepingIcon: '☀️', sleepingLabelKey: 'wake' },
   { action: 'fast_learning', icon: '📚' },
   { action: 'tarot',         icon: '🔮' },
+  { action: 'iching',        icon: '☯' },
   { action: 'sys_state',     icon: '🖥️' },
   { action: 'chat',          icon: '💬' },
   { action: 'hide',          icon: '👻' },
@@ -64,10 +65,14 @@ const panelStyle = computed(() => {
 
 const visible       = ref(false)
 const hoveredAction = ref<MenuAction | null>(null)
+const panelRef      = ref<HTMLElement | null>(null)
+const floatingTip   = ref<{ label: string; top: number; left: number } | null>(null)
+const isScrolling   = ref(false)
 // When closing because a bubble was clicked, skip the leave transition: the
 // fade-out would otherwise play *after* a tarot-triggered window move and
 // appear as ghost bubbles at the new window centre.
 const skipLeave     = ref(false)
+let scrollTimer: ReturnType<typeof setTimeout> | null = null
 
 const items = computed(() =>
   BUBBLE_DEFS.map(b => {
@@ -95,9 +100,48 @@ function open(_x = 0, _y = 0) {
 function close() {
   if (!visible.value) return
   hoveredAction.value = null
+  floatingTip.value = null
+  isScrolling.value = false
+  if (scrollTimer) {
+    clearTimeout(scrollTimer)
+    scrollTimer = null
+  }
   visible.value = false
   document.removeEventListener('mousedown', onDocumentClick, true)
   document.removeEventListener('keydown',   onKeyDown,       true)
+}
+
+function showTip(item: { action: MenuAction; label: string }, target: EventTarget | null) {
+  hoveredAction.value = item.action
+  if (!(target instanceof HTMLElement)) return
+  const rect = target.getBoundingClientRect()
+  floatingTip.value = {
+    label: item.label,
+    top: rect.top + rect.height / 2,
+    left: rect.right + 8,
+  }
+}
+
+function hideTip() {
+  hoveredAction.value = null
+  floatingTip.value = null
+}
+
+function refreshTipPosition() {
+  if (!hoveredAction.value || !panelRef.value) return
+  const wrap = panelRef.value.querySelector<HTMLElement>(`[data-action="${hoveredAction.value}"]`)
+  const item = items.value.find(i => i.action === hoveredAction.value)
+  if (wrap && item) showTip(item, wrap)
+}
+
+function onPanelScroll() {
+  isScrolling.value = true
+  refreshTipPosition()
+  if (scrollTimer) clearTimeout(scrollTimer)
+  scrollTimer = setTimeout(() => {
+    isScrolling.value = false
+    scrollTimer = null
+  }, 650)
 }
 
 function onBubbleClick(action: MenuAction) {
@@ -140,14 +184,22 @@ defineExpose({ open, close })
   <!-- duration: enter covers stagger (4×45ms) + transition (300ms) = 480ms → 520ms;
        leave matches transition duration (160ms) → 180ms -->
   <Transition name="panel" :css="!skipLeave" :duration="{ enter: 520, leave: 180 }">
-    <div v-if="visible" class="bubble-panel" :style="panelStyle">
+    <div
+      v-if="visible"
+      ref="panelRef"
+      class="bubble-panel pet-ui-overlay"
+      :class="{ scrolling: isScrolling }"
+      :style="panelStyle"
+      @scroll="onPanelScroll"
+    >
       <div
         v-for="(item, i) in items"
         :key="item.action"
         class="bubble-wrap pet-ui-overlay"
+        :data-action="item.action"
         :style="{ '--i': i }"
-        @mouseenter="hoveredAction = item.action"
-        @mouseleave="hoveredAction = null"
+        @mouseenter="showTip(item, $event.currentTarget)"
+        @mouseleave="hideTip"
       >
         <button
           class="bubble"
@@ -157,12 +209,16 @@ defineExpose({ open, close })
           <span class="bubble-icon">{{ item.icon }}</span>
         </button>
 
-        <Transition name="tip">
-          <div v-if="hoveredAction === item.action" class="bubble-tip">
-            {{ item.label }}
-          </div>
-        </Transition>
       </div>
+    </div>
+  </Transition>
+  <Transition name="tip">
+    <div
+      v-if="floatingTip"
+      class="bubble-tip pet-ui-overlay"
+      :style="{ ...panelStyle, top: `${floatingTip.top}px`, left: `${floatingTip.left}px` }"
+    >
+      {{ floatingTip.label }}
     </div>
   </Transition>
 </template>
@@ -181,8 +237,43 @@ defineExpose({ open, close })
   z-index: 999;
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: calc(var(--bubble-size) * 0.19);    /* ~7 px at large */
-  pointer-events: none;
+  max-height: calc(100vh - calc(var(--bubble-size) * 0.44));
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  padding-block: calc(var(--bubble-size) * 0.11);
+  padding-right: calc(var(--bubble-size) * 0.12);
+  pointer-events: auto;
+  scrollbar-width: none;
+  scrollbar-color: transparent transparent;
+}
+
+.bubble-panel.scrolling {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(119, 153, 119, 0.45) transparent;
+}
+
+.bubble-panel::-webkit-scrollbar {
+  width: 0;
+}
+
+.bubble-panel.scrolling::-webkit-scrollbar {
+  width: 5px;
+}
+
+.bubble-panel::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.bubble-panel::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: transparent;
+}
+
+.bubble-panel.scrolling::-webkit-scrollbar-thumb {
+  background: rgba(119, 153, 119, 0.42);
 }
 
 /* ── Enter ───────────────────────────────────────────────────────── */
@@ -290,22 +381,21 @@ defineExpose({ open, close })
 
 /* ── Tooltip (slides in to the right) ───────────────────────────── */
 .bubble-tip {
-  position: absolute;
-  left: calc(100% + calc(var(--bubble-size) * 0.22));  /* gap = left offset */
-  top: 50%;
+  position: fixed;
   transform: translateY(-50%);
   white-space: nowrap;
   pointer-events: none;
+  z-index: 1000;
 
   background: rgba(236, 246, 236, 0.92);
   backdrop-filter: blur(20px) saturate(150%);
   -webkit-backdrop-filter: blur(20px) saturate(150%);
   border: 1px solid rgba(119, 153, 119, 0.30);
   border-radius: 7px;
-  padding: 3px 9px;
+  padding: 2px 7px;
 
   font-family: system-ui, "Segoe UI", "Noto Sans SC", "Noto Sans JP", sans-serif;
-  font-size: calc(var(--bubble-size) * 0.275);  /* ~10 px at large */
+  font-size: calc(var(--bubble-size) * 0.40);  /* ~8.6 px at large */
   font-weight: 600;
   color: rgba(30, 52, 30, 0.85);
   letter-spacing: 0.01em;

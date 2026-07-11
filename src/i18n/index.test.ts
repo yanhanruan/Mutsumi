@@ -13,6 +13,7 @@ import { detectLocale, setLocale, useI18n, type Locale } from './index'
 import { en } from './locales/en'
 import { zh } from './locales/zh'
 import { ja } from './locales/ja'
+import { HEXAGRAMS, HEXAGRAM_PALACES, PALACE_POSITIONS } from '../config/iching'
 
 // ── Helpers ────────────────────────────────────────────────────────
 
@@ -121,6 +122,7 @@ describe('useI18n', () => {
         expect(t.value.contextResponses[k]).toBeTruthy()
       }
       expect(t.value.contextMenuItems.tarot).toBeTruthy()
+      expect(t.value.contextMenuItems.iching).toBeTruthy()
       expect(t.value.contextMenuItems.chat).toBeTruthy()
       expect(t.value.contextMenuItems.hide).toBeTruthy()
     }
@@ -153,17 +155,79 @@ describe('locale bundle completeness', () => {
     }
   })
 
-  // 9 keys: pat_head, feed, sleep, wake, fast_learning, tarot, chat, sys_state, hide.
-  it('en contextMenuItems has all 9 action labels (incl. sys_state + wake)', () => {
-    expect(Object.keys(en.contextMenuItems)).toHaveLength(9)
+  // 10 keys: pat_head, feed, sleep, wake, fast_learning, tarot, iching, chat, sys_state, hide.
+  it('en contextMenuItems has all 10 action labels (incl. sys_state + wake)', () => {
+    expect(Object.keys(en.contextMenuItems)).toHaveLength(10)
   })
 
-  it('zh contextMenuItems has all 9 action labels (incl. sys_state + wake)', () => {
-    expect(Object.keys(zh.contextMenuItems)).toHaveLength(9)
+  it('zh contextMenuItems has all 10 action labels (incl. sys_state + wake)', () => {
+    expect(Object.keys(zh.contextMenuItems)).toHaveLength(10)
   })
 
-  it('ja contextMenuItems has all 9 action labels (incl. sys_state + wake)', () => {
-    expect(Object.keys(ja.contextMenuItems)).toHaveLength(9)
+  it('ja contextMenuItems has all 10 action labels (incl. sys_state + wake)', () => {
+    expect(Object.keys(ja.contextMenuItems)).toHaveLength(10)
+  })
+
+  it('all locales contain complete I Ching UI and hexagram content', () => {
+    for (const bundle of [en, zh, ja]) {
+      expect(bundle.iching.title).toBeTruthy()
+      expect(bundle.iching.rerollTitle).toBeTruthy()
+      expect(bundle.iching.history).toBeTruthy()
+      expect(bundle.iching.linePositions).toHaveLength(6)
+      expect(Object.keys(bundle.iching.hexagrams)).toHaveLength(64)
+
+      for (const hexagram of HEXAGRAMS) {
+        const text = bundle.iching.hexagrams[hexagram.id]
+        expect(text.name.trim()).toBeTruthy()
+        expect(text.subtitle.trim()).toBeTruthy()
+        expect(text.judgment.trim()).toBeTruthy()
+        expect(text.reflection.trim()).toBeTruthy()
+        expect(text.lines).toHaveLength(6)
+        for (const line of text.lines) {
+          expect(line.trim()).toBeTruthy()
+          expect(line).not.toMatch(/TODO|TBD|translation missing/i)
+        }
+      }
+    }
+  })
+
+  it('Chinese I Ching content uses complete classical hexagram texts', () => {
+    const qian = zh.iching.hexagrams.hexagram01
+    const kun = zh.iching.hexagrams.hexagram02
+
+    expect(qian.judgment).toBe('乾：元亨，利贞。')
+    expect(qian.name).toBe('乾为天')
+    expect(qian.shortName).toBe('乾')
+    expect(zh.iching.hexagrams.hexagram02.name).toBe('坤为地')
+    expect(zh.iching.hexagrams.hexagram11.name).toBe('地天泰')
+    expect(zh.iching.trigramNames.qian).toBe('乾')
+    expect(zh.iching.trigramNames.kun).toBe('坤')
+    expect(qian.lines[0]).toBe('初九：潜龙，勿用。')
+    expect(qian.commentary).toContain('大哉乾元')
+    expect(qian.imageText).toBe('天行健，君子以自强不息。')
+    expect(qian.lineCommentaries).toHaveLength(6)
+    expect(kun.judgment).toContain('利牝马之贞')
+    expect(zh.iching.hexagrams.hexagram09.reflection).toContain('整理细节、约束冲动并累积条件')
+
+    for (const hexagram of Object.values(zh.iching.hexagrams)) {
+      expect(hexagram.reflection.length).toBeGreaterThan(45)
+      expect(hexagram.commentary?.trim()).toBeTruthy()
+      expect(hexagram.imageText?.trim()).toBeTruthy()
+      expect(hexagram.lineCommentaries).toHaveLength(6)
+    }
+  })
+
+  it('all locales contain every Eight-Palace name and position label', () => {
+    for (const bundle of [en, zh, ja]) {
+      expect(Object.keys(bundle.iching.palaceNames)).toHaveLength(8)
+      expect(Object.keys(bundle.iching.palacePositions)).toHaveLength(8)
+      for (const palace of HEXAGRAM_PALACES) {
+        expect(bundle.iching.palaceNames[palace].trim()).toBeTruthy()
+      }
+      for (const position of PALACE_POSITIONS) {
+        expect(bundle.iching.palacePositions[position].trim()).toBeTruthy()
+      }
+    }
   })
 
   it('all locales have character size labels', () => {
