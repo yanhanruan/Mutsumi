@@ -127,7 +127,7 @@ node scripts/fake-update-server.mjs --scenario lower-version
 | --- | --- | --- |
 | `ok` | valid manifest + installer + signature | offer 1.5.0 → download → install → relaunch as 1.5.0 |
 | `lower-version` | manifest advertises 0.0.1 | show "latest version", no offer |
-| `missing-windows` | no windows platform in manifest | show "latest version", no offer |
+| `missing-windows` | no windows platform in manifest | failed view — the plugin errors ("none of the fallback platforms… found"). Correct for a Windows-only app: such a manifest is broken, not "no update"; `verify-release-assets.mjs` blocks it from ever shipping |
 | `installer-404` | download URL returns 404 | failed view with reason; Retry works |
 | `bad-signature` | signature tampered | **reject the install** — failed view, never 🎉 |
 | `malformed-json` | manifest is not JSON | failed view, no crash |

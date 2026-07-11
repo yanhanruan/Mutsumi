@@ -15,7 +15,9 @@
  * Scenarios (what the client MUST do in each case):
  *   ok             valid manifest + installer + signature → client updates
  *   lower-version  manifest advertises 0.0.1              → "up to date", no prompt
- *   missing-windows manifest has no windows platform      → "up to date", no prompt
+ *   missing-windows manifest has no windows platform      → failed view (plugin
+ *                  errors: no matching platform — such a manifest is broken,
+ *                  and verify-release-assets.mjs keeps it from ever shipping)
  *   installer-404  download URL returns 404               → failed view, retry allowed
  *   bad-signature  signature corrupted                    → verification failure, NEVER installs
  *   malformed-json latest.json is not valid JSON          → failed view, no crash
@@ -58,10 +60,16 @@ function manifestBody() {
   if (scenario === 'missing-windows') m.platforms = {}
   if (scenario === 'bad-signature') {
     const win = m.platforms['windows-x86_64']
-    // Flip characters in the middle of the (base64) minisign signature —
-    // the payload downloads fine but verification must reject it.
-    const s = win.signature
-    win.signature = s.slice(0, 40) + 'TAMPERED' + s.slice(48)
+    // The manifest signature is base64 of the WHOLE minisign .sig file, whose
+    // first line is an "untrusted comment" that verification ignores by
+    // design. Tampering must therefore hit line 2 — the actual ed25519
+    // signature. (v1 of this script corrupted bytes 30–36, i.e. the comment,
+    // and the update sailed through: a false PASS of the whole scenario.)
+    const lines = Buffer.from(win.signature, 'base64').toString('utf8').split('\n')
+    const mid = Math.floor(lines[1].length / 2)
+    const flipped = lines[1][mid] === 'A' ? 'B' : 'A'
+    lines[1] = lines[1].slice(0, mid) + flipped + lines[1].slice(mid + 1)
+    win.signature = Buffer.from(lines.join('\n'), 'utf8').toString('base64')
   }
   return JSON.stringify(m, null, 2)
 }
