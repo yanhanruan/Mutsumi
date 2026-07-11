@@ -87,6 +87,30 @@ jobs:
           prerelease: false
           includeUpdaterJson: true
 
+      # Append GitHub's auto-generated changelog (the release UI's "Previous
+      # tag: auto" feature) to the DRAFT body: a "What's Changed" section and a
+      # "Full Changelog: vPREV...vNEW" compare link. Done AFTER tauri-action so
+      # latest.json (the in-app pop-up notes) keeps only the hand-written tag
+      # message, while the GitHub release page gets the full comparison.
+      - name: Append changelog vs previous tag to the release body
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prev=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)
+          echo "previous tag: ${prev:-<none - first release>}"
+          gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
+            -f tag_name="$GITHUB_REF_NAME" \
+            ${prev:+-f previous_tag_name="$prev"} \
+            --jq .body > generated-notes.md
+          release_id=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq ".[] | select(.tag_name==\"$GITHUB_REF_NAME\") | .id")
+          gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" --jq .body > body.md
+          printf '\n\n' >> body.md
+          cat generated-notes.md >> body.md
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" -F body=@body.md
+          echo "changelog appended (previous tag: ${prev:-auto})"
+
       - name: Verify release assets + updater manifest contract
         shell: bash
         env:

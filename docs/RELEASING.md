@@ -56,6 +56,10 @@ git push --follow-tags
 
 - The **annotated tag message** becomes the GitHub Release body **and** the
   release notes shown in the in-app update pop-up. Write it for users.
+- CI then appends an auto-generated changelog to the **GitHub release body
+  only**: a "What's Changed" section plus a `Full Changelog: vPREV...vNEW`
+  compare link against the previous tag. The in-app pop-up notes stay as just
+  your hand-written tag message (`latest.json` is generated before the append).
 - CI **fails fast** if the tag (`v1.5.0`) doesn't match the committed version
   (`1.5.0`), so a mistagged release can't ship.
 - A lightweight tag (`git tag v1.5.0`) also works, but then the release body is
