@@ -1,0 +1,118 @@
+# Auto-release (gated): on a pushed `vX.Y.Z` tag, run the unit tests, build +
+# sign the Windows installer, and create a DRAFT GitHub Release with the NSIS
+# `.exe`, its `.sig`, and the updater manifest (`latest.json`) — then verify
+# asset completeness + the manifest contract (scripts/verify-release-assets.mjs).
+#
+# The draft is NOT visible to the in-app updater (which reads
+# `releases/latest/download/latest.json` — drafts and prereleases never resolve
+# there). Publishing is a deliberate manual step in the GitHub UI, taken after
+# the staging upgrade smoke test passes — see docs/RELEASING.md and
+# docs/TESTING-UPDATES.md.
+#
+# One-time setup required before the first signed release (see docs/RELEASING.md):
+#   - repo secrets TAURI_SIGNING_PRIVATE_KEY + TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+#   - the matching public key in src-tauri/tauri.conf.json -> plugins.updater.pubkey
+#
+# Release ritual:  npm run release X.Y.Z  ->  commit  ->  git tag -a vX.Y.Z
+#   ->  git push --follow-tags  ->  CI drafts + verifies  ->  upgrade smoke test
+#   ->  click "Publish release" on GitHub
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write   # create the GitHub Release with the built assets
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # need full tags so the annotated tag message is available
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Unit tests (gate)
+        run: npm test
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Read tag metadata
+        id: tag
+        shell: bash
+        run: |
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          # Annotated-tag message becomes the release body AND the updater notes.
+          {
+            echo "notes<<__EOF__"
+            git tag -l --format='%(contents)' "$GITHUB_REF_NAME"
+            echo "__EOF__"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Verify the tag matches the committed version
+        shell: bash
+        run: |
+          conf_version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          if [ "$conf_version" != "${{ steps.tag.outputs.version }}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match tauri.conf.json version v${conf_version}. Run 'npm run release ${{ steps.tag.outputs.version }}' and commit before tagging."
+            exit 1
+          fi
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Mutsumi ${{ github.ref_name }}'
+          releaseBody: ${{ steps.tag.outputs.notes }}
+          # Draft-first release gate: invisible to the updater endpoint until a
+          # human clicks "Publish release" after the smoke test passes.
+          releaseDraft: true
+          prerelease: false
+          includeUpdaterJson: true
+
+      # Append GitHub's auto-generated changelog (the release UI's "Previous
+      # tag: auto" feature) to the DRAFT body: a "What's Changed" section and a
+      # "Full Changelog: vPREV...vNEW" compare link. Done AFTER tauri-action so
+      # latest.json (the in-app pop-up notes) keeps only the hand-written tag
+      # message, while the GitHub release page gets the full comparison.
+      - name: Append changelog vs previous tag to the release body
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prev=$(git describe --tags --exclude staging --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)
+          echo "previous tag: ${prev:-<none - first release>}"
+          gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
+            -f tag_name="$GITHUB_REF_NAME" \
+            ${prev:+-f previous_tag_name="$prev"} \
+            --jq .body > generated-notes.md
+          release_id=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq ".[] | select(.tag_name==\"$GITHUB_REF_NAME\") | .id")
+          gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" --jq .body > body.md
+          printf '\n\n' >> body.md
+          cat generated-notes.md >> body.md
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" -F body=@body.md
+          echo "changelog appended (previous tag: ${prev:-auto})"
+
+      - name: Verify release assets + updater manifest contract
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/verify-release-assets.mjs "${{ github.ref_name }}" --expect-version "${{ steps.tag.outputs.version }}"

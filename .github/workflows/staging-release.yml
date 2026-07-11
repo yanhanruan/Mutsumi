@@ -1,0 +1,80 @@
+# Staging release: builds the branch you dispatch it from and publishes it to
+# the rolling `staging` tag as a PRERELEASE, then verifies the release assets
+# and updater-manifest contract (scripts/verify-release-assets.mjs).
+#
+# Safety: `releases/latest/download/…` (the production updater endpoint) never
+# resolves to prereleases, so a staging build can NOT leak to real clients.
+# Clients built with src-tauri/tauri.github-staging.conf.json point at the
+# stable staging URL instead:
+#   https://github.com/yanhanruan/Mutsumi/releases/download/staging/latest.json
+#
+# This is Layer 3 of the update test chain, and the update source for the
+# Layer-4 real-upgrade runbook — see docs/TESTING-UPDATES.md.
+name: staging-release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  staging:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Unit tests (gate)
+        run: npm test
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Read committed version
+        id: ver
+        shell: bash
+        run: echo "version=$(node -p "require('./src-tauri/tauri.conf.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Reset the rolling staging release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete staging --yes --cleanup-tag --repo "$GITHUB_REPOSITORY" || true
+          git push origin :refs/tags/staging || true
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: staging
+          releaseName: 'Staging v${{ steps.ver.outputs.version }} (test build — not for users)'
+          releaseBody: |
+            ⚠️ Rolling staging build for update testing. Not for end users.
+
+            Version: v${{ steps.ver.outputs.version }}
+            Source: `${{ github.ref_name }}` @ ${{ github.sha }}
+
+            See docs/TESTING-UPDATES.md for the upgrade-test runbook.
+          releaseDraft: false
+          prerelease: true
+          includeUpdaterJson: true
+
+      - name: Verify release assets + updater manifest contract
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/verify-release-assets.mjs staging --expect-version "${{ steps.ver.outputs.version }}"

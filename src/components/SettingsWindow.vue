@@ -117,6 +117,15 @@ async function toggleZzz() {
   await updateConfig({ showZzz: localShowZzz.value })
 }
 
+// ── Auto-update check ─────────────────────────────────────────────
+const localUpdateAutoCheck = ref<boolean>(config.value.updateAutoCheck)
+
+watch(() => config.value.updateAutoCheck, v => { localUpdateAutoCheck.value = v })
+
+async function toggleUpdateAutoCheck() {
+  await updateConfig({ updateAutoCheck: localUpdateAutoCheck.value })
+}
+
 // ── Flying screensaver ────────────────────────────────────────────
 const localFlying     = ref<boolean>(config.value.flyingScreensaver)
 const localFlyingWait = ref<number>(config.value.flyingWaitMins)
@@ -632,6 +641,20 @@ onMounted(async () => {
               type="checkbox"
               v-model="autostart"
               @change="toggleAutostart"
+            />
+            <span class="thumb" />
+          </label>
+        </div>
+
+        <!-- Auto-update check -->
+        <div class="field-row" style="margin-top: 6px;">
+          <label for="update-toggle">{{ t.updateAutoCheck }}</label>
+          <label class="toggle">
+            <input
+              id="update-toggle"
+              type="checkbox"
+              v-model="localUpdateAutoCheck"
+              @change="toggleUpdateAutoCheck"
             />
             <span class="thumb" />
           </label>

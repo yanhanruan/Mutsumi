@@ -5,10 +5,14 @@
   "windows": [
     "main",
     "settings",
-    "about"
+    "about",
+    "update"
   ],
   "permissions": [
     "core:default",
+    "core:app:allow-version",
+    "updater:default",
+    "process:allow-restart",
     "dialog:allow-open",
     "clipboard-manager:allow-read-image",
     {
@@ -18,6 +22,7 @@
     "core:window:allow-start-dragging",
     "core:window:allow-set-position",
     "core:window:allow-set-size",
+    "core:window:allow-center",
     "core:window:allow-show",
     "core:window:allow-hide",
     "core:window:allow-close",
