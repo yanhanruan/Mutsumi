@@ -33,6 +33,8 @@ Thumbs.db
 # Raw input frames and intermediate PNGs (exclude the logo image)
 *.png
 !app-icon-cucumber-puppy-transparent-compress.png
+# …and the desktop app icons: CI release builds need them (tauri bundle.icon)
+!/src-tauri/icons/*.png
 frames_raw/**/*
 !frames_raw/**/
 !frames_raw/**/.gitkeep
