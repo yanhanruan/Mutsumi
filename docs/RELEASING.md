@@ -28,7 +28,7 @@ commit it.**
    | Secret | Value |
    | --- | --- |
    | `TAURI_SIGNING_PRIVATE_KEY` | the full contents of `~/.tauri/mutsumi.key` |
-   | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | the password you chose in step 1 |
+   | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | the password you chose in step 1 — **skip this secret entirely if the key has no password** (GitHub rejects empty secret values; an unset secret becomes an empty env var, which is exactly right for a passwordless key) |
 
 3. **Paste the public key** into
    [`src-tauri/tauri.conf.json`](../src-tauri/tauri.conf.json) →
