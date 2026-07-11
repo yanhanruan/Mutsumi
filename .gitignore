@@ -49,5 +49,8 @@ state.json
 scripts/test-keys/
 scripts/fake-update-dist/
 
-# Icons (these are generated and can be recreated from the source SVGs in
-/src-tauri/icons/
+# Mobile icon sets (regenerable via `npx tauri icon`; this app ships Windows-
+# only). The desktop icons ARE tracked: CI release builds clone the repo and
+# tauri-build hard-requires icons/icon.ico for the Windows resource file.
+/src-tauri/icons/android/
+/src-tauri/icons/ios/
