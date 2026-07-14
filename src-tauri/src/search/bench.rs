@@ -50,6 +50,7 @@ const SPACING: Duration = Duration::from_secs(5);
 /// search trigger actually fires on, so the report shows how each engine serves
 /// each *kind* of question, not just one lucky vertical.
 const THEMED_QUERIES: &[(&str, &str)] = &[
+    // zh
     ("天气 weather", "福安今天天气如何"),
     ("汇率 exchange-rate", "人民币对日元汇率"),
     ("股价 stock", "英伟达股价"),
@@ -58,6 +59,14 @@ const THEMED_QUERIES: &[(&str, &str)] = &[
     ("事实问答 entity-fact", "MyGO 的主唱是谁"),
     ("出行 transport", "东京到大阪新干线要多久"),
     ("发售日期 release-date", "GTA6 发售日期"),
+    // ja — exercises fold + ja datum families on real pages
+    ("天気 weather-ja", "東京 天気 今日"),
+    ("為替 exchange-ja", "ドル 円 為替 リアルタイム"),
+    ("発売日 release-ja", "ゼルダ 新作 発売日"),
+    // en — exercises the en datum regexes / month-name dates on real pages
+    ("weather-en", "Tokyo weather today"),
+    ("exchange-en", "USD to JPY exchange rate"),
+    ("release-en", "GTA 6 release date"),
 ];
 
 /// Spawn whichever benchmarks the environment asks for. No-op without the env
