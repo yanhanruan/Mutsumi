@@ -10,14 +10,17 @@
 //! never breaks chat.
 //!
 //!   needs_search? → webview::fetch_serp (challenge → window surfaces, waits
-//!   for the user's solve) → parse_rendered (regex → CSS fallback) → format as
-//!   a labeled real-time-context block for injection into the chat prompt.
+//!   for the user's solve) → parse_rendered (regex → CSS fallback) → curate →
+//!   deepen (snippet lacks the wanted datum? fetch the top result's page and
+//!   extract it — see [`page`]) → format as a labeled real-time-context block
+//!   for injection into the chat prompt.
 
 pub mod bench;
 pub mod trigger;
 pub mod webview;
 
 mod engines;
+mod page;
 mod parsers;
 mod quality;
 mod tracking;
@@ -151,10 +154,59 @@ pub async fn search(app: &AppHandle, engine: SearchEngine, query: &str) -> Vec<S
         return Vec::new();
     }
 
-    let results = curate(query, raw);
+    let (mut results, verdicts) = curate_report(query, raw);
+    if let Some(note) = deepen(app, query, &mut results, &verdicts).await {
+        log::info!("search: {note}");
+    }
     // log::info!("search: webview {engine:?} → {} result(s)", results.len());
     log::info!("search: webview {engine:?} → {:?}", results);
     results
+}
+
+/// The **go deeper** step: when the curated rank-1 doesn't already state the
+/// kind of fact the query asks for ([`page::should_deepen`]), fetch the top
+/// result's real page through the same hidden WebView and extract the relevant
+/// content from it — the page, unlike the SERP snippet, actually contains the
+/// answer. Tries result #2 if #1 yields nothing. Strictly additive: on any
+/// failure the surface results are returned untouched, and a successful extract
+/// replaces only the target row's snippet (title/URL keep pointing at the
+/// source) and promotes that row to rank 1.
+///
+/// Returns a human-readable note of what happened (`None` = not warranted),
+/// which both the chat log and the quality report surface.
+pub(crate) async fn deepen(
+    app: &AppHandle,
+    query: &str,
+    results: &mut [SearchResult],
+    verdicts: &[RowVerdict],
+) -> Option<String> {
+    if results.is_empty() {
+        return None;
+    }
+    let kind = quality::wanted_datum(query);
+    let rank1_datum = verdicts.iter().any(|v| v.fate == RowFate::SentDatum(1));
+    if !page::should_deepen(kind, rank1_datum, !results[0].snippet.is_empty()) {
+        return None;
+    }
+    for i in 0..results.len().min(2) {
+        let url = results[i].url.clone();
+        match webview::fetch_page(app, &url).await {
+            Ok(html) => {
+                let extract = page::extract_relevant(query, &html);
+                if !extract.is_empty() {
+                    results[i].snippet = extract;
+                    results.swap(0, i);
+                    return Some(format!(
+                        "deepened via {url} → {:?}",
+                        results[0].snippet
+                    ));
+                }
+                log::info!("search: deepen {url} extracted nothing relevant");
+            }
+            Err(e) => log::info!("search: deepen fetch {url} failed ({e})"),
+        }
+    }
+    Some("deepen attempted — nothing extracted, surface snippets kept".into())
 }
 
 /// Debug aid: when `MUTSUMI_SERP_DUMP` is set, write the raw fetched SERP HTML to
@@ -175,20 +227,9 @@ fn maybe_dump_html(app: &AppHandle, engine: SearchEngine, html: &str) {
     }
 }
 
-/// Turn raw hits into the ≤[`MAX_RESULTS`] results injected into chat. Pure —
-/// testable. Beyond cleaning + host de-duplication, this is where "useless /
-/// unrelated" SERP noise is kept out of the prompt (see [`quality`]):
-///
-///   * **Relevance** — a hit must be on-topic for `query` (share a term). A hit
-///     that is *both* off-topic **and** carries no concrete datum is dropped
-///     outright — that's the "unrelated nonsense" the model should never see.
-///   * **Low-information snippets** — SEO filler ("X天气网为您提供…查询") names the
-///     topic without stating the fact. We keep the topical link but blank its
-///     filler snippet, so the model gets a source, not a tagline to parrot.
-///   * **Best-first, three tiers** — hits whose snippet states a concrete datum
-///     (the number/date the user asked for) fill the slots first, then on-topic
-///     prose, then datum-less topical links. SERP order is kept within a tier —
-///     we surface the best content without second-guessing the engine's ranking.
+/// Test convenience: [`curate_report`] without the audit trail (production code
+/// always wants the verdicts too, for the deepen policy and the quality report).
+#[cfg(test)]
 fn curate(query: &str, raw: Vec<RawResult>) -> Vec<SearchResult> {
     curate_report(query, raw).0
 }
@@ -240,9 +281,22 @@ pub(crate) struct RowVerdict {
     pub fate: RowFate,
 }
 
-/// [`curate`] with the full audit trail: returns (what is sent to the model,
-/// a verdict for **every** raw row in SERP order). The first element is exactly
-/// what `curate` returns — `curate` is a thin wrapper.
+/// Turn raw hits into the ≤[`MAX_RESULTS`] results injected into chat, plus a
+/// verdict for **every** raw row in SERP order (the audit trail behind the
+/// quality report and the deepen policy). Pure — testable. Beyond cleaning +
+/// host de-duplication, this is where "useless / unrelated" SERP noise is kept
+/// out of the prompt (see [`quality`]):
+///
+///   * **Relevance** — a hit must be on-topic for `query` (share a term). A hit
+///     that is *both* off-topic **and** carries no concrete datum is dropped
+///     outright — that's the "unrelated nonsense" the model should never see.
+///   * **Low-information snippets** — SEO filler ("X天气网为您提供…查询") names the
+///     topic without stating the fact. We keep the topical link but blank its
+///     filler snippet, so the model gets a source, not a tagline to parrot.
+///   * **Best-first, three tiers** — hits whose snippet states a concrete datum
+///     (the number/date the user asked for) fill the slots first, then on-topic
+///     prose, then datum-less topical links. SERP order is kept within a tier —
+///     we surface the best content without second-guessing the engine's ranking.
 pub(crate) fn curate_report(query: &str, raw: Vec<RawResult>) -> (Vec<SearchResult>, Vec<RowVerdict>) {
     let terms = quality::query_terms(query);
     // "Datum" is query-aware: for a 天气 query only weather values count, for a

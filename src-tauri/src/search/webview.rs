@@ -202,6 +202,42 @@ fn init_script() -> String {
     )
 }
 
+/// Minimum rendered body text (chars) before a result page counts as settled —
+/// below this the probe keeps polling (skeleton/loading screens).
+const PAGE_TEXT_MIN: usize = 80;
+
+/// Probe script for a **result page** fetch (the "go deeper" step): returns the
+/// rendered `outerHTML` once the document looks settled, else an empty string so
+/// the Rust side keeps polling. Unlike the SERP path this runs via
+/// `ICoreWebView2::ExecuteScript` — *pulled* from Rust, not emitted by the page —
+/// so an arbitrary result page needs (and gets) **no** Tauri IPC surface; the
+/// capability file stays scoped to the engines' own domains.
+///
+/// `window.__mutsumi_pre` is the previous-document marker: it is set on the SERP
+/// document *before* navigating away, and a navigation wipes JS globals — so if
+/// it is still present the probe is racing an uncommitted navigation and must
+/// report "not ready" rather than hand back the stale SERP. Redirect-safe (the
+/// marker dies on any navigation, wherever it lands).
+fn page_probe_js() -> String {
+    format!(
+        r#"(function() {{
+  if (window.__mutsumi_pre) return '';
+  if (document.readyState === 'loading') return '';
+  var t = (document.body && document.body.innerText) || '';
+  return t.length >= {min} ? document.documentElement.outerHTML : '';
+}})()"#,
+        min = PAGE_TEXT_MIN,
+    )
+}
+
+/// Decode an `ExecuteScript` completion payload: the executed JS value arrives
+/// JSON-encoded, so a string result is a JSON string. Anything else — `null`
+/// (threw / undefined), a number, malformed — decodes to empty, which callers
+/// treat as "not ready / no HTML". Pure — unit-tested.
+fn decode_exec_result(json: &str) -> String {
+    serde_json::from_str::<String>(json).unwrap_or_default()
+}
+
 /// Outcome of one SERP fetch — the unit of the bot-detection benchmark.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Outcome {
@@ -399,8 +435,14 @@ pub async fn fetch_serp(
     Err("webview SERP fetch is disabled under cfg(test)".into())
 }
 
+/// Test stub — see [`fetch_serp`]'s stub note.
+#[cfg(test)]
+pub async fn fetch_page(_app: &tauri::AppHandle, _url: &str) -> Result<String, String> {
+    Err("webview page fetch is disabled under cfg(test)".into())
+}
+
 #[cfg(not(test))]
-pub use real::fetch_serp;
+pub use real::{fetch_page, fetch_serp};
 
 #[cfg(not(test))]
 mod real {
@@ -411,9 +453,9 @@ mod real {
     use tokio::sync::oneshot;
 
     use super::{
-        homepage_url, init_script, is_blocking_challenge, manual_solve_enabled,
-        resolve_pending_key, serp_url, should_solve_inline, solve_banner_js, solve_strings,
-        WebviewSerp, SERP_EVENT,
+        decode_exec_result, homepage_url, init_script, is_blocking_challenge,
+        manual_solve_enabled, page_probe_js, resolve_pending_key, serp_url,
+        should_solve_inline, solve_banner_js, solve_strings, WebviewSerp, SERP_EVENT,
     };
     use crate::search::SearchEngine;
 
@@ -428,6 +470,15 @@ mod real {
     const WARMUP_SETTLE: Duration = Duration::from_millis(1500);
     /// How long to wait for the user to clear a surfaced challenge.
     const MANUAL_TIMEOUT: Duration = Duration::from_secs(150);
+    /// Overall budget for one result-page fetch (navigate → settle → grab).
+    const PAGE_TIMEOUT: Duration = Duration::from_secs(6);
+    /// First probe delay after the navigation is scheduled (lets it commit).
+    const PAGE_INITIAL_WAIT: Duration = Duration::from_millis(800);
+    /// Interval between settle probes.
+    const PAGE_POLL: Duration = Duration::from_millis(400);
+    /// Cap on one ExecuteScript round-trip (the COM callback is normally fast;
+    /// this only guards a wedged renderer).
+    const EXEC_TIMEOUT: Duration = Duration::from_secs(4);
 
     #[derive(serde::Deserialize)]
     struct SerpHtml {
@@ -660,6 +711,111 @@ mod real {
         result
     }
 
+    /// Run JS in the fetch window's document and return its (JSON-encoded)
+    /// result — via `ICoreWebView2::ExecuteScript`, i.e. **pulled from the Rust
+    /// side**. This is how result-page fetches read HTML back: unlike the SERP
+    /// init-script's `plugin:event|emit`, it needs no Tauri IPC in the page, so
+    /// arbitrary result pages get zero app surface and the capability file stays
+    /// scoped to the search engines' domains. Windows-only (WebView2), like the
+    /// rest of this app's platform integrations.
+    async fn exec_script(app: &AppHandle, js: &str) -> Result<String, String> {
+        use webview2_com::ExecuteScriptCompletedHandler;
+        use windows::core::HSTRING;
+
+        let window = app
+            .get_webview_window(SERP_WINDOW)
+            .ok_or_else(|| "no fetch window".to_string())?;
+        let (tx, rx) = oneshot::channel::<Result<String, String>>();
+        let js = js.to_string();
+        window
+            .with_webview(move |webview| {
+                // Runs on the main (UI) thread — required for WebView2 COM calls.
+                let core = match unsafe { webview.controller().CoreWebView2() } {
+                    Ok(core) => core,
+                    Err(e) => {
+                        let _ = tx.send(Err(format!("CoreWebView2: {e}")));
+                        return;
+                    }
+                };
+                let handler = ExecuteScriptCompletedHandler::create(Box::new(
+                    move |hr: windows::core::Result<()>, json: String| {
+                        let _ = tx.send(hr.map(|()| json).map_err(|e| format!("ExecuteScript: {e}")));
+                        Ok(())
+                    },
+                ));
+                if let Err(e) = unsafe { core.ExecuteScript(&HSTRING::from(js.as_str()), &handler) } {
+                    // The handler (owning tx) drops here → rx sees "dropped".
+                    log::warn!("search: ExecuteScript submit failed: {e}");
+                }
+            })
+            .map_err(|e| format!("with_webview: {e}"))?;
+        match tokio::time::timeout(EXEC_TIMEOUT, rx).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(_)) => Err("exec channel dropped".into()),
+            Err(_) => Err("script execution timed out".into()),
+        }
+    }
+
+    /// Fetch a **result page**'s rendered HTML through the same hidden window —
+    /// the "go deeper" step when a SERP snippet doesn't carry the answer.
+    ///
+    /// Navigate → poll [`page_probe_js`] until the document settles (readyState,
+    /// minimum body text, and the previous-document marker cleared) → return the
+    /// `outerHTML`. On deadline, grabs whatever is rendered — the extractor
+    /// ([`crate::search::page`]) fails open on junk. Never pops a solve window:
+    /// a challenge on a content site is simply returned and extracts to nothing.
+    pub async fn fetch_page(app: &AppHandle, url: &str) -> Result<String, String> {
+        let state = app.state::<WebviewSerp>();
+        let parsed: tauri::Url = url.parse().map_err(|e| format!("bad url {url}: {e}"))?;
+
+        // Same serialization as SERP fetches (shared window, warm jar).
+        let _guard = state.nav.lock().await;
+
+        // Mark the current (SERP) document so the probe can tell it from the
+        // page we're about to load. Best-effort: if there is no window yet
+        // there is no stale document to confuse the probe either.
+        let _ = exec_script(app, "window.__mutsumi_pre = 1; ''").await;
+
+        let app2 = app.clone();
+        let (setup_tx, setup_rx) = oneshot::channel::<Result<(), String>>();
+        app.run_on_main_thread(move || {
+            let _ = setup_tx.send(build_or_navigate(&app2, parsed));
+        })
+        .map_err(|e| format!("run_on_main_thread: {e}"))?;
+        match setup_rx.await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => return Err(e),
+            Err(_) => return Err("setup channel dropped".into()),
+        }
+
+        tokio::time::sleep(PAGE_INITIAL_WAIT).await;
+        let deadline = tokio::time::Instant::now() + PAGE_TIMEOUT;
+        let probe = page_probe_js();
+        loop {
+            match exec_script(app, &probe).await {
+                Ok(json) => {
+                    let html = decode_exec_result(&json);
+                    if !html.is_empty() {
+                        return Ok(html);
+                    }
+                }
+                Err(e) => log::info!("search: page probe failed ({e})"),
+            }
+            if tokio::time::Instant::now() >= deadline {
+                break;
+            }
+            tokio::time::sleep(PAGE_POLL).await;
+        }
+        // Deadline: take what rendered — slow pages often still carry the fact.
+        let json = exec_script(app, "document.documentElement.outerHTML").await?;
+        let html = decode_exec_result(&json);
+        if html.is_empty() {
+            Err("page produced no HTML".into())
+        } else {
+            Ok(html)
+        }
+    }
+
     /// Drive a SERP fetch through the hidden WebView; returns the rendered HTML.
     ///
     /// On a **blocking challenge** the window is surfaced immediately and this
@@ -800,6 +956,33 @@ mod tests {
         assert!(js.contains("if (invoke) invoke("), "grab must use the captured invoke");
         assert!(js.contains("plugin:event|emit"));
         assert!(js.contains("window.top !== window.self"));
+    }
+
+    // ── result-page fetch helpers (the "go deeper" step) ───────────────────
+
+    #[test]
+    fn page_probe_waits_for_settle_and_guards_the_stale_document() {
+        let js = page_probe_js();
+        // Not-ready arms all return '' so the Rust side keeps polling.
+        assert!(js.contains("window.__mutsumi_pre"), "stale-document guard missing");
+        assert!(js.contains("readyState"), "load-state check missing");
+        assert!(js.contains(&format!(">= {PAGE_TEXT_MIN}")), "text threshold missing");
+        assert!(js.contains("document.documentElement.outerHTML"), "no HTML grab");
+        // Pulled via ExecuteScript — the page needs no Tauri IPC surface.
+        assert!(!js.contains("__TAURI"), "probe must not touch Tauri IPC");
+        assert!(!js.contains("invoke"), "probe must not emit");
+    }
+
+    #[test]
+    fn decode_exec_result_unwraps_strings_and_maps_everything_else_to_empty() {
+        // ExecuteScript returns the JS value JSON-encoded.
+        assert_eq!(decode_exec_result(r#""<html>x</html>""#), "<html>x</html>");
+        assert_eq!(decode_exec_result(r#""a\nb\"c""#), "a\nb\"c");
+        // undefined / thrown → "null"; numbers / junk → not HTML.
+        assert_eq!(decode_exec_result("null"), "");
+        assert_eq!(decode_exec_result("123"), "");
+        assert_eq!(decode_exec_result("not json"), "");
+        assert_eq!(decode_exec_result(""), "");
     }
 
     // ── outcome classifier (benchmark instrumentation) ─────────────────────

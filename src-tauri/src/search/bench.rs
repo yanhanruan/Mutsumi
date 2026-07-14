@@ -190,7 +190,19 @@ async fn run_quality(app: AppHandle, engines: Vec<SearchEngine>) {
         let mut cells = Vec::new();
         for (i, &(theme, query)) in THEMED_QUERIES.iter().enumerate() {
             let fetch = webview::fetch_serp(&app, engine, query).await;
-            let cell = quality_cell(engine, theme, query, &fetch);
+            let mut cell = quality_cell(engine, theme, query, &fetch);
+            // Exercise the "go deeper" step exactly as search() would, and
+            // record its outcome — so the report reviews the full pipeline,
+            // not just surface curation. (Re-runs the pure curate; cheap.)
+            if let Ok(html) = &fetch {
+                let raw = super::parse_rendered(engine, html);
+                if !raw.is_empty() && !webview::is_blocking_challenge(engine, true, html) {
+                    let (mut sent, verdicts) = super::curate_report(query, raw);
+                    if let Some(note) = super::deepen(&app, query, &mut sent, &verdicts).await {
+                        cell.section.push_str(&format!("**Deepen:** {note}\n\n"));
+                    }
+                }
+            }
             log::info!("serp-quality {engine:?} [{}/{n}] {query} -> {}", i + 1, cell.summary);
             cells.push(cell);
             if i + 1 < n {
@@ -314,9 +326,12 @@ fn render_quality_report(per_engine: &[(SearchEngine, Vec<QualityCell>)]) -> Str
     let ts = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
     let mut s = format!(
         "# SERP quality report — {ts}\n\n\
-         Full pipeline (fetch → parse → curate) per engine × theme. \
+         Full pipeline (fetch → parse → curate → deepen) per engine × theme. \
          “Before” lists **every** row parsed from the SERP with its verdict; \
-         “After” is the **exact** context block injected into chat (max {max} results).\n\n\
+         “After” is the **exact** context block injected into chat (max {max} results). \
+         A **Deepen** line means the surface snippet lacked the wanted datum, so \
+         the top result's page was fetched and its relevant content extracted \
+         (that extract replaces the snippet in the real chat context).\n\n\
          Legend: **✓** datum in slot 1 · **●** datum sent, not first · \
          **○** sent, no hard datum · **∅** nothing sent · **🛡** challenge · **✗** fetch failed. \
          `rel` = shares a term with the query (trad/simp folded); `datum` = states \

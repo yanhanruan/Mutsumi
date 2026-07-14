@@ -58,6 +58,10 @@ strip         = true  # drop DWARF debug symbols from the final binary
 panic         = "abort" # no unwinding tables/machinery (~50 KB saved)
 
 [target.'cfg(windows)'.dependencies]
+# Read a fetched page's rendered HTML from the Rust side via
+# ICoreWebView2::ExecuteScript (search "go deeper" step) — result pages get no
+# Tauri IPC surface, unlike the SERP emit path. Same version wry pins.
+webview2-com = "0.38"
 windows = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Graphics_Dxgi",
