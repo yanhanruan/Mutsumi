@@ -31,6 +31,10 @@ pub fn fold_zh(s: &str) -> String {
             // the traditional forms below: 気≠氣, 発≠發, 売≠賣).
             '気' => '气', '発' => '发', '売' => '售', '対' => '对', '楽' => '乐',
             '駅' => '站', '図' => '图', '広' => '广',
+            // More shinjitai that unlock search vocab: 価格/株価, 検索, 経済…
+            '価' => '价', '検' => '检', '経' => '经', '実' => '实', '変' => '变',
+            '転' => '转', '覚' => '觉', '応' => '应', '単' => '单', '続' => '续',
+            '覧' => '览', '圧' => '压', '険' => '险', '営' => '营', '県' => '县',
             '東' => '东', '氣' => '气', '溫' => '温', '濕' => '湿', '雲' => '云',
             '陰' => '阴', '風' => '风', '預' => '预', '報' => '报', '週' => '周',
             '幾' => '几', '號' => '号', '誰' => '谁', '燈' => '灯', '樂' => '乐',
@@ -55,10 +59,12 @@ pub fn fold_zh(s: &str) -> String {
 }
 
 /// Query terms for relevance matching: lowercased latin tokens (≥2 chars) plus
-/// CJK bigrams (adjacent Han pairs within a run; a lone Han char is kept as-is).
-/// Bigrams beat single Han chars — "天气" is a term, "天"/"气" alone over-match.
-/// Terms are built from the trad→simp folded query (see [`fold_zh`]), and
-/// topic-free function bigrams are dropped (see [`STOP_BIGRAMS`]).
+/// CJK bigrams (adjacent CJK-term-char pairs within a run; a lone char is kept
+/// as-is). Bigrams beat single chars — "天气" is a term, "天"/"气" alone over-match.
+/// "CJK term char" is kanji/hanzi **and katakana** (Japanese foreign proper nouns
+/// like ブルーアーカイブ) — see [`is_cjk_term_char`]. Terms are built from the
+/// trad→simp folded query (see [`fold_zh`]); topic-free function words are dropped
+/// (see [`STOP_BIGRAMS`] for CJK, [`STOP_LATIN`] for English).
 #[derive(Debug, Default)]
 pub struct QueryTerms {
     latin: Vec<String>,
@@ -71,8 +77,19 @@ impl QueryTerms {
     }
 }
 
-fn is_han(c: char) -> bool {
-    matches!(c as u32, 0x3400..=0x9FFF)
+/// A char that can anchor a CJK relevance term: Han (kanji/hanzi) or katakana.
+/// Katakana is included because Japanese renders foreign proper nouns —
+/// ブルーアーカイブ, ポケモン — in katakana, and those are strong topic anchors.
+/// Hiragana is deliberately **excluded**: it is mostly particles and inflection
+/// (の/は/を…), which would spawn noise bigrams (京の, の天); Japanese content
+/// words are overwhelmingly kanji or katakana.
+fn is_cjk_term_char(c: char) -> bool {
+    matches!(c as u32,
+        0x3400..=0x9FFF        // CJK unified ideographs (kanji / hanzi)
+      | 0x30A0..=0x30FF        // katakana (incl. the ー prolonged-sound mark)
+      | 0x31F0..=0x31FF        // katakana phonetic extensions
+      | 0xFF66..=0xFF9D        // halfwidth katakana
+    )
 }
 
 /// Function-word bigrams that carry no topic: time deixis (今天/现在), question
@@ -86,6 +103,20 @@ const STOP_BIGRAMS: &[&str] = &[
     "今天", "今日", "明天", "昨天", "现在", "目前", "最近", "天天",
     "如何", "什么", "怎么", "怎样", "时候", "哪里", "哪儿", "哪个",
     "多少", "是谁", "谁是", "知道", "请问", "帮我", "告诉", "一下",
+];
+
+/// English/romaji function words that carry no topic — dropped from latin terms
+/// (mirror of [`STOP_BIGRAMS`]). Without this every English row shares "the"/"is"
+/// with the query, so [`is_relevant`] would fire for all of them and the
+/// off-topic gate would be effectively disabled for English. Fail-open still
+/// holds: an all-stopword query yields empty terms and matches everything.
+const STOP_LATIN: &[&str] = &[
+    "the", "a", "an", "of", "to", "in", "on", "at", "for", "and", "or", "is",
+    "are", "was", "were", "be", "do", "does", "did", "what", "who", "when",
+    "where", "why", "how", "which", "whose", "whom", "my", "your", "you", "me",
+    "it", "its", "this", "that", "these", "those", "with", "about", "from",
+    "into", "latest", "current", "today", "now", "please", "tell", "know",
+    "there", "their", "have", "has", "will", "can", "get",
 ];
 
 /// Extract matchable terms from the user's query.
@@ -127,7 +158,7 @@ pub fn query_terms(query: &str) -> QueryTerms {
         run.clear();
     };
     for c in query.chars() {
-        if is_han(c) {
+        if is_cjk_term_char(c) {
             run.push(c);
         } else {
             flush(&mut run, &mut cjk);
@@ -136,6 +167,7 @@ pub fn query_terms(query: &str) -> QueryTerms {
     flush(&mut run, &mut cjk);
 
     cjk.retain(|t| !STOP_BIGRAMS.contains(&t.as_str()));
+    latin.retain(|t| !STOP_LATIN.contains(&t.as_str()));
 
     latin.sort();
     latin.dedup();
@@ -171,13 +203,22 @@ pub fn is_low_information(snippet: &str) -> bool {
     if has_concrete_data(snippet) {
         return false;
     }
-    // Marketing / service language typical of SEO landing pages.
+    // Marketing / service language typical of SEO landing pages. English is
+    // matched case-insensitively (`hay` is lowercased; CJK is unaffected by it).
+    let hay = snippet.to_lowercase();
     const SERVICE: &[&str] = &[
+        // zh
         "为您提供", "为你提供", "提供", "查询", "助您", "便捷", "欢迎", "访问",
         "官方网站", "官网", "一站式", "尽在", "服务平台", "旅游出行", "放心出行",
         "轻松掌握", "尽收眼底",
+        // ja
+        "を提供", "をお届け", "公式サイト", "ご案内", "お任せ", "詳しくは", "検索",
+        // en (lowercase)
+        "official site", "official website", "welcome to", "find the latest",
+        "your source for", "everything you need", "learn more", "we provide",
+        "provides the latest",
     ];
-    let service_hits = SERVICE.iter().filter(|w| snippet.contains(**w)).count();
+    let service_hits = SERVICE.iter().filter(|w| hay.contains(**w)).count();
     service_hits >= 2 || day_range_count(snippet) >= 2
 }
 
@@ -199,16 +240,19 @@ pub fn has_concrete_data(s: &str) -> bool {
     RE.get_or_init(|| {
         Regex::new(
             r"(?x)
-              \d+\s*(?:℃|℉|°|%|％|元|¥|\$|km/h|km|公里|千米|级|hPa|mm|万|亿|人民币|美元|日元|欧元|英镑)
-            | ≈\s*\d
+              \d+\s*(?:℃|℉|°|%|％|元|¥|\$|€|£|km/h|km|公里|千米|级|hpa|mm|万|亿|人民币|美元|日元|欧元|英镑|dollars?|yen|euros?|pounds?)
+            | [≈=]\s*\d
             | \d{1,2}\s*月\s*\d{1,2}
             | \d{4}\s*年
             | \d{1,2}:\d{2}
+            | \d+\s*degrees?
             ",
         )
         .unwrap()
     })
-    .is_match(s)
+    // Lowercased so English units (°F, DOLLARS, hPa) match regardless of case;
+    // CJK is unaffected.
+    .is_match(&s.to_lowercase())
 }
 
 // ── query-aware datum matching ────────────────────────────────────────────────
@@ -235,10 +279,36 @@ pub enum DatumKind {
 /// Classify what the query wants. Checked most-specific-first; folds trad→simp
 /// so 天氣/股價 classify like 天气/股价.
 pub fn wanted_datum(query: &str) -> DatumKind {
-    let q = fold_zh(query);
-    const WEATHER: &[&str] = &["天气", "气温", "温度", "下雨", "下雪", "降温", "几度", "多少度"];
-    const MONEY: &[&str] = &["汇率", "股价", "价格", "多少钱", "币价", "市值", "房价", "票价", "股票"];
-    const DATE: &[&str] = &["发售", "上映", "发布日期", "上线时间", "什么时候", "几号", "哪天", "哪一天", "何时", "日期", "生日"];
+    // `q` is folded (気→气, 発→发, 価→价…) AND lowercased, so CJK keywords are
+    // written in post-fold simplified form and English keywords in lowercase.
+    let q = fold_zh(query).to_lowercase();
+    const WEATHER: &[&str] = &[
+        // zh
+        "天气", "气温", "温度", "下雨", "下雪", "降温", "几度", "多少度",
+        // ja (post-fold; 天気→天气・気温→气温 fold into the zh row)
+        "气候", "气象", "天候", "何度", "晴れ", "曇り", "くもり",
+        // en
+        "weather", "temperature", "forecast", "humidity", "celsius", "fahrenheit",
+    ];
+    const MONEY: &[&str] = &[
+        // zh
+        "汇率", "股价", "价格", "多少钱", "币价", "市值", "房价", "票价", "股票",
+        // ja (post-fold; 為替→为替, 株価→株价, 価格→价格 folds into zh 价格)
+        "为替", "株价", "値段", "相場", "いくら",
+        // en
+        "exchange rate", "stock price", "price", "cost", "how much", "currency",
+        "dollar", "yen", "euro", "usd", "cny", "jpy", "eur", "gbp",
+    ];
+    const DATE: &[&str] = &[
+        // zh
+        "发售", "上映", "发布日期", "上线时间", "什么时候", "几号", "哪天",
+        "哪一天", "何时", "日期", "生日",
+        // ja (post-fold; 発売→发售・公開→公开 fold; 誕生日 covered by zh 生日)
+        "公开", "リリース", "いつ",
+        // en
+        "release date", "release", "launch", "when is", "when does", "when did",
+        "what date", "premiere", "coming out",
+    ];
     if WEATHER.iter().any(|k| q.contains(k)) {
         return DatumKind::Weather;
     }
@@ -254,7 +324,9 @@ pub fn wanted_datum(query: &str) -> DatumKind {
 /// Whether `text` states the kind of concrete fact the query asks for. This is
 /// what promotes a row into the datum tier — see [`super::curate`].
 pub fn has_wanted_datum(kind: DatumKind, text: &str) -> bool {
-    let text = fold_zh(text);
+    // Folded (trad/shinjitai → simp) AND lowercased, so the datum regexes can
+    // carry lowercase English branches (°f, dollars, november) alongside CJK.
+    let text = fold_zh(text).to_lowercase();
     match kind {
         DatumKind::Weather => weather_datum(&text),
         DatumKind::Money => money_datum(&text),
@@ -278,6 +350,9 @@ fn weather_datum(s: &str) -> bool {
             | (?:气温|温度|体感|湿度|降水概率|降雨概率|能见度|紫外线指数)\s*[:：]?\s*\d
             | [东南西北]?风\s*\d                                    # 西风 3-4级
             | \d+\s*级
+            | \d+\s*degrees?                                       # en: 20 degrees
+            | (?:humidity|wind|temp(?:erature)?)\s*[:：]?\s*\d      # en: humidity: 90
+            | \d+\s*(?:mph|km/?h)                                  # en/units: wind speed
             ",
         )
         .unwrap()
@@ -296,8 +371,9 @@ fn money_datum(s: &str) -> bool {
               \d+\.\d+
             | \d+(?:\.\d+)?\s*[%％]
             | [≈=]\s*\d
-            | [¥￥$＄]\s*\d
-            | \d[\d,]+\s*(?:日元|日圆|円|人民币|美元|美金|港元|港币|欧元|英镑|韩元|元|圆|JPY|CNY|USD|RMB)
+            | [¥￥$＄€£]\s*\d
+            | \d[\d,]+\s*(?:日元|日圆|円|人民币|美元|美金|港元|港币|欧元|英镑|韩元|元|圆)
+            | \d+(?:\.\d+)?\s*(?:dollars?|yen|euros?|pounds?|usd|cny|jpy|eur|gbp|rmb)  # en/romaji words
             ",
         )
         .unwrap()
@@ -315,6 +391,8 @@ fn date_datum(s: &str) -> bool {
               \d{4}\s*年
             | \d{1,2}\s*月\s*\d{1,2}\s*[日号]?
             | \d{4}[./-]\d{1,2}[./-]\d{1,2}
+            | (?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2}   # en: november 19
+            | \d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*      # en: 19 november
             ",
         )
         .unwrap()
@@ -332,11 +410,14 @@ fn any_datum(s: &str) -> bool {
     let nondate = NONDATE.get_or_init(|| {
         Regex::new(
             r"(?x)
-              \d+\s*(?:℃|℉|°|%|％|元|¥|\$|km/h|km|公里|千米|米|级|hPa|mm|万|亿|人民币|美元|日元|欧元|英镑)
+              \d+\s*(?:℃|℉|°|%|％|元|¥|\$|€|£|km/h|km|公里|千米|米|级|hpa|mm|万|亿|人民币|美元|日元|欧元|英镑|dollars?|yen|euros?|pounds?)
             | ≈\s*\d
             | \d{1,2}:\d{2}
             | \d+\s*小时\s*\d+\s*分                                # 2小时30分(钟)
+            | \d+\s*时间\s*\d+\s*分                                # ja: 2時間30分 → 时间
             | \d+\s*分钟                                           # 130分钟 — bare 24小时 spans stay excluded
+            | \d+\s*(?:hours?|hrs?)\s*\d+\s*(?:minutes?|mins?)     # en: 2 hours 30 minutes
+            | \d+\s*(?:minutes?|mins?)                             # en: 130 minutes
             ",
         )
         .unwrap()
@@ -540,5 +621,85 @@ mod tests {
         assert!(is_relevant(&t, "东京天气预报一周"));
         // Trad weather text carries the datum.
         assert!(has_wanted_datum(DatumKind::Weather, "多雲轉晴 氣溫 18~25℃ 東風3級"));
+    }
+
+    // ── multilingual coverage: English + Japanese ───────────────────────────
+
+    #[test]
+    fn wanted_datum_classifies_english_and_japanese() {
+        // English (matched case-insensitively).
+        assert_eq!(wanted_datum("weather in Tokyo tomorrow"), DatumKind::Weather);
+        assert_eq!(wanted_datum("USD to JPY exchange rate"), DatumKind::Money);
+        assert_eq!(wanted_datum("GTA6 release date"), DatumKind::Date);
+        assert_eq!(wanted_datum("who is the singer of MyGO"), DatumKind::Any);
+        // Japanese: kanji that fold into the zh families…
+        assert_eq!(wanted_datum("東京の天気"), DatumKind::Weather); // 天気→天气
+        assert_eq!(wanted_datum("ブルアカの発売日"), DatumKind::Date); // 発売→发售
+        assert_eq!(wanted_datum("ドル円の為替"), DatumKind::Money); // 為替→为替
+        assert_eq!(wanted_datum("新幹線の値段"), DatumKind::Money); // ja-distinct 値段
+        assert_eq!(wanted_datum("株価はいくら"), DatumKind::Money); // 株価→株价 (価→价)
+        assert_eq!(wanted_datum("いつリリースされる"), DatumKind::Date); // kana リリース/いつ
+    }
+
+    #[test]
+    fn weather_datum_matches_english_values() {
+        let w = DatumKind::Weather;
+        assert!(has_wanted_datum(w, "Tokyo: 18°C, partly cloudy"));
+        assert!(has_wanted_datum(w, "High of 72 degrees, wind 12 mph"));
+        assert!(has_wanted_datum(w, "Humidity: 90%, feels like 33°"));
+        // Vocabulary without a value is still not a weather datum.
+        assert!(!has_wanted_datum(w, "Get the latest weather forecast and radar"));
+    }
+
+    #[test]
+    fn money_datum_matches_symbols_and_english_words() {
+        let m = DatumKind::Money;
+        assert!(has_wanted_datum(m, "€1,299.00 for the base model"));
+        assert!(has_wanted_datum(m, "around £25 per ticket"));
+        assert!(has_wanted_datum(m, "1 USD = 157.3 JPY"));
+        assert!(has_wanted_datum(m, "costs 20 dollars")); // single-digit worded ok
+        // A currency word with no amount is not a price.
+        assert!(!has_wanted_datum(m, "convert dollars to yen easily"));
+    }
+
+    #[test]
+    fn date_datum_matches_english_month_names() {
+        let d = DatumKind::Date;
+        assert!(has_wanted_datum(d, "Releases on November 19, 2026"));
+        assert!(has_wanted_datum(d, "coming 19 Nov 2026"));
+        assert!(has_wanted_datum(d, "out on 2026-11-19"));
+        assert!(!has_wanted_datum(d, "coming soon to all platforms"));
+    }
+
+    #[test]
+    fn any_datum_counts_english_and_japanese_durations() {
+        let a = DatumKind::Any;
+        assert!(has_wanted_datum(a, "The trip takes about 130 minutes"));
+        assert!(has_wanted_datum(a, "2 hours 30 minutes end to end"));
+        assert!(has_wanted_datum(a, "最短2時間14分")); // ja 時間→时间
+    }
+
+    #[test]
+    fn query_terms_and_relevance_cover_katakana_and_english() {
+        // Katakana proper noun becomes matchable CJK terms (foreign-name anchor).
+        let t = query_terms("ブルーアーカイブの声優");
+        assert!(t.cjk.iter().any(|term| "ブルーアーカイブ".contains(term.as_str())));
+        assert!(is_relevant(&t, "ブルーアーカイブ 公式サイト｜声優一覧"));
+        // English relevance ignores stopwords, so a shared "the"/"is" alone
+        // does NOT make an off-topic row relevant.
+        let t = query_terms("who is the singer of MyGO");
+        assert!(is_relevant(&t, "MyGO!!!!! members and their roles"));
+        assert!(!is_relevant(&t, "This is the best of everything today"));
+    }
+
+    #[test]
+    fn low_information_flags_english_and_japanese_seo() {
+        // Two service phrases + no datum → filler.
+        assert!(is_low_information(
+            "Welcome to the official site. Your source for the latest news and more."
+        ));
+        assert!(is_low_information("公式サイトへようこそ。最新情報をお届けする検索ポータル。"));
+        // English snippet stating a real fact is never filler.
+        assert!(!is_low_information("The official site lists the price at $59.99."));
     }
 }
