@@ -265,7 +265,15 @@ pub(crate) fn curate_report(query: &str, raw: Vec<RawResult>) -> (Vec<SearchResu
         // in the title above a filler snippet.
         let has_data =
             quality::has_wanted_datum(kind, &snippet) || quality::has_wanted_datum(kind, &title);
-        let has_info = !snippet.is_empty() && !quality::is_low_information(&snippet);
+        // The predicate that promotes must also protect: a snippet whose own text
+        // states the wanted datum is never blanked as filler, even when it leans
+        // on service language. (The two predicates diverge — `is_low_information`
+        // escapes on `has_concrete_data`, which e.g. doesn't know durations — so
+        // without this a row could be promoted FOR its snippet's datum and then
+        // have that same snippet blanked.)
+        let has_info = !snippet.is_empty()
+            && (!quality::is_low_information(&snippet)
+                || quality::has_wanted_datum(kind, &snippet));
         let mut v = RowVerdict {
             title,
             url: r.url,
@@ -687,6 +695,47 @@ mod tests {
         assert_eq!(out[0].url, "https://zhihu.example.com/nov", "relevant datum first: {out:?}");
         assert_eq!(verdicts[1].fate, RowFate::SentDatum(1));
         assert_eq!(verdicts[0].fate, RowFate::SentProse(2), "off-topic datum kept, but never #1");
+    }
+
+    #[test]
+    fn curate_never_blanks_the_snippet_that_won_the_datum_slot() {
+        // The two datum predicates used to diverge on durations: `any_datum`
+        // promoted this row for "130分钟" while `is_low_information` (which only
+        // knows `has_concrete_data`) flagged the same snippet as service filler —
+        // sent as SentDatum with an EMPTY snippet. Promotion must protect it.
+        let raw = vec![RawResult {
+            title: "东京到大阪的新干线".into(),
+            url: "https://travel.example.com/shinkansen".into(),
+            snippet: "全程约130分钟，本站为您提供时刻查询，便捷出行。".into(),
+        }];
+        let (out, verdicts) = curate_report("东京到大阪要多久", raw);
+        assert_eq!(verdicts[0].fate, RowFate::SentDatum(1));
+        assert!(
+            out[0].snippet.contains("130分钟"),
+            "the datum that promoted the row must reach the model: {out:?}"
+        );
+    }
+
+    #[test]
+    fn curate_drops_junk_sharing_only_function_words_with_the_query() {
+        // "今天" is question/time chrome, not a topic — a stock-market row must
+        // not ride a weather query's prose tier just because both say 今天.
+        let raw = vec![
+            RawResult {
+                title: "今天A股为何大跌".into(),
+                url: "https://stock.example.com/a".into(),
+                snippet: "沪指今天低开低走，市场情绪谨慎。".into(),
+            },
+            RawResult {
+                title: "福安实时天气".into(),
+                url: "https://weather.example.com/fuan".into(),
+                snippet: "福安今天多云，气温 28~37℃。".into(),
+            },
+        ];
+        let (out, verdicts) = curate_report("福安今天天气如何", raw);
+        assert_eq!(verdicts[0].fate, RowFate::DroppedOffTopic, "{:?}", verdicts[0].fate);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].url, "https://weather.example.com/fuan");
     }
 
     // ── per-engine SERP-quality suite ────────────────────────────────────────

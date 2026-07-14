@@ -19,11 +19,18 @@ use regex::Regex;
 
 /// Fold common traditional-Chinese characters to simplified so relevance and
 /// datum matching work across scripts (Yahoo HK's 英偉達/股價 must match a query's
-/// 英伟达/股价). A curated table of high-frequency chars, not a full converter —
-/// misses degrade to the old behavior, never break it.
+/// 英伟达/股价). Also folds Japanese **shinjitai** variants (気/発/売…) so a
+/// ja-locale query like「東京の天気」classifies and matches like 东京天气 — the
+/// app ships a ja UI, so ja queries are first-class. A curated table of
+/// high-frequency chars, not a full converter — misses degrade to the old
+/// behavior, never break it.
 pub fn fold_zh(s: &str) -> String {
     fn fold(c: char) -> char {
         match c {
+            // Japanese shinjitai → simplified Chinese (distinct code points from
+            // the traditional forms below: 気≠氣, 発≠發, 売≠賣).
+            '気' => '气', '発' => '发', '売' => '售', '対' => '对', '楽' => '乐',
+            '駅' => '站', '図' => '图', '広' => '广',
             '東' => '东', '氣' => '气', '溫' => '温', '濕' => '湿', '雲' => '云',
             '陰' => '阴', '風' => '风', '預' => '预', '報' => '报', '週' => '周',
             '幾' => '几', '號' => '号', '誰' => '谁', '燈' => '灯', '樂' => '乐',
@@ -50,7 +57,8 @@ pub fn fold_zh(s: &str) -> String {
 /// Query terms for relevance matching: lowercased latin tokens (≥2 chars) plus
 /// CJK bigrams (adjacent Han pairs within a run; a lone Han char is kept as-is).
 /// Bigrams beat single Han chars — "天气" is a term, "天"/"气" alone over-match.
-/// Terms are built from the trad→simp folded query (see [`fold_zh`]).
+/// Terms are built from the trad→simp folded query (see [`fold_zh`]), and
+/// topic-free function bigrams are dropped (see [`STOP_BIGRAMS`]).
 #[derive(Debug, Default)]
 pub struct QueryTerms {
     latin: Vec<String>,
@@ -66,6 +74,19 @@ impl QueryTerms {
 fn is_han(c: char) -> bool {
     matches!(c as u32, 0x3400..=0x9FFF)
 }
+
+/// Function-word bigrams that carry no topic: time deixis (今天/现在), question
+/// chrome (如何/什么/多少), and bigram artifacts of them (天天 from 今天+天气).
+/// Dropped from [`query_terms`] — a junk row that merely shares "今天" with a
+/// weather query is NOT on-topic, and counting it as relevant let such rows
+/// slip past the off-topic gate into the prose tier. If a query is *entirely*
+/// stopwords the term set goes empty and [`is_relevant`] fails open (matches
+/// everything), so nothing is ever dropped for lacking a topic anchor.
+const STOP_BIGRAMS: &[&str] = &[
+    "今天", "今日", "明天", "昨天", "现在", "目前", "最近", "天天",
+    "如何", "什么", "怎么", "怎样", "时候", "哪里", "哪儿", "哪个",
+    "多少", "是谁", "谁是", "知道", "请问", "帮我", "告诉", "一下",
+];
 
 /// Extract matchable terms from the user's query.
 pub fn query_terms(query: &str) -> QueryTerms {
@@ -113,6 +134,8 @@ pub fn query_terms(query: &str) -> QueryTerms {
         }
     }
     flush(&mut run, &mut cjk);
+
+    cjk.retain(|t| !STOP_BIGRAMS.contains(&t.as_str()));
 
     latin.sort();
     latin.dedup();
@@ -353,7 +376,33 @@ mod tests {
         let t = query_terms("MyGO 的主唱是谁");
         assert!(t.latin.contains(&"mygo".to_string()));
         assert!(t.cjk.contains(&"主唱".to_string()));
-        assert!(t.cjk.contains(&"是谁".to_string()));
+        // Question chrome ("是谁") is a stopword bigram, not a topic anchor.
+        assert!(!t.cjk.contains(&"是谁".to_string()));
+    }
+
+    #[test]
+    fn query_terms_drops_function_word_bigrams_but_fails_open_when_all_stop() {
+        // «福安今天天气如何»: 今天/天天/如何 are chrome; 福安/天气 anchor the topic.
+        let t = query_terms("福安今天天气如何");
+        assert!(t.cjk.contains(&"福安".to_string()));
+        assert!(t.cjk.contains(&"天气".to_string()));
+        for stop in ["今天", "天天", "如何"] {
+            assert!(!t.cjk.contains(&stop.to_string()), "{stop} should be dropped");
+        }
+        // A junk row sharing only "今天" with the query is NOT on-topic now.
+        assert!(!is_relevant(&t, "今天A股大跌，沪指下挫2%"));
+        // All-stopword query → empty terms → fail-open (never drop everything).
+        assert!(is_relevant(&query_terms("今天"), "anything at all"));
+    }
+
+    #[test]
+    fn folding_covers_japanese_shinjitai() {
+        // ja-locale queries are first-class: 気 (U+6C17) ≠ 氣 (U+6C23).
+        assert_eq!(wanted_datum("東京の天気"), DatumKind::Weather);
+        assert_eq!(wanted_datum("ブルーアーカイブの発売日"), DatumKind::Date);
+        let t = query_terms("東京の天気");
+        assert!(is_relevant(&t, "东京天气预报：多云 18~25℃"));
+        assert!(has_wanted_datum(DatumKind::Weather, "東京の天気は晴れ、気温 18~25℃"));
     }
 
     #[test]
