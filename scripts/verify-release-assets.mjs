@@ -95,7 +95,11 @@ let release
 for (let attempt = 1; attempt <= 6; attempt++) {
   releases = await listReleases()
   release =
+    // exact tag, then version tag with/without the `v`, then — since a draft's
+    // tag_name can be blank in the list API — a draft whose release *name*
+    // carries the version (releaseName is `Mutsumi-vX.Y.Z`).
     releases.find(r => r.tag_name === tag) ||
+    (expectVersion && releases.find(r => r.tag_name === expectVersion || r.tag_name === `v${expectVersion}`)) ||
     (expectVersion && releases.find(r => r.draft && typeof r.name === 'string' && r.name.includes(expectVersion)))
   if (release) break
   if (attempt < 6) {
