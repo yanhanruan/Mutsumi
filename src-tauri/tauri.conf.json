@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "mutsumi",
-  "version": "1.1.0",
+  "version": "1.4.0",
   "identifier": "com.mutsumi.app",
   "build": {
     "frontendDist": "../dist",
@@ -41,9 +41,21 @@
       }
     }
   },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/yanhanruan/Mutsumi/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDFFRTJCMEQ5Rjc4Q0NFODAKUldTQXpvejMyYkRpSGk0TlAxTmtjNENiMFltSkpzOStyd3B4bkVDb3dKYXJRSmI2TE91VE5vdlIK",
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  },
   "bundle": {
     "active": true,
     "targets": ["nsis"],
+    "createUpdaterArtifacts": true,
     "windows": {
       "nsis": {
         "compression": "lzma"
@@ -53,7 +65,6 @@
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
-      "icons/icon.icns",
       "icons/icon.ico"
     ],
     "android": {

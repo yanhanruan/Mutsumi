@@ -1,0 +1,9 @@
+{
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/yanhanruan/Mutsumi/releases/download/staging/latest.json"
+      ]
+    }
+  }
+}

@@ -47,6 +47,24 @@ export interface AppConfig {
   searchEnabled: boolean
   /** Active chat model (applied to the backend at startup + on change). */
   chatModel:     ChatModelKey
+  /** Auto-check GitHub for a newer version once a day. */
+  updateAutoCheck: boolean
+  /**
+   * ISO timestamp of the last update check (throttles to once/day), or `null`
+   * if never checked. Read/written by useUpdateCheck; shown in the About window.
+   */
+  updateLastCheck: string | null
+  /**
+   * ISO date until which the update pop-up is snoozed ("remind me later"), or
+   * `null` when not snoozed. Set when the user defers an available update.
+   */
+  updateSnoozeUntil: string | null
+  /**
+   * Outcome of the last update check: `'success'` (reached the server, whether
+   * or not an update was found) or `'error'` (network/updater failure), or
+   * `null` if never checked. Shown in the About window next to the timestamp.
+   */
+  updateLastCheckStatus: 'success' | 'error' | null
 }
 
 // ── Flying screensaver bounds ────────────────────────────────────────
@@ -99,6 +117,10 @@ const DEFAULT_CONFIG: AppConfig = {
   searchEngine:  'bing-cn',     // renders fully + reachable from CN (matches Rust default)
   searchEnabled: true,          // web search on by default (matches prior behavior)
   chatModel:     'qwen3.7-plus',// balanced default
+  updateAutoCheck:   true,      // check for new versions once a day by default
+  updateLastCheck:   null,      // never checked yet
+  updateSnoozeUntil: null,      // not snoozed
+  updateLastCheckStatus: null,  // no check recorded yet
 }
 
 function loadConfig(): AppConfig {
