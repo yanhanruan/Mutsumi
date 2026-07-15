@@ -43,7 +43,7 @@ dotenvy = "0.15"
 rusqlite = { version = "0.32", features = ["bundled"] }
 scraper = "0.20"   # HTML parsing for search-result + page-body scraping
 regex = "1"        # date / keyword detection for search triggering
-tokio = { version = "1", features = ["time", "macros"] }  # search budget + concurrent embed/search (join!)
+tokio = { version = "1", features = ["time", "macros", "sync"] }  # search budget + concurrent embed/search (join!) + webview-serp oneshot/Mutex
 sysinfo = "0.36.1"   # CPU / memory / network sampling for the System State panel
 battery = "0.7.8"    # battery level + charge-rate time estimate
 
@@ -60,6 +60,10 @@ strip         = true  # drop DWARF debug symbols from the final binary
 panic         = "abort" # no unwinding tables/machinery (~50 KB saved)
 
 [target.'cfg(windows)'.dependencies]
+# Read a fetched page's rendered HTML from the Rust side via
+# ICoreWebView2::ExecuteScript (search "go deeper" step) — result pages get no
+# Tauri IPC surface, unlike the SERP emit path. Same version wry pins.
+webview2-com = "0.38"
 windows = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Graphics_Dxgi",

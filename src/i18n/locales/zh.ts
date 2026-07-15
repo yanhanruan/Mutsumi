@@ -113,7 +113,7 @@ export const zh: Translations = {
     bingCn:     'Bing 国内',
     bing:       'Bing 国际',
     google:     'Google',
-    baidu:      '百度',
+    baidu:      '百度（不推荐）',
   },
   searchEnabled:     '联网搜索',
   searchEnabledHint: '开启后，遇到时事/实时类问题时会联网检索作为参考；关闭则只凭模型与记忆回答（更快）。',

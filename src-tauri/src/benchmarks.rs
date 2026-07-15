@@ -741,71 +741,37 @@ fn is_hedge(reply: &str) -> bool {
     HEDGES.iter().any(|h| reply.contains(h))
 }
 
+// Model-only uncertainty baseline. The "with search" half of this benchmark used
+// the old reqwest `SearchClient`, which has been removed — the live search path
+// now runs entirely through a hidden WebView and can only be exercised inside the
+// running app (see the search refactor's runtime validation checklist). This
+// measures how often the ungrounded model hedges on time-sensitive questions,
+// i.e. the gap that web search exists to close.
 #[tokio::test]
 #[ignore = "live benchmark"]
 async fn bench_search_correctness() {
-    use crate::search::{format_context, search, SearchClient, SearchEngine};
-
     let Some(qwen) = client_or_skip() else { return };
-    let client = SearchClient::new().unwrap();
-    let engine = SearchEngine::default();
     let neutral = "你是一个严谨的助手，用一到两句话如实、简洁地回答用户的问题。如果你的知识可能已经过时、或你无法获知实时/最新信息，必须明确说明，绝不要编造具体数字或事实。";
     let opts = ChatOptions { temperature: Some(0.0), ..Default::default() };
 
-    println!("\n=== S2 Answer correctness without vs with search ({} questions) ===", TIME_SENSITIVE_Q.len());
-    let (mut off_concrete, mut on_concrete, mut search_hit) = (0usize, 0usize, 0usize);
+    println!("\n=== S2 Ungrounded model uncertainty on time-sensitive Qs ({}) ===", TIME_SENSITIVE_Q.len());
+    let mut off_concrete = 0usize;
     for q in TIME_SENSITIVE_Q {
-        // OFF — model only.
         let off = qwen
             .chat(&[ChatMessage::system(neutral), ChatMessage::user(*q)], None, opts.clone())
             .await
             .ok()
             .and_then(|c| c.message.content)
             .unwrap_or_default();
-
-        // Retrieve, then ON — model + injected real-time context (the app's path).
-        let results = search(&client, engine, q).await;
-        let ctx = (!results.is_empty()).then(|| format_context(q, &results));
-        if ctx.is_some() {
-            search_hit += 1;
-        }
-        let on_msgs = match &ctx {
-            Some(c) => vec![
-                ChatMessage::system(neutral),
-                ChatMessage::system(c.clone()),
-                ChatMessage::user(*q),
-            ],
-            None => vec![ChatMessage::system(neutral), ChatMessage::user(*q)],
-        };
-        let on = qwen
-            .chat(&on_msgs, None, opts.clone())
-            .await
-            .ok()
-            .and_then(|c| c.message.content)
-            .unwrap_or_default();
-
         if !is_hedge(&off) {
             off_concrete += 1;
         }
-        if !is_hedge(&on) {
-            on_concrete += 1;
-        }
-        println!("\nQ: {q}   [search {}]", if ctx.is_some() { "HIT" } else { "MISS" });
+        println!("\nQ: {q}");
         println!("  OFF: {}", off.replace('\n', " ").trim());
-        println!("  ON : {}", on.replace('\n', " ").trim());
-
-        // Be gentle on the scraped engine.
-        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
     }
     let n = TIME_SENSITIVE_Q.len();
     println!("\n--- summary ---");
-    println!("search hit rate (context returned):  {search_hit}/{n}");
-    // NOTE: this is a crude lower bound — the model appends "verify with a
-    // realtime source" caveats even to correct grounded answers, so a reply can
-    // be both concrete AND flagged here. Grade correctness from the transcripts
-    // above, not from this number alone.
-    println!("no explicit-uncertainty marker (OFF): {off_concrete}/{n}");
-    println!("no explicit-uncertainty marker (ON):  {on_concrete}/{n}");
+    println!("no explicit-uncertainty marker (model only): {off_concrete}/{n}");
 }
 
 // ════════════════════════════════════════════════════════════════════

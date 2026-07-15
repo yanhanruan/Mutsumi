@@ -57,8 +57,7 @@ pub fn run() {
     .expect("failed to build Fish Audio TTS service");
   let qwen_state    = services::QwenState::new(services::qwen::config_from_env())
     .expect("failed to build Qwen LLM client");
-  let search_state  = search::SearchState::new(search::SearchEngine::default())
-    .expect("failed to build search client");
+  let search_state  = search::SearchState::new(search::SearchEngine::default());
 
   tauri::Builder::default()
     // ── Single-instance guard ─────────────────────────────────────────────
@@ -81,6 +80,7 @@ pub fn run() {
     .plugin(tauri_plugin_updater::Builder::new().build())
     .plugin(tauri_plugin_process::init())
     .manage(shared.clone())
+    .manage(app_state::LocaleState::default())
     .manage(update_window::PendingUpdateState::default())
     .manage(weather_state)
     .manage(audio_state)
@@ -88,6 +88,7 @@ pub fn run() {
     .manage(fish_audio_state)
     .manage(qwen_state)
     .manage(search_state)
+    .manage(search::webview::WebviewSerp::default())
     .manage(chat::ChatBuffer::new())
     .manage(sys_state::SysMonitor::default())
     .invoke_handler(tauri::generate_handler![
@@ -250,6 +251,9 @@ pub fn run() {
 
       // Pet state + pomodoro ticker (also drives late-night reminder).
       app_state::spawn_ticker(app.handle().clone(), shared.clone());
+
+      // Bot-detection benchmark — inert unless MUTSUMI_SERP_BENCH is set.
+      search::bench::maybe_spawn(app.handle());
 
       Ok(())
     })

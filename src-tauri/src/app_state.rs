@@ -31,6 +31,22 @@ struct StateSnapshot {
     pomodoro: PomodoroState,
 }
 
+/// Retained UI locale ("en" | "zh" | "ja"), pushed from the frontend via
+/// [`set_tray_locale`]. Kept in its own lock (not [`AppState`]'s, which the
+/// ticker holds every second) so Rust-side surfaces that can't reach the Vue
+/// i18n system — e.g. the search challenge-solve window's instruction banner —
+/// can still render localized text. Empty until the frontend reports; callers
+/// treat empty/unknown as English.
+#[derive(Default)]
+pub struct LocaleState(pub Mutex<String>);
+
+impl LocaleState {
+    /// Current locale string ("" until the frontend reports one).
+    pub fn get(&self) -> String {
+        self.0.lock().unwrap().clone()
+    }
+}
+
 impl SharedState {
     pub fn new() -> Self {
         Self(Arc::new(Mutex::new(AppState::default())))
@@ -193,6 +209,10 @@ pub fn pet_context_action(
 /// Supported values: "en" | "zh" | "ja" (anything else falls back to "en").
 #[tauri::command]
 pub fn set_tray_locale(app: AppHandle, locale: String) {
+    // Retain it for Rust-side surfaces (e.g. the search challenge-solve window).
+    if let Some(state) = app.try_state::<LocaleState>() {
+        *state.0.lock().unwrap() = locale.clone();
+    }
     crate::tray::rebuild_tray(&app, &locale);
 }
 

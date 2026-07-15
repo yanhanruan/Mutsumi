@@ -22,7 +22,11 @@ pub fn parse_serp_regex(engine: SearchEngine, html: &str, max: usize) -> Vec<Raw
         SearchEngine::Bing | SearchEngine::BingCn => parse_bing(html, max),
         SearchEngine::Google => parse_google(html, max),
         SearchEngine::DuckDuckGo => parse_ddg(html, max),
-        SearchEngine::Baidu => parse_baidu(html, max),
+        // Baidu's modern result cards are deeply nested with hashed class names
+        // that defeat block-level regex — go straight to the CSS parser
+        // (`engines::parse_baidu`), which reads the real URL from the container's
+        // `mu` attribute and the snippet from its `data-module="abstract"` block.
+        SearchEngine::Baidu => Vec::new(),
     }
 }
 
@@ -133,52 +137,6 @@ fn parse_ddg(html: &str, max: usize) -> Vec<RawResult> {
         let snippet = snippets
             .get(idx)
             .and_then(|c| c.get(1))
-            .map(|m| clean_html(m.as_str()))
-            .unwrap_or_default();
-        out.push(RawResult { title, url, snippet });
-        if out.len() >= max {
-            break;
-        }
-    }
-    out
-}
-
-// ── Baidu ─────────────────────────────────────────────────────────────────────
-
-fn parse_baidu(html: &str, max: usize) -> Vec<RawResult> {
-    static BLOCK: OnceLock<Regex> = OnceLock::new();
-    static TITLE: OnceLock<Regex> = OnceLock::new();
-    static SNIP: OnceLock<Regex> = OnceLock::new();
-
-    let block_re = BLOCK.get_or_init(|| {
-        Regex::new(
-            r#"(?si)<div[^>]+class="[^"]*(?:result|c-container)[^"]*"[^>]*>.*?</div>\s*</div>"#,
-        )
-        .unwrap()
-    });
-    let title_re = TITLE.get_or_init(|| {
-        Regex::new(r#"(?si)<h3[^>]*>\s*<a[^>]+href="([^"]+)"[^>]*>(.*?)</a>"#).unwrap()
-    });
-    let snip_re = SNIP.get_or_init(|| {
-        Regex::new(
-            r#"(?si)<span[^>]+class="[^"]*content-right[^"]*"[^>]*>(.*?)</span>|<div[^>]+class="[^"]*c-abstract[^"]*"[^>]*>(.*?)</div>"#,
-        )
-        .unwrap()
-    });
-
-    let mut out = Vec::new();
-    for block in block_re.find_iter(html) {
-        let b = block.as_str();
-        let Some(caps) = title_re.captures(b) else { continue };
-        // Baidu URLs are redirect links; reqwest follows them automatically.
-        let url = tracking::html_unescape(caps.get(1).map_or("", |m| m.as_str()).trim());
-        let title = clean_html(caps.get(2).map_or("", |m| m.as_str()));
-        if title.is_empty() || url.is_empty() {
-            continue;
-        }
-        let snippet = snip_re
-            .captures(b)
-            .and_then(|c| c.get(1).or_else(|| c.get(2)))
             .map(|m| clean_html(m.as_str()))
             .unwrap_or_default();
         out.push(RawResult { title, url, snippet });

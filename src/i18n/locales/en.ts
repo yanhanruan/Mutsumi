@@ -113,7 +113,7 @@ export const en: Translations = {
     bingCn:     'Bing (China)',
     bing:       'Bing',
     google:     'Google',
-    baidu:      'Baidu',
+    baidu:      'Baidu (not recommended)',
   },
   searchEnabled:     'Web search',
   searchEnabledHint: 'When on, current-events / real-time questions are looked up online for grounding; when off, replies use only the model and memory (faster).',

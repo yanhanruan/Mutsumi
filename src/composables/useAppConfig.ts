@@ -114,7 +114,7 @@ const DEFAULT_CONFIG: AppConfig = {
   flyingScreensaver: true,
   flyingWaitMins:    10,   // matches flight::DEFAULT_WAIT_SECS (600 s)
   language:      null,          // null → follow system locale
-  searchEngine:  'duckduckgo',  // fast + scrape-friendly default (matches Rust)
+  searchEngine:  'bing-cn',     // renders fully + reachable from CN (matches Rust default)
   searchEnabled: true,          // web search on by default (matches prior behavior)
   chatModel:     'qwen3.7-plus',// balanced default
   updateAutoCheck:   true,      // check for new versions once a day by default
