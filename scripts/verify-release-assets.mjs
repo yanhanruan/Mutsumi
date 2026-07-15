@@ -76,13 +76,41 @@ async function downloadAsset(asset) {
 }
 
 // ── 1. Find the release (drafts included — listing sees them, /tags/ does not)
+//
+// A just-created draft is eventually consistent in the list endpoint: it shows
+// up, but its `tag_name` field can briefly lag behind (the changelog step, run
+// seconds earlier, can match by tag while this step still sees it blank). So we
+// (a) retry the lookup, and (b) accept a draft whose release *name* carries the
+// expected version as a fallback while tag_name settles. On final failure we
+// dump every release we saw, so the cause is never a mystery again.
 
-const listRes = await fetch(`${api}/releases?per_page=100`, { headers })
-if (!listRes.ok) fail(`could not list releases: ${listRes.status} ${await listRes.text()}`)
-const releases = await listRes.json()
-const release = releases.find(r => r.tag_name === tag)
-if (!release) fail(`no release found for tag "${tag}" (checked ${releases.length} releases incl. drafts)`)
-ok(`release found: "${release.name}" (draft=${release.draft}, prerelease=${release.prerelease})`)
+async function listReleases() {
+  const res = await fetch(`${api}/releases?per_page=100`, { headers })
+  if (!res.ok) fail(`could not list releases: ${res.status} ${await res.text()}`)
+  return res.json()
+}
+
+let releases = []
+let release
+for (let attempt = 1; attempt <= 6; attempt++) {
+  releases = await listReleases()
+  release =
+    releases.find(r => r.tag_name === tag) ||
+    (expectVersion && releases.find(r => r.draft && typeof r.name === 'string' && r.name.includes(expectVersion)))
+  if (release) break
+  if (attempt < 6) {
+    console.log(`~ release "${tag}" not visible yet (attempt ${attempt}/6, saw ${releases.length}); retrying in 5s…`)
+    await new Promise(r => setTimeout(r, 5000))
+  }
+}
+if (!release) {
+  console.error(`releases seen (${releases.length}):`)
+  for (const r of releases) {
+    console.error(`  - tag_name=${JSON.stringify(r.tag_name)} draft=${r.draft} prerelease=${r.prerelease} name=${JSON.stringify(r.name)}`)
+  }
+  fail(`no release found for tag "${tag}"${expectVersion ? ` (nor a draft named with "${expectVersion}")` : ''}`)
+}
+ok(`release found: "${release.name}" (draft=${release.draft}, prerelease=${release.prerelease}, tag=${JSON.stringify(release.tag_name)})`)
 
 // ── 2. Asset completeness ──────────────────────────────────────────
 
