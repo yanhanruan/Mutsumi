@@ -1,0 +1,51 @@
+# Post-publish gate: the safety net the pre-publish gate can't provide.
+#
+# Fires when a release is PUBLISHED (a human clicking "Publish release" in the
+# GitHub UI), and can also be run on demand. It verifies that the installer URL
+# baked into the live `latest.json` actually resolves for end users — and, if
+# the release got orphaned on an `untagged-*` ref (see below), rebinds it to its
+# `vX.Y.Z` tag so the URL resolves, then re-checks.
+#
+# Background: tauri-action drafts a release under an `untagged-<hash>`
+# placeholder but bakes latest.json's URL from the tag. Because our tag is
+# pushed first (it triggers the build), publishing the draft can leave it
+# orphaned on the untagged ref, so latest.json's /releases/download/vX.Y.Z/...
+# URL 404s and every client's update fails. The draft-time gate
+# (scripts/verify-release-assets.mjs) can't see this — the URL only settles on
+# publish — so this runs after. See docs/RELEASING.md and
+# scripts/heal-published-release.mjs.
+name: verify-published-release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to verify/heal, e.g. 1.5.2'
+        required: true
+        type: string
+
+permissions:
+  contents: write   # PATCH the release's tag_name if it's orphaned on untagged-*
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Post-publish updater gate (verify + heal the download URL)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            node scripts/heal-published-release.mjs --release-id "${{ github.event.release.id }}"
+          else
+            node scripts/heal-published-release.mjs --version "${{ inputs.version }}"
+          fi

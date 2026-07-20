@@ -179,5 +179,17 @@ if (urlName !== installer.name) {
 }
 ok(`manifest url resolves to the uploaded installer (${urlName})`)
 
+// The url's tag path segment must be the version tag, so that once the draft is
+// published the baked /releases/download/<tag>/... URL resolves. NOTE: this only
+// checks the *string* — at draft time the assets themselves still live under an
+// `untagged-*` placeholder, so we can't verify the URL actually resolves here.
+// That final check happens post-publish in scripts/heal-published-release.mjs.
+const expectedTagSeg =
+  /^v\d+\.\d+\.\d+$/.test(tag) ? tag : expectVersion ? `v${expectVersion}` : null
+if (expectedTagSeg && !win.url.includes(`/releases/download/${expectedTagSeg}/`)) {
+  fail(`latest.json url is not on the /releases/download/${expectedTagSeg}/ path: ${win.url}`)
+}
+if (expectedTagSeg) ok(`manifest url targets the ${expectedTagSeg} tag path`)
+
 console.log('')
 console.log(`release "${tag}" passed all updater-contract checks`)
