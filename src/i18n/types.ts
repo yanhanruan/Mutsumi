@@ -103,6 +103,8 @@ export interface Translations {
   flyingScreensaver:     string
   flyingWaitLabel:       string
   flyingScreensaverHint: string
+  /** Shown when a global hotkey failed to register ({keys} = accelerator). */
+  hotkeyUnavailable:     string
 
   // ── Search engine (chat search-enhancement) ─────────────────────
   searchEngine: string

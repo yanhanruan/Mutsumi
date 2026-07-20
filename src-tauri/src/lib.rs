@@ -13,6 +13,7 @@ mod cursor;
 mod db;
 mod flight;
 mod hardware;
+mod hotkeys;
 mod http;
 mod idle;
 mod late_night;
@@ -139,6 +140,7 @@ pub fn run() {
       search::set_search_engine,
       search::set_search_enabled,
       hardware::get_hardware_info,
+      hotkeys::get_hotkey_status,
       sys_state::sys_monitor_start,
       sys_state::sys_monitor_stop,
       update_window::open_update_window,
@@ -229,35 +231,11 @@ pub fn run() {
         idle::spawn(app.handle().clone(), stop_flag);
       }
 
-      // Global shortcut: Ctrl+Alt+F toggles manual flying mode anywhere.
-      //
-      // The hotkey is a nice-to-have, never a launch requirement. If another
-      // running app already owns Ctrl+Alt+F, the OS RegisterHotKey call rejects
-      // our request — and if that error is allowed to bubble out of setup() the
-      // whole app fails to start. So we register the plugin with NO pre-bound
-      // shortcuts (plugin init then can't fail on a collision), then try to bind
-      // Ctrl+Alt+F on its own. On collision we just log and carry on with the
-      // hotkey disabled, so startup always succeeds.
-      #[cfg(desktop)]
-      {
-        use tauri_plugin_global_shortcut::{
-          Builder as ShortcutBuilder, GlobalShortcutExt, ShortcutState,
-        };
-        app.handle().plugin(ShortcutBuilder::new().build())?;
-        if let Err(e) = app.global_shortcut().on_shortcut(
-          "ctrl+alt+f",
-          |app, _shortcut, event| {
-            if event.state() == ShortcutState::Pressed {
-              flight::toggle_manual(app);
-            }
-          },
-        ) {
-          log::warn!(
-            "Ctrl+Alt+F global shortcut unavailable (likely already in use by \
-             another app); flying-mode hotkey disabled for this session: {e}"
-          );
-        }
-      }
+      // Global hotkeys (Ctrl+Alt+F toggles flying mode, …). Each hotkey in the
+      // hotkeys::DEFS registry is registered in isolation: a collision with
+      // another app disables only that hotkey (recorded in HotkeysState for
+      // Settings to surface), never startup.
+      hotkeys::init(app.handle())?;
 
       // System state monitor is NOT started here: it runs only while the
       // System State panel is open (sys_monitor_start / _stop commands), so it

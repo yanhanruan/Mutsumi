@@ -105,6 +105,7 @@ export const en: Translations = {
   flyingScreensaver:     'Flying Screensaver',
   flyingWaitLabel:       'Start after',
   flyingScreensaverHint: 'She floats around the screen after the computer sits idle for a while. Ctrl+Alt+F toggles flight anytime.',
+  hotkeyUnavailable:     '{keys} is in use by another app, so the shortcut is off for this session. Close that app and restart Mutsumi to get it back.',
 
   // ── Search engine ─────────────────────────────────────────────────
   searchEngine: 'Search Engine',

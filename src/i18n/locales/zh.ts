@@ -105,6 +105,7 @@ export const zh: Translations = {
   flyingScreensaver:     '飞行屏保',
   flyingWaitLabel:       '闲置多久后开始',
   flyingScreensaverHint: '电脑闲置一段时间后，她会在屏幕上飘来飘去。随时按 Ctrl+Alt+F 切换飞行。',
+  hotkeyUnavailable:     '{keys} 已被其他应用占用，本次运行中该快捷键不可用。关闭占用它的应用并重启 Mutsumi 即可恢复。',
 
   // ── Search engine ─────────────────────────────────────────────────
   searchEngine: '搜索引擎',
