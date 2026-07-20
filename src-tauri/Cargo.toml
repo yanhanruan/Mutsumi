@@ -1,6 +1,6 @@
 [package]
 name = "Mutsumi"
-version = "1.5.0"
+version = "1.5.1"
 description = "Mutsumi desktop companion"
 authors = ["yOHO"]
 license = ""
