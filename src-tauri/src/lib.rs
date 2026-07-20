@@ -230,19 +230,33 @@ pub fn run() {
       }
 
       // Global shortcut: Ctrl+Alt+F toggles manual flying mode anywhere.
+      //
+      // The hotkey is a nice-to-have, never a launch requirement. If another
+      // running app already owns Ctrl+Alt+F, the OS RegisterHotKey call rejects
+      // our request — and if that error is allowed to bubble out of setup() the
+      // whole app fails to start. So we register the plugin with NO pre-bound
+      // shortcuts (plugin init then can't fail on a collision), then try to bind
+      // Ctrl+Alt+F on its own. On collision we just log and carry on with the
+      // hotkey disabled, so startup always succeeds.
       #[cfg(desktop)]
       {
-        use tauri_plugin_global_shortcut::{Builder as ShortcutBuilder, ShortcutState};
-        app.handle().plugin(
-          ShortcutBuilder::new()
-            .with_shortcuts(["ctrl+alt+f"])?
-            .with_handler(|app, _shortcut, event| {
-              if event.state() == ShortcutState::Pressed {
-                flight::toggle_manual(app);
-              }
-            })
-            .build(),
-        )?;
+        use tauri_plugin_global_shortcut::{
+          Builder as ShortcutBuilder, GlobalShortcutExt, ShortcutState,
+        };
+        app.handle().plugin(ShortcutBuilder::new().build())?;
+        if let Err(e) = app.global_shortcut().on_shortcut(
+          "ctrl+alt+f",
+          |app, _shortcut, event| {
+            if event.state() == ShortcutState::Pressed {
+              flight::toggle_manual(app);
+            }
+          },
+        ) {
+          log::warn!(
+            "Ctrl+Alt+F global shortcut unavailable (likely already in use by \
+             another app); flying-mode hotkey disabled for this session: {e}"
+          );
+        }
       }
 
       // System state monitor is NOT started here: it runs only while the
