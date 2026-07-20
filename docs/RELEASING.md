@@ -77,6 +77,8 @@ tag push
   → CI: verify assets + latest.json contract (scripts/verify-release-assets.mjs)
   → you: staging upgrade smoke test  (docs/TESTING-UPDATES.md, Layer 4)
   → you: click "Publish release" on GitHub
+  → CI: post-publish gate — verify the live latest.json download resolves,
+        auto-rebind an orphaned `untagged-*` release (heal-published-release.mjs)
 ```
 
 - Drafts (and prereleases) never resolve through
@@ -91,6 +93,31 @@ tag push
   [`TESTING-UPDATES.md`](TESTING-UPDATES.md) — it also documents the
   `staging-release` workflow, which publishes to a rolling `staging`
   prerelease that production clients can never see.
+
+### The post-publish gate (auto-heal)
+
+Publishing the draft is where a subtle failure hides. `tauri-action` uploads the
+draft's assets under an `untagged-<hash>` placeholder ref, but bakes
+`latest.json`'s installer URL from the **tag** (`/releases/download/vX.Y.Z/...`),
+expecting publish to move the assets onto the tag path. Because our tag is pushed
+*first* (it's the build trigger), publishing can leave the release **orphaned on
+the `untagged-*` ref** instead of bound to `vX.Y.Z` — so `latest.json`'s
+version-check still succeeds, but its download URL **404s**, and every client's
+update fails. (This silently bit v1.5.0 and v1.5.1.)
+
+The draft-time gate can't catch it: the URL only settles on publish. So a second
+workflow — [`verify-published-release.yml`](../.github/workflows/verify-published-release.yml)
+— runs on the `release: published` event (i.e. the moment you click **Publish**)
+and via [`heal-published-release.mjs`](../scripts/heal-published-release.mjs):
+
+1. reads the live `latest.json` → the exact installer URL clients will fetch;
+2. if the release isn't bound to `vX.Y.Z`, **rebinds it** (PATCH `tag_name`,
+   the same fix as editing the tag in the UI) using the in-CI `GITHUB_TOKEN`;
+3. verifies the URL actually resolves, and **fails loudly** if it still doesn't.
+
+So a normal release self-heals after you publish. If you ever need to re-run it
+by hand (e.g. to repair an old release), trigger the workflow manually:
+**Actions → verify-published-release → Run workflow → version `X.Y.Z`**.
 
 ## How the in-app updater consumes this
 
