@@ -51,6 +51,8 @@ npm run release 1.5.0                 # writes 1.5.0 into tauri.conf.json + Carg
 #   docs/release-notes/v1.5.0.md
 git add docs/release-notes/v1.5.0.md
 git commit -am "chore(release): v1.5.0"
+# GUARD — must print 1.5.0; if it shows an older version the release PR isn't merged/pulled yet, so don't tag:
+node -p "require('./src-tauri/tauri.conf.json').version"
 git tag -a v1.5.0 -m "v1.5.0"
 git push --follow-tags
 ```
