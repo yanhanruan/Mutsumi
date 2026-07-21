@@ -46,3 +46,6 @@ state.json
 
 # Icons (these are generated and can be recreated from the source SVGs in
 /src-tauri/icons/
+
+# Build cache / downloaded tooling
+nsis_tauri_utils.dll

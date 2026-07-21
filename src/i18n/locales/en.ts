@@ -123,6 +123,7 @@ export const en: Translations = {
     fast_learning: 'Fast Learning',
     tarot:         'Tarot Reading',
     chat:          'Chat',
+    rhythm:        'Rhythm Game',
     hide:          'Hide App',
   },
 

@@ -114,6 +114,8 @@ export interface Translations {
     tarot:         string
     /** Opens the in-pet chat overlay (frontend-only). */
     chat:          string
+    /** Opens the in-pet rhythm game overlay (frontend-only). */
+    rhythm:        string
     /** Task 5: hide the main window to tray. */
     hide:          string
   }

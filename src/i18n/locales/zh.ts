@@ -123,6 +123,7 @@ export const zh: Translations = {
     fast_learning: '快速学习',
     tarot:         '塔罗占卜',
     chat:          '聊天',
+    rhythm:        '音游',
     hide:          '隐藏应用',
   },
 

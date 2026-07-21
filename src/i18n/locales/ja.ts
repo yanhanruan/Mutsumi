@@ -123,6 +123,7 @@ export const ja: Translations = {
     fast_learning: '速習モード',
     tarot:         'タロット占い',
     chat:          'おしゃべり',
+    rhythm:        'リズムゲーム',
     hide:          'アプリを隠す',
   },
 

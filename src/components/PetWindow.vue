@@ -24,7 +24,9 @@ import { useAppConfig, CHAR_SIZE_DIMS } from '../composables/useAppConfig'
 import { useWeatherAvailable } from '../composables/useWeatherAvailable'
 import { TAROT_WINDOW_DIMS } from '../config/tarot'
 import { CHAT_WINDOW_DIMS } from '../config/chat'
+import { RHYTHM_GAME_DIMS } from '../config/rhythmSongs'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import type { DanceIntensity } from '../composables/useRhythmGame'
 import ChatBubble from './ChatBubble.vue'
 import PomodoroBadge from './PomodoroBadge.vue'
 import WeatherBadge from './WeatherBadge.vue'
@@ -32,6 +34,7 @@ import MusicBadge from './MusicBadge.vue'
 import BalloonPet from './BalloonPet.vue'
 import TarotCard from './TarotCard.vue'
 import ChatPanel from './ChatPanel.vue'
+import RhythmGame from './RhythmGame.vue'
 import ContextMenu, { type MenuAction, type ContextActionKey } from './ContextMenu.vue'
 
 const imgRef = ref<HTMLImageElement | null>(null)
@@ -66,18 +69,21 @@ const { t, locale } = useI18n()
 const { config } = useAppConfig()
 const { weatherAvailable } = useWeatherAvailable()
 
-// True while the tarot / chat overlay is open (declared before the size watch
-// below, which reads them on its immediate run).
-const tarotActive = ref(false)
-const chatActive  = ref(false)
-// Any full-window overlay is open — gates pet interaction + sprite/badge display.
+// True while the tarot / chat overlay is open — hides pet, blocks drag.
 const overlayOpen = computed(() => tarotActive.value || chatActive.value)
+// Rhythm game is special: pet stays visible above the game canvas.
+// Block drag/interaction but don't hide the pet sprite.
+const blockInteraction = computed(() => overlayOpen.value || rhythmActive.value)
 
 // ── Window show / hide transitions ────────────────────────────────
 // petOpacity drives a CSS opacity transition. It starts at 1, goes to 0 when
 // hiding, and goes back to 1 when pet-show is received.
 const petOpacity = ref(1)
 
+// ── Overlay state ─────────────────────────────────────────────────
+const tarotActive   = ref(false)
+const chatActive    = ref(false)
+const rhythmActive  = ref(false)
 
 // ── Window sizing (Task 3) ─────────────────────────────────────────
 // Resize the main window whenever the user changes the character size
@@ -94,10 +100,11 @@ watch(
   { immediate: true },
 )
 
-const bubbleRef  = ref<InstanceType<typeof ChatBubble> | null>(null)
-const contextRef = ref<InstanceType<typeof ContextMenu> | null>(null)
-const tarotRef   = ref<InstanceType<typeof TarotCard> | null>(null)
-const chatRef    = ref<InstanceType<typeof ChatPanel> | null>(null)
+const bubbleRef     = ref<InstanceType<typeof ChatBubble> | null>(null)
+const contextRef    = ref<InstanceType<typeof ContextMenu> | null>(null)
+const tarotRef      = ref<InstanceType<typeof TarotCard> | null>(null)
+const chatRef       = ref<InstanceType<typeof ChatPanel> | null>(null)
+const rhythmGameRef = ref<InstanceType<typeof RhythmGame> | null>(null)
 
 // ── Tarot overlay ──────────────────────────────────────────────────
 // Integrated in-window reading (not a separate OS window). On open the main
@@ -201,6 +208,81 @@ async function closeChat() {
   chatActive.value = false
 }
 
+// ── Rhythm game overlay ────────────────────────────────────────────
+// Same window-grow/restore choreography as tarot/chat overlays, sized via
+// RHYTHM_GAME_DIMS. The pet sprite hides and the game takes over.
+async function openRhythmGame() {
+  const win = getCurrentWindow()
+  try { savedPos = await win.outerPosition() } catch { savedPos = null }
+  bubbleRef.value?.hide()
+  rhythmActive.value = true
+
+  // Start the music dance chain (music1→music2→music3→music4→loop)
+  // The headphones_on animation is a one-shot intro; we skip it and
+  // jump straight into the looping dance.
+  setAnim('music1')
+
+  rhythmGameRef.value?.open()
+  await nextTick()
+  await nextPaint()
+
+  const [lw, lh] = RHYTHM_GAME_DIMS[config.value.characterSize]
+  const sf  = await win.scaleFactor()
+  const mon = await currentMonitor()
+  const pw  = lw * sf
+  const ph  = lh * sf
+  let x = savedPos?.x ?? 0
+  let y = savedPos?.y ?? 0
+  if (mon) {
+    x = mon.position.x + (mon.size.width  - pw) / 2
+    y = mon.position.y + (mon.size.height - ph) / 2
+  }
+  await setBounds(x, y, pw, ph)
+}
+
+async function closeRhythmGame() {
+  const win = getCurrentWindow()
+  const [lw, lh] = CHAR_SIZE_DIMS[config.value.characterSize]
+  const sf = await win.scaleFactor()
+
+  // Stop dancing, return to idle
+  setAnim('idle')
+  disposeShake()
+
+  rhythmGameRef.value?.dismiss()
+  await nextTick()
+  await nextPaint()
+  await setBounds(savedPos?.x ?? 0, savedPos?.y ?? 0, lw * sf, lh * sf)
+  rhythmActive.value = false
+}
+
+// ── Sync pet dance animation with rhythm game ──────────────────────
+// When the game emits a "dance" event, tell the pet to play a matching
+// animation. This bridges the game judgment → pet sprite pipeline.
+
+/** Brief CSS shake for miss punishment. Automatically clears after 300 ms. */
+const petShake = ref(false)
+let shakeTimer: ReturnType<typeof setTimeout> | null = null
+
+function triggerShake() {
+  petShake.value = true
+  if (shakeTimer) clearTimeout(shakeTimer)
+  shakeTimer = setTimeout(() => { petShake.value = false }, 300)
+}
+
+function onRhythmDance(intensity: DanceIntensity) {
+  if (intensity === 'none') {
+    // Miss — quick shake / punishment
+    triggerShake()
+  }
+  // Otherwise the music chain (music1→…→music4) keeps looping from openRhythmGame
+}
+
+function disposeShake() {
+  if (shakeTimer) clearTimeout(shakeTimer)
+  petShake.value = false
+}
+
 // ── Mouse interaction ──────────────────────────────────────────────
 const DRAG_THRESHOLD = 5
 let pressX = 0
@@ -209,7 +291,7 @@ let pressed = false
 let didDrag = false
 
 function onMouseDown(e: MouseEvent) {
-  if (e.button !== 0 || overlayOpen.value) return
+  if (e.button !== 0 || blockInteraction.value) return
   pressX = e.screenX
   pressY = e.screenY
   pressed = true
@@ -235,7 +317,7 @@ async function onMouseMove(e: MouseEvent) {
 }
 
 function onMouseUp(e: MouseEvent) {
-  if (e.button !== 0 || overlayOpen.value) return
+  if (e.button !== 0 || blockInteraction.value) return
   if (pressed && !didDrag) {
     // True click — no movement.
     // TODO re-enable click animation:
@@ -256,7 +338,7 @@ function onMouseUp(e: MouseEvent) {
 
 function onContextMenu(e: MouseEvent) {
   e.preventDefault()
-  if (overlayOpen.value) return
+  if (blockInteraction.value) return
   contextRef.value?.open(e.clientX, e.clientY)
 }
 
@@ -272,6 +354,10 @@ async function onContextAction(action: MenuAction) {
   }
   if (action === 'chat') {
     await openChat()
+    return
+  }
+  if (action === 'rhythm') {
+    await openRhythmGame()
     return
   }
   // Play the pat_head animation immediately (like click — no pending delay).
@@ -326,16 +412,17 @@ onUnmounted(() => {
 <template>
   <div
     class="pet"
+    :class="{ 'rhythm-pet': rhythmActive, 'shake': petShake }"
     :style="{ opacity: petOpacity }"
     @mousedown="onMouseDown"
     @mousemove="onMouseMove"
     @mouseup="onMouseUp"
-    @contextmenu="onContextMenu"
+    @contextmenu.prevent="onContextMenu"
   >
-    <img v-show="ready && !overlayOpen" ref="imgRef" class="frame" draggable="false" />
-    <PomodoroBadge v-if="!overlayOpen" />
-    <WeatherBadge v-if="!overlayOpen && config.showWeather && weatherAvailable !== false" />
-    <MusicBadge v-if="!overlayOpen && config.showMusic" />
+    <img v-show="ready && !tarotActive && !chatActive" ref="imgRef" class="frame" draggable="false" />
+    <PomodoroBadge v-if="!tarotActive && !chatActive" />
+    <WeatherBadge v-if="!tarotActive && !chatActive && config.showWeather && weatherAvailable !== false" />
+    <MusicBadge v-if="!tarotActive && !chatActive && config.showMusic" />
     <div class="bubble-anchor">
       <ChatBubble ref="bubbleRef" />
     </div>
@@ -343,6 +430,7 @@ onUnmounted(() => {
   <ContextMenu ref="contextRef" @action="onContextAction" />
   <TarotCard ref="tarotRef" @close="closeTarot" />
   <ChatPanel ref="chatRef" @close="closeChat" />
+  <RhythmGame ref="rhythmGameRef" @close="closeRhythmGame" @dance="onRhythmDance" />
   <BalloonPet />
 </template>
 
@@ -355,6 +443,12 @@ onUnmounted(() => {
   cursor: pointer;
   transition: opacity 200ms ease;
 }
+/* When rhythm game is active, the pet shrinks to the top 35% of the window
+   so the game canvas can occupy the bottom 65%. */
+.pet.rhythm-pet {
+  height: 35%;
+  overflow: hidden;
+}
 .frame {
   width: 100%;
   height: 100%;
@@ -362,6 +456,21 @@ onUnmounted(() => {
   display: block;
   pointer-events: none;
   -webkit-user-drag: none;
+}
+
+/* Miss punishment — quick horizontal shake */
+@keyframes pet-shake {
+  0%   { transform: translateX(0); }
+  15%  { transform: translateX(-6px); }
+  30%  { transform: translateX(5px); }
+  45%  { transform: translateX(-4px); }
+  60%  { transform: translateX(3px); }
+  75%  { transform: translateX(-2px); }
+  90%  { transform: translateX(1px); }
+  100% { transform: translateX(0); }
+}
+.pet.shake {
+  animation: pet-shake 300ms ease-in-out;
 }
 .bubble-anchor {
   position: absolute;

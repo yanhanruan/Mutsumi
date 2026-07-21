@@ -89,6 +89,24 @@ export function isOverUiOverlay(els: Element[]): boolean {
   return false
 }
 
+/**
+ * True when the cursor is over the active rhythm game canvas.
+ * When the rhythm game overlay is open, the window must stay interactive
+ * (not ignore cursor events) so the canvas can receive mouse/keyboard input.
+ */
+function isOverActiveGameCanvas(els: Element[]): boolean {
+  for (const el of els) {
+    if (
+      el instanceof HTMLElement &&
+      el.classList.contains('rhythm-canvas') &&
+      el.classList.contains('active')
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
 export function useHitTest(getCurrentImage: () => HTMLImageElement | null) {
   const canvas = document.createElement('canvas')
   const ctx    = canvas.getContext('2d', { willReadFrequently: true })!
@@ -180,8 +198,16 @@ export function useHitTest(getCurrentImage: () => HTMLImageElement | null) {
     const cssX = pos.x / dpr
     const cssY = pos.y / dpr
 
+    // Rhythm game canvas is active — never click-through. The canvas needs
+    // real pointer events for song selection clicks and gameplay input.
+    const els = document.elementsFromPoint(cssX, cssY)
+    if (isOverActiveGameCanvas(els)) {
+      void setIgnore(false)
+      return
+    }
+
     // UI overlays take priority — never click-through over them.
-    if (isOverUiOverlay(document.elementsFromPoint(cssX, cssY))) {
+    if (isOverUiOverlay(els)) {
       void setIgnore(false)
       return
     }
