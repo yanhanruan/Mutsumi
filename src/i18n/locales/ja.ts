@@ -105,6 +105,7 @@ export const ja: Translations = {
   flyingScreensaver:     'フライングスクリーンセーバー',
   flyingWaitLabel:       '開始までの待機時間',
   flyingScreensaverHint: 'パソコンをしばらく操作しないと、画面の中をふわふわ飛び回ります。Ctrl+Alt+F でいつでも切り替えできます。',
+  hotkeyUnavailable:     '{keys} は他のアプリで使用中のため、今回の起動ではこのショートカットは無効です。該当アプリを閉じてから Mutsumi を再起動すると復活します。',
 
   // ── Search engine ─────────────────────────────────────────────────
   searchEngine: '検索エンジン',

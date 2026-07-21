@@ -143,6 +143,23 @@ async function applyFlying() {
   catch { /* best-effort; re-synced on next startup */ }
 }
 
+// Global-hotkey status: when a hotkey failed to register at startup (another
+// app owns the combination), surface WHY the shortcut is dead this session
+// instead of leaving it silently broken. Backed by hotkeys.rs (HotkeysState).
+interface HotkeyStatus {
+  id:          string
+  accelerator: string
+  active:      boolean
+}
+const flightHotkey = ref<HotkeyStatus | null>(null)
+
+async function refreshHotkeys() {
+  try {
+    const all = await invoke<HotkeyStatus[]>('get_hotkey_status')
+    flightHotkey.value = all.find(h => h.id === 'toggle-flight') ?? null
+  } catch { /* status unavailable — just show no warning */ }
+}
+
 // ── Search engine (chat search-enhancement) ───────────────────────
 type EngineLabelKey = 'duckduckgo' | 'bingCn' | 'bing' | 'google' | 'baidu'
 const ENGINE_OPTIONS: { key: SearchEngineKey; labelKey: EngineLabelKey }[] = [
@@ -350,6 +367,7 @@ onMounted(async () => {
   await refresh()
   await refreshAutostart()
   await refreshApiKeyStatus()
+  await refreshHotkeys()
 })
 </script>
 
@@ -482,6 +500,9 @@ onMounted(async () => {
           <span class="card-icon">🎈</span>{{ t.flyingScreensaver }}
         </h2>
         <p class="card-hint">{{ t.flyingScreensaverHint }}</p>
+        <p v-if="flightHotkey && !flightHotkey.active" class="hotkey-warn">
+          ⚠️ {{ t.hotkeyUnavailable.replace('{keys}', flightHotkey.accelerator) }}
+        </p>
         <div class="field-row">
           <label for="flying-toggle">{{ t.flyingScreensaver }}</label>
           <label class="toggle">
@@ -1069,6 +1090,18 @@ onMounted(async () => {
   font-size: 11.5px;
   line-height: 1.5;
   color: rgba(45, 85, 45, 0.62);
+}
+
+/* Hotkey-collision warning (a global shortcut failed to register). */
+.hotkey-warn {
+  margin: 0 0 9px;
+  padding: 6px 9px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: #8a6d1a;
+  background: rgba(224, 178, 66, 0.14);
+  border: 1px solid rgba(224, 178, 66, 0.35);
+  border-radius: 8px;
 }
 
 /* ── Status toast ────────────────────────────────────────── */
