@@ -1,0 +1,205 @@
+/**
+ * faceRig.ts — PROCEDURAL multi-part test rig for the P3 spike. The face is now
+ * split into independent layers (parts), which is what makes the eye close fully
+ * and stops it dragging the brows:
+ *
+ *   draw order: face-base (head, hair, BROWS, blush, nose, mouth)
+ *               → eyeL, eyeR   (white + iris, their own layer)
+ *               → lidL, lidR   (opaque SKIN eyelids, on top)
+ *
+ * `ParamEyeLOpen/ROpen` are bound ONLY to the eye + eyelid parts, so the
+ * face/brow part is structurally untouchable by a blink. A blink collapses the
+ * eyelid layer down over the eye (opaque skin → fully closed); opening it lifts
+ * the lid to a thin crease line at the top of the eye.
+ *
+ * Geometry + bindings are pure (buildFacePartsGeometry) and unit-tested; the
+ * per-part textures are DOM canvases (drawFaceBase / drawEye / drawLid),
+ * attached to the geometry in main.ts.
+ */
+import type { ParameterDef } from '../parameters'
+import type { ParamBinding, Vec2 } from '../deform'
+import type { PartGeom } from '../part'
+import { buildGridMesh, buildSubMesh, type Mesh } from '../mesh'
+
+export const FACE_SIZE = 1.8
+export const FACE_COLS = 20
+export const FACE_ROWS = 26
+
+/** Landmark uv positions (v=0 at top), shared by textures and geometry. */
+const EYE_L  = { x: 0.36, y: 0.44 }
+const EYE_R  = { x: 0.64, y: 0.44 }
+const MOUTH  = { x: 0.50, y: 0.68 }
+
+// Model-space rects for the eye / eyelid parts (positioned at the eye centres).
+const EYE_W = 0.34, EYE_H = 0.24
+const LID_W = 0.40, LID_H = 0.30
+
+/** uv (v=0 top) → model space (y-up), matching buildSubMesh's convention. */
+const toModel = (u: number, v: number): Vec2 => ({ x: (u - 0.5) * FACE_SIZE, y: (0.5 - v) * FACE_SIZE })
+
+export interface FaceTuning {
+  /** Model-units the open eyelid's crease line sits above the eye top (+ = wider open). */
+  openLift?:  number
+  /** 0..1 — how much the eye itself narrows as it closes (under the lid). */
+  eyeSquash?: number
+}
+export const FACE_TUNING_DEFAULTS: Required<FaceTuning> = { openLift: 0, eyeSquash: 0.5 }
+
+// ── binding helpers ─────────────────────────────────────────────────
+
+const zeros = (n: number): Vec2[] => Array.from({ length: n }, () => ({ x: 0, y: 0 }))
+const offs  = (mesh: Mesh, fn: (uv: Vec2, base: Vec2) => Vec2): Vec2[] => mesh.vertices.map((b, i) => fn(mesh.uvs[i], b))
+const mask  = (uv: Vec2, c: Vec2, r: number): number => Math.max(0, 1 - Math.hypot(uv.x - c.x, uv.y - c.y) / r)
+
+const HALF = FACE_SIZE / 2
+const SHEAR = 0.16, SLIDE = 0.05
+
+/**
+ * Head motion bindings (angleX / angleY / breath) for ANY part's mesh, computed
+ * from that mesh's own vertices so every layer moves together and stays aligned.
+ */
+function headMotion(mesh: Mesh): ParamBinding[] {
+  const n = mesh.vertices.length
+  return [
+    { paramId: 'ParamAngleX', keyforms: [
+      { at: 0,   offsets: offs(mesh, (_u, b) => ({ x: -(SHEAR * (b.y / HALF) + SLIDE), y: 0 })) },
+      { at: 0.5, offsets: zeros(n) },
+      { at: 1,   offsets: offs(mesh, (_u, b) => ({ x:  (SHEAR * (b.y / HALF) + SLIDE), y: 0 })) },
+    ] },
+    { paramId: 'ParamAngleY', keyforms: [
+      { at: 0,   offsets: offs(mesh, (_u, b) => ({ x: 0, y: -(SHEAR * (b.x / HALF) + SLIDE) })) },
+      { at: 0.5, offsets: zeros(n) },
+      { at: 1,   offsets: offs(mesh, (_u, b) => ({ x: 0, y:  (SHEAR * (b.x / HALF) + SLIDE) })) },
+    ] },
+    { paramId: 'ParamBreath', keyforms: [
+      { at: 0, offsets: zeros(n) },
+      { at: 1, offsets: offs(mesh, (_u, b) => ({ x: b.x * 0.03, y: b.y * 0.03 + 0.02 })) },
+    ] },
+  ]
+}
+
+/**
+ * Build the parts geometry + parameter defs. Pure — no DOM. The eye/eyelid
+ * bindings reference only ParamEye*Open, so a blink cannot reach the face part.
+ */
+export function buildFacePartsGeometry(tuning: FaceTuning = {}): { parts: PartGeom[]; defs: ParameterDef[] } {
+  const tune = { ...FACE_TUNING_DEFAULTS, ...tuning }
+
+  const defs: ParameterDef[] = [
+    { id: 'ParamAngleX',     min: -30, max: 30, default: 0 },
+    { id: 'ParamAngleY',     min: -30, max: 30, default: 0 },
+    { id: 'ParamBreath',     min: 0,   max: 1,  default: 0 },
+    { id: 'ParamEyeLOpen',   min: 0,   max: 1,  default: 1 },
+    { id: 'ParamEyeROpen',   min: 0,   max: 1,  default: 1 },
+    { id: 'ParamMouthOpenY', min: 0,   max: 1,  default: 0 },
+  ]
+
+  // ── face base (everything except the eyes) ───────────────────────────
+  const faceMesh = buildGridMesh(FACE_COLS, FACE_ROWS, FACE_SIZE, FACE_SIZE)
+  const mouthCy  = toModel(MOUTH.x, MOUTH.y).y
+  const mouthBinding: ParamBinding = { paramId: 'ParamMouthOpenY', keyforms: [
+    { at: 0, offsets: zeros(faceMesh.vertices.length) },
+    { at: 1, offsets: offs(faceMesh, (uv, b) => ({ x: 0, y: (b.y - mouthCy) * 0.6 * mask(uv, MOUTH, 0.16) })) },
+  ] }
+  const parts: PartGeom[] = [
+    { id: 'face', mesh: faceMesh, bindings: [...headMotion(faceMesh), mouthBinding] },
+  ]
+
+  // ── eye + eyelid parts, per side ─────────────────────────────────────
+  const eye = (side: 'L' | 'R', centerUV: Vec2) => {
+    const c   = toModel(centerUV.x, centerUV.y)
+    const openId = `ParamEye${side}Open`
+    const eyeMesh = buildSubMesh(c.x, c.y, EYE_W, EYE_H, 8, 8)
+    const lidMesh = buildSubMesh(c.x, c.y, LID_W, LID_H, 6, 6)
+    const eyeTop  = c.y + EYE_H / 2
+
+    // Eye layer: narrows slightly toward its centre as it closes.
+    const eyeSquash: ParamBinding = { paramId: openId, keyforms: [
+      { at: 0, offsets: offs(eyeMesh, (_u, b) => ({ x: 0, y: (c.y - b.y) * tune.eyeSquash })) },
+      { at: 1, offsets: zeros(eyeMesh.vertices.length) },
+    ] }
+    // Eyelid layer: open (1) collapses to a thin crease line at the eye top;
+    // closed (0) rests at full height, opaque skin covering the whole eye.
+    const lid: ParamBinding = { paramId: openId, keyforms: [
+      { at: 0, offsets: zeros(lidMesh.vertices.length) },
+      { at: 1, offsets: offs(lidMesh, (_u, b) => ({ x: 0, y: (eyeTop + tune.openLift) - b.y })) },
+    ] }
+
+    return [
+      { id: `eye${side}`, mesh: eyeMesh, bindings: [...headMotion(eyeMesh), eyeSquash] },
+      { id: `lid${side}`, mesh: lidMesh, bindings: [...headMotion(lidMesh), lid] },
+    ] as PartGeom[]
+  }
+
+  parts.push(...eye('L', EYE_L), ...eye('R', EYE_R))
+  return { parts, defs }
+}
+
+/** Order the part textures must be attached in — matches buildFacePartsGeometry. */
+export type FacePartId = 'face' | 'eyeL' | 'lidL' | 'eyeR' | 'lidR'
+
+// ── procedural textures (DOM; not unit-tested) ──────────────────────
+
+function ctx(size: number): [HTMLCanvasElement, CanvasRenderingContext2D] {
+  const cv = document.createElement('canvas')
+  cv.width = cv.height = size
+  const g = cv.getContext('2d')
+  if (!g) throw new Error('2D canvas context unavailable')
+  return [cv, g]
+}
+
+const SKIN = '#ffe0cf'
+
+/** Face base: head, hair, brows, blush, nose, mouth — but NO eyes (own layer). */
+export function drawFaceBase(size = 512): HTMLCanvasElement {
+  const [cv, g] = ctx(size)
+  const px = (u: number) => u * size
+
+  g.fillStyle = '#6b4a8f'                                                   // back hair
+  g.beginPath(); g.ellipse(px(0.5), px(0.52), px(0.40), px(0.44), 0, 0, Math.PI * 2); g.fill()
+  g.fillStyle = SKIN                                                        // head
+  g.beginPath(); g.ellipse(px(0.5), px(0.52), px(0.33), px(0.38), 0, 0, Math.PI * 2); g.fill()
+  g.fillStyle = '#7d58a6'                                                   // bangs
+  g.beginPath(); g.ellipse(px(0.5), px(0.30), px(0.35), px(0.20), 0, Math.PI, Math.PI * 2); g.fill()
+
+  g.fillStyle = 'rgba(255,150,150,0.45)'                                    // blush
+  g.beginPath(); g.ellipse(px(0.31), px(0.56), px(0.055), px(0.035), 0, 0, Math.PI * 2); g.fill()
+  g.beginPath(); g.ellipse(px(0.69), px(0.56), px(0.055), px(0.035), 0, 0, Math.PI * 2); g.fill()
+
+  g.strokeStyle = '#5b3b82'; g.lineWidth = size * 0.012; g.lineCap = 'round'  // brows
+  g.beginPath(); g.moveTo(px(0.29), px(0.35)); g.quadraticCurveTo(px(0.36), px(0.325), px(0.43), px(0.35)); g.stroke()
+  g.beginPath(); g.moveTo(px(0.57), px(0.35)); g.quadraticCurveTo(px(0.64), px(0.325), px(0.71), px(0.35)); g.stroke()
+
+  g.strokeStyle = 'rgba(180,120,110,0.6)'; g.lineWidth = size * 0.008        // nose
+  g.beginPath(); g.moveTo(px(0.5), px(0.56)); g.lineTo(px(0.485), px(0.60)); g.stroke()
+  g.fillStyle = '#c65b6b'                                                    // mouth
+  g.beginPath(); g.ellipse(px(MOUTH.x), px(MOUTH.y), px(0.06), px(0.03), 0, 0, Math.PI * 2); g.fill()
+
+  return cv
+}
+
+/** One eye (white + iris + pupil + highlight), centred in its own layer. */
+export function drawEye(size = 256): HTMLCanvasElement {
+  const [cv, g] = ctx(size)
+  const c = size / 2
+  g.fillStyle = '#ffffff'
+  g.beginPath(); g.ellipse(c, c, size * 0.40, size * 0.38, 0, 0, Math.PI * 2); g.fill()
+  g.fillStyle = '#5b3b82'
+  g.beginPath(); g.ellipse(c, c + size * 0.03, size * 0.24, size * 0.30, 0, 0, Math.PI * 2); g.fill()
+  g.fillStyle = '#241033'
+  g.beginPath(); g.ellipse(c, c + size * 0.04, size * 0.12, size * 0.16, 0, 0, Math.PI * 2); g.fill()
+  g.fillStyle = '#ffffff'
+  g.beginPath(); g.ellipse(c - size * 0.08, c - size * 0.07, size * 0.06, size * 0.06, 0, 0, Math.PI * 2); g.fill()
+  return cv
+}
+
+/** Opaque skin eyelid with a soft lash line along its lower edge. */
+export function drawLid(size = 256): HTMLCanvasElement {
+  const [cv, g] = ctx(size)
+  const c = size / 2
+  g.fillStyle = SKIN
+  g.beginPath(); g.ellipse(c, c, size * 0.48, size * 0.46, 0, 0, Math.PI * 2); g.fill()
+  g.strokeStyle = '#7a5a52'; g.lineWidth = size * 0.02; g.lineCap = 'round'   // lash line
+  g.beginPath(); g.ellipse(c, c + size * 0.02, size * 0.42, size * 0.40, 0, Math.PI * 0.15, Math.PI * 0.85); g.stroke()
+  return cv
+}

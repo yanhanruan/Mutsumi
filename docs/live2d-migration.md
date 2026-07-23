@@ -128,3 +128,45 @@ Unit-tested (`parameters.test.ts`, `deform.test.ts`). This is the engine's
 heart; the WebGL upload + a visible test rig (P2) is the next slice and is where
 the first *manual* visual check will be needed (does it render in the
 transparent window, no black box).
+
+### Phase P2 — WebGL2 spike ✅ (code + static render self-verified) / ⏳ (motion: manual)
+
+An isolated, dev-only page renders the runtime end to end. **Not** wired into the
+app — no route/window points at it.
+
+- `mesh.ts` — deformable grid mesh (`buildSubMesh`/`buildGridMesh`) + Float32 flatten.
+- WebGL2 renderer: transparent clear (no black box), straight-alpha blending,
+  per-frame dynamic vertex upload, **full cleanup** on `destroy()` and **context-
+  loss recovery**. (Single-mesh `glRenderer` superseded by the parts renderer in P3.)
+- `spike/faceRig.ts` + `spike/main.ts` + `puppet-spike.html` — procedural face
+  (no art), live sliders, alpha-inspect background toggle, "simulate GPU loss".
+
+**Run it:** `npm run dev`, open `http://localhost:5173/puppet-spike.html` (plain
+Vite — not `tauri dev`). Self-verified via pixel readback: renders upright,
+transparent corners, `status: ok`.
+
+### Phase P3 — multi-part scene graph ✅ (code + closure self-verified)
+
+The single-grid spike could not fully close an eye (stretching a flat eye
+texture ≠ skin-over-eye) and dragged the brows (one shared mesh). Fixed by the
+real architecture: **a puppet is an ordered list of independent PART layers**,
+each its own mesh + texture, composited back-to-front.
+
+- `part.ts` — `Part`/`Puppet` model + `deformPuppet` (per-part, independent) +
+  `partsBoundTo`. Unit-tested (a param in one part cannot move another).
+- `webgl/puppetRenderer.ts` — draws a list of parts in order; per-part buffers +
+  texture; keeps transparent-clear, cleanup, and context-loss recovery.
+- `spike/faceRig.ts` — face split into layers: `face` (head/hair/**brows**/blush/
+  nose/mouth) → `eyeL/eyeR` (white+iris) → `lidL/lidR` (opaque skin eyelids).
+  `ParamEye*Open` binds ONLY to the eye+lid layers, so a blink is structurally
+  incapable of touching the brows. Open lifts the lid to a crease line; closed
+  drops the opaque lid fully over the eye.
+
+**Self-verified** (in-frame pixel readback): closing an eye drops eye-white
+pixels 924 → **0** (replaced by skin) — a *full* close; and the face-part
+independence is unit-guaranteed. **Manual gate:** confirm the blink/feel and,
+later, compositing in the real transparent Tauri window.
+
+Next (P4): standard params as engine features (auto blink/breath/gaze, physics),
+then a model loader (adopt Inochi2D `.inp` or a minimal own format) so real
+layered art replaces the procedural test rig.

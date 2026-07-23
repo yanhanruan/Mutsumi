@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Puppet Spike — P2</title>
+    <style>
+      :root { color-scheme: dark; font-family: system-ui, sans-serif; }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; }
+      body { display: grid; grid-template-columns: 1fr 260px; }
+
+      /* Background toggles — to confirm the canvas alpha is genuinely transparent. */
+      .stage-wrap { display: grid; place-items: center; }
+      body.bg-checker .stage-wrap {
+        background-color: #808080;
+        background-image:
+          linear-gradient(45deg, #666 25%, transparent 25%, transparent 75%, #666 75%),
+          linear-gradient(45deg, #666 25%, transparent 25%, transparent 75%, #666 75%);
+        background-size: 32px 32px;
+        background-position: 0 0, 16px 16px;
+      }
+      body.bg-dark  .stage-wrap { background: #14121a; }
+      body.bg-light .stage-wrap { background: #f2eef7; }
+
+      #stage { width: min(78vmin, 100%); aspect-ratio: 1 / 1; display: block; }
+
+      aside { background: #1b1820; color: #e8e2f0; padding: 16px; overflow-y: auto; }
+      h1 { font-size: 14px; letter-spacing: .04em; text-transform: uppercase; opacity: .7; margin: 0 0 12px; }
+      .row { margin: 12px 0; font-size: 13px; }
+      .row label { display: block; margin-bottom: 4px; opacity: .85; }
+      input[type=range] { width: 100%; }
+      .btns { display: flex; flex-wrap: wrap; gap: 6px; }
+      button { background: #3a2f52; color: #eee; border: 0; border-radius: 6px; padding: 6px 9px; font-size: 12px; cursor: pointer; }
+      button:hover { background: #4a3d69; }
+      .check { display: flex; align-items: center; gap: 6px; }
+      .meta { margin-top: 16px; font-size: 12px; opacity: .7; line-height: 1.5; }
+      code { background: #2a2436; padding: 1px 4px; border-radius: 4px; }
+    </style>
+  </head>
+  <body class="bg-checker">
+    <div class="stage-wrap"><canvas id="stage"></canvas></div>
+    <aside>
+      <h1>Puppet Spike · P2</h1>
+
+      <div class="row">
+        <label>Head X <span>(ParamAngleX)</span></label>
+        <input id="angleX" type="range" min="-30" max="30" value="0" step="1" />
+      </div>
+      <div class="row">
+        <label>Head Y <span>(ParamAngleY)</span></label>
+        <input id="angleY" type="range" min="-30" max="30" value="0" step="1" />
+      </div>
+      <div class="row">
+        <label>Mouth open <span>(ParamMouthOpenY)</span></label>
+        <input id="mouth" type="range" min="0" max="100" value="0" step="1" />
+      </div>
+      <div class="row">
+        <label>Eye open <span>(manual — disable auto-blink)</span></label>
+        <input id="eye" type="range" min="0" max="100" value="100" step="1" />
+      </div>
+
+      <div class="row check"><input id="autoBlink" type="checkbox" checked /><label style="margin:0">Auto-blink</label></div>
+      <div class="row check"><input id="sway" type="checkbox" checked /><label style="margin:0">Idle sway</label></div>
+
+      <hr style="border:0;border-top:1px solid #332b45;margin:14px 0" />
+      <div style="font-size:11px;opacity:.6;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Eye / blink tuning</div>
+      <div class="row">
+        <label>Eye open height <span>(how wide open)</span></label>
+        <input id="openLift" type="range" min="-40" max="60" value="0" step="2" />
+      </div>
+      <div class="row">
+        <label>Eye squash <span>(narrowing on close, %)</span></label>
+        <input id="eyeSquash" type="range" min="0" max="100" value="50" step="5" />
+      </div>
+      <div class="row">
+        <label>Blink speed <span>(%)</span></label>
+        <input id="blinkSpd" type="range" min="50" max="200" value="100" step="5" />
+      </div>
+
+      <div class="row btns">
+        <button id="blinkNow">Blink</button>
+        <button id="loseCtx">Simulate GPU loss</button>
+      </div>
+      <div class="row">
+        <label>Background</label>
+        <div class="btns">
+          <button id="bg-checker">Checker</button>
+          <button id="bg-dark">Dark</button>
+          <button id="bg-light">Light</button>
+        </div>
+      </div>
+
+      <div class="meta">
+        FPS: <code id="fps">–</code> · GL: <code id="status">–</code><br />
+        Checker background shows through wherever the sprite is transparent —
+        if you see a black box, alpha compositing is wrong.
+      </div>
+    </aside>
+    <script type="module" src="/src/puppet/spike/main.ts"></script>
+  </body>
+</html>
