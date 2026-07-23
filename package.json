@@ -10,6 +10,7 @@
     "tauri": "tauri",
     "test": "vitest run",
     "test:watch": "vitest",
+    "audit:assets": "vitest run src/config/assetInventory.live.test.ts --reporter=verbose",
     "release": "node scripts/bump-version.mjs"
   },
   "dependencies": {
