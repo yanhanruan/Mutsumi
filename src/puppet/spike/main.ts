@@ -92,6 +92,17 @@ function blinkValue(now: number): number {
   return p * p * (3 - 2 * p)
 }
 
+// ── eyelid opacity (kills the open-eye crease sliver) ───────────────
+// The lid is fully opaque until the eye is LID_FADE from fully open, then
+// ramps to 0 exactly at open. Keyed by part id so it survives geometry rebuilds.
+const LID_FADE = 0.15
+const lidOpacity = (open: number): number => Math.min(Math.max((1 - open) / LID_FADE, 0), 1)
+function partOpacities(openL: number, openR: number): number[] {
+  return parts.map(p =>
+    p.id === 'lidL' ? lidOpacity(openL) :
+    p.id === 'lidR' ? lidOpacity(openR) : 1)
+}
+
 // ── render loop ─────────────────────────────────────────────────────
 let raf = 0
 let last = performance.now()
@@ -123,7 +134,17 @@ function renderOnce(now: number) {
   values.set('ParamAngleY', angleY.valueAsNumber + swayY)
   values.set('ParamMouthOpenY', mouth.valueAsNumber / 100)
 
-  renderer.draw(deformPuppet(parts, defsIndex, values))
+  // Fade each eyelid out over the last sliver of opening. When open, the lid
+  // collapses to a line at the eye top; breath/sway perturb that line just
+  // enough for its lash texel to show as a faint crease. Fading it to zero as
+  // the eye nears fully open removes that artifact, while the lid stays fully
+  // opaque through the whole close (open < 1 - LID_FADE), so a blink still
+  // reads as solid skin over the eye.
+  const opacities = partOpacities(
+    values.get('ParamEyeLOpen') ?? 1,
+    values.get('ParamEyeROpen') ?? 1,
+  )
+  renderer.draw(deformPuppet(parts, defsIndex, values), opacities)
 
   fpsOut.textContent = fpsEma.toFixed(0)
   statusOut.textContent = renderer.lost ? 'context lost — restoring…' : 'ok'

@@ -5,8 +5,18 @@
  * independence is what lets the eye + eyelid close without touching the face.
  *
  * Keeps the properties the migration plan insists on: transparent clear (no
- * black box), straight-alpha compositing, deterministic resource cleanup, and
- * WebGL context-loss recovery (all parts rebuilt on restore).
+ * black box), deterministic resource cleanup, and WebGL context-loss recovery
+ * (all parts rebuilt on restore).
+ *
+ * Compositing is PREMULTIPLIED alpha end-to-end (context premultipliedAlpha +
+ * UNPACK_PREMULTIPLY_ALPHA_WEBGL on upload + `ONE, ONE_MINUS_SRC_ALPHA` blend).
+ * Straight alpha would sample a dark/gray fringe at every layer's edge: a
+ * transparent canvas pixel is (0,0,0,0), so LINEAR filtering across a shape's
+ * boundary bleeds its RGB toward black at partial coverage — visible as a thin
+ * gray oval around the eyelids/eyes. Premultiplying makes that edge blend the
+ * colour correctly (coverage scales an already-multiplied colour), so the
+ * fringe disappears. This matters for the real character art too, not just the
+ * procedural test textures.
  *
  * Lifecycle:
  *   const r = createPuppetRenderer(canvas)
@@ -25,8 +35,13 @@ export interface RenderPart {
 export interface PuppetGLRenderer {
   /** Upload each part's static uv/index buffers and texture, in draw order. */
   setPuppet(parts: readonly RenderPart[]): void
-  /** Draw one frame: `perPartVertices[i]` are part i's deformed positions. */
-  draw(perPartVertices: readonly (readonly Vec2[])[]): void
+  /**
+   * Draw one frame: `perPartVertices[i]` are part i's deformed positions.
+   * `opacities[i]` optionally scales part i's whole-layer alpha (default 1) —
+   * e.g. fading the eyelid out as the eye opens so its collapsed edge never
+   * shows a residual sliver.
+   */
+  draw(perPartVertices: readonly (readonly Vec2[])[], opacities?: readonly number[]): void
   resize(cssWidth: number, cssHeight: number, dpr?: number): void
   destroy(): void
   readonly lost: boolean
@@ -53,7 +68,10 @@ precision mediump float;
 in vec2 v_uv;
 out vec4 outColor;
 uniform sampler2D u_tex;
-void main() { outColor = texture(u_tex, v_uv); }`
+uniform float u_alpha;
+// Texture is premultiplied, so scaling all four channels by u_alpha is the
+// correct way to apply a whole-layer opacity (stays premultiplied).
+void main() { outColor = texture(u_tex, v_uv) * u_alpha; }`
 
 function compile(gl: WebGL2RenderingContext, type: number, src: string): WebGLShader {
   const sh = gl.createShader(type)
@@ -83,7 +101,7 @@ function link(gl: WebGL2RenderingContext): WebGLProgram {
 
 export function createPuppetRenderer(canvas: HTMLCanvasElement): PuppetGLRenderer {
   const gl = canvas.getContext('webgl2', {
-    alpha: true, premultipliedAlpha: false, antialias: true, depth: false,
+    alpha: true, premultipliedAlpha: true, antialias: true, depth: false,
   })
   if (!gl) throw new Error('WebGL2 not available in this environment')
 
@@ -91,6 +109,7 @@ export function createPuppetRenderer(canvas: HTMLCanvasElement): PuppetGLRendere
   let aPos = -1, aUv = -1
   let uScaleLoc: WebGLUniformLocation | null = null
   let uTexLoc:   WebGLUniformLocation | null = null
+  let uAlphaLoc: WebGLUniformLocation | null = null
   let partsGL: PartGL[] = []
 
   let lastParts: readonly RenderPart[] = []
@@ -104,9 +123,14 @@ export function createPuppetRenderer(canvas: HTMLCanvasElement): PuppetGLRendere
     aUv  = gl!.getAttribLocation(program, 'a_uv')
     uScaleLoc = gl!.getUniformLocation(program, 'u_scale')
     uTexLoc   = gl!.getUniformLocation(program, 'u_tex')
+    uAlphaLoc = gl!.getUniformLocation(program, 'u_alpha')
     gl!.clearColor(0, 0, 0, 0)
     gl!.enable(gl!.BLEND)
-    gl!.blendFuncSeparate(gl!.SRC_ALPHA, gl!.ONE_MINUS_SRC_ALPHA, gl!.ONE, gl!.ONE_MINUS_SRC_ALPHA)
+    // Premultiplied-alpha "over": src is already colour×coverage, so add it
+    // directly and attenuate the destination by (1 - srcAlpha). Same formula
+    // for the alpha channel, keeping the framebuffer premultiplied to match the
+    // context's premultipliedAlpha:true page composite.
+    gl!.blendFuncSeparate(gl!.ONE, gl!.ONE_MINUS_SRC_ALPHA, gl!.ONE, gl!.ONE_MINUS_SRC_ALPHA)
   }
 
   function buildPart(part: RenderPart): PartGL {
@@ -131,7 +155,7 @@ export function createPuppetRenderer(canvas: HTMLCanvasElement): PuppetGLRendere
 
     gl!.bindTexture(gl!.TEXTURE_2D, texture)
     gl!.pixelStorei(gl!.UNPACK_FLIP_Y_WEBGL, false)
-    gl!.pixelStorei(gl!.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false)
+    gl!.pixelStorei(gl!.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true)
     gl!.texImage2D(gl!.TEXTURE_2D, 0, gl!.RGBA, gl!.RGBA, gl!.UNSIGNED_BYTE, part.image)
     gl!.texParameteri(gl!.TEXTURE_2D, gl!.TEXTURE_MIN_FILTER, gl!.LINEAR)
     gl!.texParameteri(gl!.TEXTURE_2D, gl!.TEXTURE_MAG_FILTER, gl!.LINEAR)
@@ -172,7 +196,7 @@ export function createPuppetRenderer(canvas: HTMLCanvasElement): PuppetGLRendere
       partsGL = parts.map(buildPart)
     },
 
-    draw(perPartVertices) {
+    draw(perPartVertices, opacities) {
       if (lost || destroyed || partsGL.length === 0) return
       gl.viewport(0, 0, canvas.width, canvas.height)
       gl.clear(gl.COLOR_BUFFER_BIT)
@@ -185,6 +209,9 @@ export function createPuppetRenderer(canvas: HTMLCanvasElement): PuppetGLRendere
         const p = partsGL[i]
         const verts = perPartVertices[i]
         if (!verts || p.indexCount === 0) continue
+        const alpha = opacities?.[i] ?? 1
+        if (alpha <= 0) continue                 // fully transparent — skip the draw
+        gl.uniform1f(uAlphaLoc, alpha)
         gl.bindVertexArray(p.vao)
         gl.bindBuffer(gl.ARRAY_BUFFER, p.posBuf)
         gl.bufferSubData(gl.ARRAY_BUFFER, 0, flattenVec2(verts))
