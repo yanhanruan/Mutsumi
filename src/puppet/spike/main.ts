@@ -5,15 +5,17 @@
  *     → per-part deform() → layered WebGL2 draw on a transparent canvas.
  *
  * The eyes + eyelids are their own layers, so a blink closes them fully without
- * touching the brows. Automatic breathing + random blink + idle sway; live
- * sliders for head/mouth/eye and eye-shape tuning; background toggle; a
- * "simulate GPU loss" button. NOT part of the production app or its build.
+ * touching the brows. Automatic breathing + random blink; live sliders for
+ * head/mouth/eye and eye-shape tuning; a "Real Mutsumi" toggle that swaps the
+ * placeholder for her actual idle frame; background toggle; a "simulate GPU
+ * loss" button. NOT part of the production app or its build.
  */
 import {
-  buildFacePartsGeometry, drawFaceBase, drawEye, drawLid, FACE_TUNING_DEFAULTS,
+  buildFacePartsGeometry, buildRealFaceGeometry,
+  drawFaceBase, drawEye, drawLid, FACE_TUNING_DEFAULTS,
 } from './faceRig'
 import { createPuppetRenderer, type RenderPart } from '../webgl/puppetRenderer'
-import { deformPuppet, type Part } from '../part'
+import { deformPuppet, type Part, type PartGeom } from '../part'
 import { defaultValues, indexDefs } from '../parameters'
 
 function el<T extends HTMLElement>(id: string): T {
@@ -35,11 +37,35 @@ const defsIndex = indexDefs(geom.defs)
 const values = defaultValues(geom.defs)
 let parts: Part[] = []
 
+// Real-art layer (loaded async). When decoded AND enabled, the puppet becomes a
+// single deforming layer showing Mutsumi's actual idle frame (eyes still baked
+// in) instead of the procedural placeholder. Its bindings only use head params,
+// which the procedural defs already include, so defsIndex/values are unchanged.
+let realImg: HTMLImageElement | null = null
+let realParts: PartGeom[] = []
+let realMode = false
+
 function rebuildPuppet() {
-  parts = geom.parts.map(p => ({ ...p, image: imageFor(p.id) }))
+  const useReal = realMode && realImg !== null
+  const source: PartGeom[] = useReal ? realParts : geom.parts
+  parts = source.map(p => ({ ...p, image: useReal ? realImg! : imageFor(p.id) }))
   renderer.setPuppet(parts as RenderPart[])
 }
 rebuildPuppet()
+
+// Decode the real frame off the main thread, then swap it in if real mode is on.
+{
+  const im = new Image()
+  im.decoding = 'async'
+  im.src = '/assets/idle/frame_001.webp'
+  im.decode()
+    .then(() => {
+      realImg = im
+      realParts = buildRealFaceGeometry(im.naturalWidth / im.naturalHeight).parts
+      if (realMode) rebuildPuppet()
+    })
+    .catch((e: unknown) => console.error('real frame failed to load', e))
+}
 
 // ── controls ────────────────────────────────────────────────────────
 const angleX = el<HTMLInputElement>('angleX')
@@ -47,7 +73,6 @@ const angleY = el<HTMLInputElement>('angleY')
 const mouth  = el<HTMLInputElement>('mouth')
 const eye    = el<HTMLInputElement>('eye')
 const autoBlink = el<HTMLInputElement>('autoBlink')
-const sway      = el<HTMLInputElement>('sway')
 const openLift  = el<HTMLInputElement>('openLift')    // eye-open height (×1000)
 const eyeSquash = el<HTMLInputElement>('eyeSquash')   // eye narrowing on close (%)
 const blinkSpd  = el<HTMLInputElement>('blinkSpd')    // blink speed (%)
@@ -66,6 +91,9 @@ function rebuildGeom() {
 }
 openLift.addEventListener('input', rebuildGeom)
 eyeSquash.addEventListener('input', rebuildGeom)
+
+const realArt = el<HTMLInputElement>('realArt')
+realArt.addEventListener('change', () => { realMode = realArt.checked; rebuildPuppet() })
 
 el<HTMLButtonElement>('blinkNow').addEventListener('click', () => startBlink(performance.now()))
 el<HTMLButtonElement>('loseCtx').addEventListener('click', () => {
@@ -128,15 +156,17 @@ function renderOnce(now: number) {
     values.set('ParamEyeROpen', e)
   }
 
-  const swayX = sway.checked ? 7 * Math.sin(now * 0.0007) : 0
-  const swayY = sway.checked ? 4 * Math.sin(now * 0.0009) : 0
-  values.set('ParamAngleX', angleX.valueAsNumber + swayX)
-  values.set('ParamAngleY', angleY.valueAsNumber + swayY)
+  // No ambient sway: her idle art has none, and an ambient horizontal slide on a
+  // full-body layer bends the torso (the "PVZ sunflower" wobble) — structural,
+  // not tunable, until the head is its own part rotating about a neck. Breath
+  // alone carries the idle life; head params stay slider-driven for testing.
+  values.set('ParamAngleX', angleX.valueAsNumber)
+  values.set('ParamAngleY', angleY.valueAsNumber)
   values.set('ParamMouthOpenY', mouth.valueAsNumber / 100)
 
   // Fade each eyelid out over the last sliver of opening. When open, the lid
-  // collapses to a line at the eye top; breath/sway perturb that line just
-  // enough for its lash texel to show as a faint crease. Fading it to zero as
+  // collapses to a line at the eye top; breath perturbs that line just enough
+  // for its lash texel to show as a faint crease. Fading it to zero as
   // the eye nears fully open removes that artifact, while the lid stays fully
   // opaque through the whole close (open < 1 - LID_FADE), so a blink still
   // reads as solid skin over the eye.

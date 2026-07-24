@@ -138,6 +138,64 @@ export function buildFacePartsGeometry(tuning: FaceTuning = {}): { parts: PartGe
 /** Order the part textures must be attached in — matches buildFacePartsGeometry. */
 export type FacePartId = 'face' | 'eyeL' | 'lidL' | 'eyeR' | 'lidR'
 
+// ── real-art single-layer face (migration increment 1) ──────────────────
+// Renders an actual character frame (eyes still baked in) as ONE deforming
+// layer, to prove real art loads + warps in the puppet before we cut the eyes
+// and lids into their own layers. Portrait mesh sized to the image aspect.
+
+const REAL_COLS = 16, REAL_ROWS = 28
+const REAL_SWAY = 0.08     // model-units the head slides at full ParamAngle
+const REAL_BREATH = 0.02   // model-units the upper body rises at full ParamBreath
+
+const smoothstep = (edge0: number, edge1: number, x: number): number => {
+  const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)))
+  return t * t * (3 - 2 * t)
+}
+
+/**
+ * Head/breath motion for a full-body portrait: weighted so it's full-strength
+ * over the upper body and fades to 0 by the waist — the feet never slide. No
+ * shear (that splays a full-body image); just a masked slide + breath rise.
+ */
+function realBodyMotion(mesh: Mesh, halfH: number): ParamBinding[] {
+  const n = mesh.vertices.length
+  const w = (b: Vec2) => smoothstep(-halfH, 0, b.y)   // 0 at feet → 1 at mid-body & up
+  return [
+    { paramId: 'ParamAngleX', keyforms: [
+      { at: 0,   offsets: mesh.vertices.map(b => ({ x: -REAL_SWAY * w(b), y: 0 })) },
+      { at: 0.5, offsets: zeros(n) },
+      { at: 1,   offsets: mesh.vertices.map(b => ({ x:  REAL_SWAY * w(b), y: 0 })) },
+    ] },
+    { paramId: 'ParamAngleY', keyforms: [
+      { at: 0,   offsets: mesh.vertices.map(b => ({ x: 0, y: -REAL_SWAY * w(b) })) },
+      { at: 0.5, offsets: zeros(n) },
+      { at: 1,   offsets: mesh.vertices.map(b => ({ x: 0, y:  REAL_SWAY * w(b) })) },
+    ] },
+    { paramId: 'ParamBreath', keyforms: [
+      { at: 0, offsets: zeros(n) },
+      { at: 1, offsets: mesh.vertices.map(b => ({ x: 0, y: REAL_BREATH * w(b) })) },
+    ] },
+  ]
+}
+
+/**
+ * One-layer geometry for a real character frame. `imgAspect` = width/height of
+ * the source image; the mesh matches it so the art isn't squished. Only head
+ * params are bound (eyes/mouth are still baked into the frame this increment).
+ */
+export function buildRealFaceGeometry(imgAspect: number): { parts: PartGeom[]; defs: ParameterDef[] } {
+  const defs: ParameterDef[] = [
+    { id: 'ParamAngleX', min: -30, max: 30, default: 0 },
+    { id: 'ParamAngleY', min: -30, max: 30, default: 0 },
+    { id: 'ParamBreath', min: 0,   max: 1,  default: 0 },
+  ]
+  const height = FACE_SIZE
+  const width  = height * imgAspect
+  const mesh   = buildGridMesh(REAL_COLS, REAL_ROWS, width, height)
+  const parts: PartGeom[] = [{ id: 'face', mesh, bindings: realBodyMotion(mesh, height / 2) }]
+  return { parts, defs }
+}
+
 // ── procedural textures (DOM; not unit-tested) ──────────────────────
 
 function ctx(size: number): [HTMLCanvasElement, CanvasRenderingContext2D] {
