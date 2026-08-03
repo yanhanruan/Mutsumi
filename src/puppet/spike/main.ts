@@ -11,8 +11,9 @@
  * loss" button. NOT part of the production app or its build.
  */
 import {
-  buildFacePartsGeometry, buildRealFaceGeometry,
-  drawFaceBase, drawEye, drawLid, FACE_TUNING_DEFAULTS,
+  buildFacePartsGeometry, buildRealFaceGeometry, buildLayeredFaceGeometry,
+  drawFaceBase, drawEye, drawLid, FACE_TUNING_DEFAULTS, FACE_SIZE,
+  type LidShape, type EyeSpan,
 } from './faceRig'
 import { createPuppetRenderer, type RenderPart } from '../webgl/puppetRenderer'
 import { deformPuppet, type Part, type PartGeom } from '../part'
@@ -37,35 +38,210 @@ const defsIndex = indexDefs(geom.defs)
 const values = defaultValues(geom.defs)
 let parts: Part[] = []
 
-// Real-art layer (loaded async). When decoded AND enabled, the puppet becomes a
-// single deforming layer showing Mutsumi's actual idle frame (eyes still baked
-// in) instead of the procedural placeholder. Its bindings only use head params,
-// which the procedural defs already include, so defsIndex/values are unchanged.
-let realImg: HTMLImageElement | null = null
+// Real-art layers. Mutsumi is authored as many aligned PSD layers (see
+// docs/puppet-eye-layers.md). At load we composite them into three deforming
+// groups — back (through the open eyes) → lid (skin curtain + moving lash) →
+// front (eyebrows, bangs) — and rig the lid to shut for a real blink. The lid is
+// SYNTHESISED: an opaque skin patch (sampled from her face) under her lash, so
+// the source needs no dedicated eyelid layer. If the layer set is absent, fall
+// back to the single baked idle frame (breathing only).
+const MUTSUMI_DIR  = '/assets/mutsumi_layers'
+const BACK_LAYERS  = ['back_hair', 'leg_left', 'leg_right', 'bottomwear', 'topwear',
+                      'hand_left', 'hand_right', 'face', 'ears', 'nose', 'mouth', 'irides']
+const FRONT_LAYERS = ['eyebrow', 'hair_front']
+// The eyelash is split: only the MAIN lash rides the moving lid; the OUTER
+// CORNER is a fixed anchor (the eye's tail stays put as the lid sweeps down).
+// Both are optional splits — fall back to the un-split `eyelash` if absent.
+const LASH_MOVING  = 'eyelash_original'
+const LASH_ANCHOR  = 'eyelash_outer_corner'
+const FRAME_SRC    = '/assets/idle/frame_001.webp'
+
+let realImages: Record<string, TexImageSource> | null = null
 let realParts: PartGeom[] = []
 let realMode = false
+let realIsLayered = false
 
 function rebuildPuppet() {
-  const useReal = realMode && realImg !== null
+  const useReal = realMode && realImages !== null
   const source: PartGeom[] = useReal ? realParts : geom.parts
-  parts = source.map(p => ({ ...p, image: useReal ? realImg! : imageFor(p.id) }))
+  parts = source.map(p => ({ ...p, image: useReal ? realImages![p.id] : imageFor(p.id) }))
   renderer.setPuppet(parts as RenderPart[])
 }
 rebuildPuppet()
 
-// Decode the real frame off the main thread, then swap it in if real mode is on.
-{
+function decode(src: string): Promise<HTMLImageElement> {
   const im = new Image()
   im.decoding = 'async'
-  im.src = '/assets/idle/frame_001.webp'
-  im.decode()
-    .then(() => {
-      realImg = im
-      realParts = buildRealFaceGeometry(im.naturalWidth / im.naturalHeight).parts
-      if (realMode) rebuildPuppet()
-    })
-    .catch((e: unknown) => console.error('real frame failed to load', e))
+  im.src = src
+  return im.decode().then(() => im)
 }
+
+/** Decode, or resolve null if the asset is missing (for optional split layers). */
+const tryDecode = (src: string): Promise<HTMLImageElement | null> =>
+  decode(src).then(im => im, () => null)
+
+function makeCanvas(w: number, h: number): [HTMLCanvasElement, CanvasRenderingContext2D] {
+  const cv = document.createElement('canvas')
+  cv.width = w; cv.height = h
+  const g = cv.getContext('2d', { willReadFrequently: true })
+  if (!g) throw new Error('2D context unavailable')
+  return [cv, g]
+}
+
+const imageCtx = (im: HTMLImageElement): CanvasRenderingContext2D => {
+  const [, g] = makeCanvas(im.naturalWidth, im.naturalHeight)
+  g.drawImage(im, 0, 0)
+  return g
+}
+
+/** Columns (x) that hold any alpha across the union of the given images. */
+function presentColumns(imgs: HTMLImageElement[], W: number, H: number): boolean[] {
+  const present = new Array<boolean>(W).fill(false)
+  for (const im of imgs) {
+    const { data } = imageCtx(im).getImageData(0, 0, W, H)
+    for (let x = 0; x < W; x++)
+      for (let y = 0; y < H; y++)
+        if (data[(y * W + x) * 4 + 3] > 10) { present[x] = true; break }
+  }
+  return present
+}
+
+/** Alpha bbox of pre-fetched pixels restricted to columns [xlo, xhi). */
+function bboxInColumns(data: Uint8ClampedArray, W: number, H: number, xlo: number, xhi: number) {
+  let x0 = W, y0 = H, x1 = -1, y1 = -1
+  for (let y = 0; y < H; y++)
+    for (let x = xlo; x < xhi; x++)
+      if (data[(y * W + x) * 4 + 3] > 10) {
+        if (x < x0) x0 = x; if (x > x1) x1 = x
+        if (y < y0) y0 = y; if (y > y1) y1 = y
+      }
+  return { x0, y0, x1, y1 }
+}
+
+/** Median of bright skin pixels in a small patch just above an eye (avoids the
+ *  lash/outline), used to tint that eye's curtain to its LOCAL skin tone. */
+function localSkin(faceData: Uint8ClampedArray, W: number, cx: number, eyeTop: number): [number, number, number] {
+  const rs: number[] = [], gs: number[] = [], bs: number[] = []
+  for (let y = eyeTop - 22; y < eyeTop - 8; y++)
+    for (let x = cx - 9; x <= cx + 9; x++) {
+      const i = (y * W + x) * 4
+      if (faceData[i] > 150 && faceData[i + 3] > 200) { rs.push(faceData[i]); gs.push(faceData[i + 1]); bs.push(faceData[i + 2]) }
+    }
+  const med = (a: number[], d: number): number => (a.length ? a.sort((p, q) => p - q)[a.length >> 1] : d)
+  return [med(rs, 245), med(gs, 227), med(bs, 218)]
+}
+
+/** One eye's pixel geometry + the curtain rectangle/skin used to synthesise it. */
+interface EyeGeom { span: EyeSpan; curtain: { x0: number; x1: number; top: number; bot: number; skin: [number, number, number] } }
+
+/**
+ * Per-eye geometry from the real art. The irides layer is split into two eyes at
+ * the empty nose-bridge column (robust — no width-sorting that a stray speck
+ * could fool); each eye's horizontal extent comes from the union of iris + lash
+ * + corner on that side, and its vertical band from that side's iris box. The
+ * curtain is tinted with the eye's LOCAL skin so a shaded brow doesn't patch.
+ */
+function computeEyes(
+  imgs: { irides: HTMLImageElement; face: HTMLImageElement }, lashMoving: HTMLImageElement,
+  lashAnchor: HTMLImageElement | null, W: number, H: number,
+): EyeGeom[] {
+  const irisData = imageCtx(imgs.irides).getImageData(0, 0, W, H).data
+  const faceData = imageCtx(imgs.face).getImageData(0, 0, W, H).data
+  const irisCols = presentColumns([imgs.irides], W, H)
+  const xs = irisCols.map((p, i) => (p ? i : -1)).filter(i => i >= 0)
+  const lo = xs[0], hi = xs[xs.length - 1]
+  let gapS = -1, gapE = -1
+  for (let x = lo; x <= hi; x++) if (!irisCols[x]) { if (gapS < 0) gapS = x; gapE = x }
+  const bridge = gapS >= 0 ? (gapS + gapE) >> 1 : (lo + hi) >> 1
+
+  const unionCols = presentColumns([imgs.irides, lashMoving, ...(lashAnchor ? [lashAnchor] : [])], W, H)
+  const side = (xlo: number, xhi: number): EyeGeom => {
+    const iris = bboxInColumns(irisData, W, H, xlo, xhi)
+    let ex0 = xhi, ex1 = xlo
+    for (let x = xlo; x < xhi; x++) if (unionCols[x]) { if (x < ex0) ex0 = x; if (x > ex1) ex1 = x }
+    const cx = (ex0 + ex1) / 2
+    return {
+      span: {
+        cx: cx / W,
+        half: Math.max(1, (ex1 - ex0) / 2) / W,
+        pinV: (iris.y0 - 38) / H,
+        lashV: iris.y0 / H,
+        travel: ((iris.y1 - iris.y0) / H) * FACE_SIZE,
+      },
+      curtain: { x0: ex0 - 2, x1: ex1 + 2, top: iris.y0 - 38, bot: iris.y0 + 3, skin: localSkin(faceData, W, Math.round(cx), iris.y0) },
+    }
+  }
+  return [side(0, bridge), side(bridge, W)]
+}
+
+function compositeLayers(imgs: HTMLImageElement[], w: number, h: number): HTMLCanvasElement {
+  const [cv, g] = makeCanvas(w, h)
+  for (const im of imgs) g.drawImage(im, 0, 0)
+  return cv
+}
+
+async function loadMutsumiLayers(): Promise<{
+  back: HTMLCanvasElement; lidSkin: HTMLCanvasElement; lidLash: HTMLCanvasElement
+  front: HTMLCanvasElement; aspect: number; lidShape: LidShape
+}> {
+  const names = [...new Set([...BACK_LAYERS, ...FRONT_LAYERS, 'irides', 'face'])]
+  const imgs: Record<string, HTMLImageElement> = {}
+  await Promise.all(names.map(n => decode(`${MUTSUMI_DIR}/${n}.png`).then(im => { imgs[n] = im })))
+  const W = imgs.face.naturalWidth, H = imgs.face.naturalHeight
+
+  // The main lash rides the lid; prefer the split-out original, else the un-split
+  // eyelash. The outer corner is a fixed pivot buried in BACK (optional).
+  const lashMoving = await tryDecode(`${MUTSUMI_DIR}/${LASH_MOVING}.png`)
+    ?? await decode(`${MUTSUMI_DIR}/eyelash.png`)
+  const lashAnchor = await tryDecode(`${MUTSUMI_DIR}/${LASH_ANCHOR}.png`)
+
+  // The outer-corner lash is the eye's fixed pivot. It rides in BACK (over the
+  // irides, under the lid), so when the lid shuts the descending skin BURIES it —
+  // rather than leaving it floating on top of the closed eye.
+  const back  = compositeLayers(
+    [...BACK_LAYERS.map(n => imgs[n]), ...(lashAnchor ? [lashAnchor] : [])], W, H)
+  const front = compositeLayers(FRONT_LAYERS.map(n => imgs[n]), W, H)
+
+  // Per-eye geometry from the real art (see computeEyes).
+  const eyeGeoms = computeEyes({ irides: imgs.irides, face: imgs.face }, lashMoving, lashAnchor, W, H)
+
+  // lidSkin: an opaque skin curtain per eye, each tinted to that eye's LOCAL skin
+  // so a shaded brow doesn't leave a mismatched patch. The rects are then FEATHERED
+  // (soft-blurred edges) so the curtain blends into the surrounding skin instead of
+  // reading as a hard-edged block. lidLash: her moving lash, deformed to the
+  // designed closed curve on top of the skin.
+  const [rects, rg] = makeCanvas(W, H)
+  for (const { curtain: c } of eyeGeoms) {
+    rg.fillStyle = `rgb(${c.skin[0]},${c.skin[1]},${c.skin[2]})`
+    rg.fillRect(c.x0, c.top, c.x1 - c.x0, c.bot - c.top)
+  }
+  const [lidSkin, sg] = makeCanvas(W, H)
+  sg.filter = 'blur(3px)'
+  sg.drawImage(rects, 0, 0)
+  const lidLash = compositeLayers([lashMoving], W, H)
+
+  const lidShape: LidShape = { eyes: eyeGeoms.map(e => e.span) }
+  return { back, lidSkin, lidLash, front, aspect: W / H, lidShape }
+}
+
+// Prefer the layered blink; fall back to the single baked frame if absent.
+loadMutsumiLayers()
+  .then(({ back, lidSkin, lidLash, front, aspect, lidShape }) => {
+    realImages = { back, lidSkin, lidLash, front }
+    realParts = buildLayeredFaceGeometry(aspect, lidShape).parts
+    realIsLayered = true
+    if (realMode) rebuildPuppet()
+  })
+  .catch(() =>
+    decode(FRAME_SRC)
+      .then(im => {
+        realImages = { face: im }
+        realParts = buildRealFaceGeometry(im.naturalWidth / im.naturalHeight).parts
+        realIsLayered = false
+        if (realMode) rebuildPuppet()
+      })
+      .catch((e: unknown) => console.error('real art failed to load', e)),
+  )
 
 // ── controls ────────────────────────────────────────────────────────
 const angleX = el<HTMLInputElement>('angleX')
@@ -105,7 +281,10 @@ for (const bg of ['checker', 'dark', 'light'] as const) {
 }
 
 // ── blink state machine ─────────────────────────────────────────────
-const BASE_CLOSE = 70, BASE_HOLD = 40, BASE_OPEN = 130
+// Human blink kinematics: a fast, ballistic downstroke (~75ms) and a markedly
+// slower, smoother reopen (~180ms), with a brief hold shut. Close uses ease-OUT
+// (snaps then settles onto the lid); open uses smoothstep (slow, gentle lift).
+const BASE_CLOSE = 75, BASE_HOLD = 30, BASE_OPEN = 180
 let blinkStart = -Infinity
 let nextBlinkAt = 0
 function startBlink(now: number) { blinkStart = now }
@@ -114,10 +293,10 @@ function blinkValue(now: number): number {
   const close = BASE_CLOSE * scale, hold = BASE_HOLD * scale, open = BASE_OPEN * scale
   const e = now - blinkStart
   if (e < 0 || e > close + hold + open) return 1
-  if (e < close)          return 1 - e / close
+  if (e < close)        { const p = e / close;         return (1 - p) * (1 - p) }  // ballistic snap shut
   if (e < close + hold)   return 0
   const p = (e - close - hold) / open
-  return p * p * (3 - 2 * p)
+  return p * p * (3 - 2 * p)                                                        // gentle reopen
 }
 
 // ── eyelid opacity (kills the open-eye crease sliver) ───────────────
@@ -177,7 +356,9 @@ function renderOnce(now: number) {
   renderer.draw(deformPuppet(parts, defsIndex, values), opacities)
 
   fpsOut.textContent = fpsEma.toFixed(0)
-  statusOut.textContent = renderer.lost ? 'context lost — restoring…' : 'ok'
+  statusOut.textContent = renderer.lost ? 'context lost — restoring…'
+    : realMode ? (realIsLayered ? 'layered blink' : 'baked frame (no layers found)')
+    : 'ok'
 }
 
 // ── sizing + lifecycle ──────────────────────────────────────────────

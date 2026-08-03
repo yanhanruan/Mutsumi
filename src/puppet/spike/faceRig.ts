@@ -143,7 +143,9 @@ export type FacePartId = 'face' | 'eyeL' | 'lidL' | 'eyeR' | 'lidR'
 // layer, to prove real art loads + warps in the puppet before we cut the eyes
 // and lids into their own layers. Portrait mesh sized to the image aspect.
 
-const REAL_COLS = 16, REAL_ROWS = 28
+// Dense enough (≈7 columns across each eye) that the designed closed-eye CURVE
+// resolves smoothly rather than as a chunky few-vertex jump.
+const REAL_COLS = 80, REAL_ROWS = 48
 const REAL_SWAY = 0.08     // model-units the head slides at full ParamAngle
 const REAL_BREATH = 0.02   // model-units the upper body rises at full ParamBreath
 
@@ -193,6 +195,114 @@ export function buildRealFaceGeometry(imgAspect: number): { parts: PartGeom[]; d
   const width  = height * imgAspect
   const mesh   = buildGridMesh(REAL_COLS, REAL_ROWS, width, height)
   const parts: PartGeom[] = [{ id: 'face', mesh, bindings: realBodyMotion(mesh, height / 2) }]
+  return { parts, defs }
+}
+
+// ── layered real-art blink rig (migration increment 2: real parametric blink) ──
+// Four aligned full-canvas layers, in draw order:
+//   back    — everything through the open eyes (body, hair, face-skin, irides)
+//   lidSkin — an opaque SKIN curtain that occludes the iris from the top
+//   lidLash — the moving eyelash, deformed to a DESIGNED closed-eye curve
+//   front   — features that stay above the lid (eyebrows, front hair)
+// All share one mesh + head bindings so they deform together and never drift.
+//
+// The two lid layers both shut on ParamEyeLOpen, but with DIFFERENT closed
+// shapes — this is what makes the blink read like a real eyelid rather than a
+// panel sliding:
+//   · lidSkin closes with a shallow, corner-covering arc: the skin pins at the
+//     top and stretches down over the iris (aperture closes from the top), with
+//     a high corner floor so the eye is fully occluded across its width.
+//   · lidLash closes onto a DEEP, corner-pivoting ‿ curve with lifted outer
+//     tips — the centre drops most, the canthi least, so the lash CHANGES
+//     CURVATURE as it descends, interpolating toward a designed closed-eye line.
+// Opaque skin occludes the iris (no squash, no cross-fade, no ghosting); the
+// lash is one texture warped along a curve (no second frame). See
+// docs/puppet-eye-layers.md.
+
+export type LayeredPartId = 'back' | 'lidSkin' | 'lidLash' | 'front'
+
+/** Kept for callers/tests referring to the old single-travel default. */
+export const EYELID_TRAVEL = 0.1
+
+/** One eye's geometry in the mesh's uv space (v=0 at the top). */
+export interface EyeSpan {
+  cx: number     // uv-x centre
+  half: number   // uv-x half-width (centre → outer corner)
+  pinV: number   // uv-v where the curtain top is pinned
+  lashV: number  // uv-v of the lash at rest
+  travel: number // model-units the eye centre drops to reach the lower lid
+}
+
+/** Shape of the eyelid shutter. */
+export interface LidShape {
+  /** Per-eye geometry; each eye pivots at its own corners. */
+  eyes?: EyeSpan[]
+  /** Corner drop fraction for the SKIN curtain (high → covers the iris corners). */
+  skinFloor?: number
+  /** Corner drop fraction for the LASH (low → a deep, pronounced closed arc). */
+  lashFloor?: number
+  /** Fullness of the lash arc (higher → flatter centre, sharper fall to corners). */
+  lashPow?: number
+  /** Slight upturn of the outer lash tips (fraction of travel lifted back up). */
+  tipLift?: number
+}
+export const LID_SHAPE_DEFAULTS: Required<LidShape> =
+  { eyes: [], skinFloor: 0.74, lashFloor: 0.20, lashPow: 1.7, tipLift: 0.14 }
+
+/**
+ * Model-units a lid vertex at (u,v) drops when the eye is fully closed, for the
+ * eye that owns column u (0 elsewhere). `wv` pins the skin above the eye and
+ * ramps to full at/below the lash; the horizontal profile is `floor` at the
+ * corners rising to full (1) at the centre, shaped by `pow`, with an optional
+ * `tip` upturn near the outer corners. Skin and lash call this with different
+ * floors/pow so they close to different shapes over the same mesh.
+ */
+function lidDrop(u: number, v: number, eyes: EyeSpan[], floor: number, pow: number, tip: number): number {
+  let drop = 0
+  for (const e of eyes) {
+    const d = Math.abs(u - e.cx) / e.half
+    if (d > 1.2) continue                                   // column belongs to another eye
+    const dc = Math.min(1, d)
+    let s = floor + (1 - floor) * Math.cos((Math.PI / 2) * dc) ** pow   // floor..1
+    if (tip > 0 && dc > 0.7) s -= tip * (dc - 0.7) / 0.3    // lift the outer tips
+    drop = Math.max(drop, smoothstep(e.pinV, e.lashV, v) * s * e.travel)
+  }
+  return drop
+}
+
+export function buildLayeredFaceGeometry(
+  imgAspect: number,
+  lid: LidShape = {},
+): { parts: PartGeom[]; defs: ParameterDef[] } {
+  const { eyes, skinFloor, lashFloor, lashPow, tipLift } = { ...LID_SHAPE_DEFAULTS, ...lid }
+  const defs: ParameterDef[] = [
+    { id: 'ParamAngleX',   min: -30, max: 30, default: 0 },
+    { id: 'ParamAngleY',   min: -30, max: 30, default: 0 },
+    { id: 'ParamBreath',   min: 0,   max: 1,  default: 0 },
+    { id: 'ParamEyeLOpen', min: 0,   max: 1,  default: 1 },
+  ]
+  const height   = FACE_SIZE
+  const width    = height * imgAspect
+  const mesh     = buildGridMesh(REAL_COLS, REAL_ROWS, width, height)
+  const body     = realBodyMotion(mesh, height / 2)
+
+  // A ParamEyeLOpen binding whose closed (0) keyform drops each vertex by
+  // lidDrop(...) with the given profile, and open (1) is rest. Composes with
+  // breath, so the lid still breathes while it blinks.
+  const shutter = (floor: number, pow: number, tip: number): ParamBinding => ({
+    paramId: 'ParamEyeLOpen',
+    keyforms: [
+      { at: 0, offsets: offs(mesh, uv => ({ x: 0, y: -lidDrop(uv.x, uv.y, eyes, floor, pow, tip) })) },
+      { at: 1, offsets: zeros(mesh.vertices.length) },
+    ],
+  })
+
+  const parts: PartGeom[] = [
+    { id: 'back',    mesh, bindings: body },
+    { id: 'lidSkin', mesh, bindings: [...body, shutter(skinFloor, 1.5, 0)] },
+    { id: 'lidLash', mesh, bindings: [...body, shutter(lashFloor, lashPow, tipLift)] },
+    { id: 'front',   mesh, bindings: body },
+  ]
   return { parts, defs }
 }
 
