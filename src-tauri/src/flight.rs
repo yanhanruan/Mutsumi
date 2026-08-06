@@ -62,6 +62,15 @@ const BOB_PERIOD_SECS: f64 = 6.0;
 /// Movement tick. ~60 Hz keeps the glide smooth; set_position is cheap.
 const TICK_MS: u64 = 16;
 
+/// How often the mover re-verifies, from its OWN input sample, that flight
+/// should still be happening — a safety net so the window never keeps gliding
+/// after the user has come back. See the recheck in `run_flight` for why this
+/// exists (the idle monitor is the primary off-switch, but a missed
+/// suspend/resume transition would otherwise pin flight on forever). At
+/// TICK_MS=16 ms, 32 ticks ≈ every 0.5 s — lands within half a second of the
+/// user's return, far too infrequent to cost anything.
+const INPUT_RECHECK_TICKS: u64 = 32;
+
 // ── Event payloads ─────────────────────────────────────────────────
 
 #[derive(Serialize, Clone, Copy)]
@@ -179,6 +188,14 @@ pub fn toggle_manual(app: &AppHandle) {
 
 pub fn screensaver_enabled() -> bool {
     SCREENSAVER_ENABLED.load(Ordering::Relaxed)
+}
+
+/// Whether manual (Ctrl+Alt+F) flight is engaged. Read by the mover's input
+/// recheck so a manual flight keeps going even while the user is active —
+/// manual flight is intentional and must not self-land on input.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn manual_active() -> bool {
+    mode_slot().lock().unwrap().manual
 }
 
 /// Current screensaver wait threshold in seconds (read by idle.rs each poll).
@@ -407,10 +424,44 @@ fn run_flight(app: AppHandle, stop: Arc<AtomicBool>) {
 
     let dt = TICK_MS as f64 / 1000.0;
     let mut t = 0.0_f64;
+    let mut tick: u64 = 0;
 
     while !stop.load(Ordering::Relaxed) {
         thread::sleep(Duration::from_millis(TICK_MS));
         t += dt;
+        tick += 1;
+
+        // ── Input safety net ────────────────────────────────────────
+        // The idle monitor (idle.rs) is the primary off-switch: on the user's
+        // return it reports not-idle, refresh() calls set_active(false), and
+        // this thread's stop flag flips. But that hinges on a single one-shot
+        // transition. If it is ever missed — a suspend/resume where the idle
+        // poll's transition never lands, a dropped poll — nothing else stops
+        // us, and the window keeps repositioning under the cursor every tick,
+        // which fights the user's startDragging() and makes the pet feel
+        // stuck-in-flight and un-draggable (clicks still work; only the drag
+        // loses the position fight). So the mover re-checks its OWN input
+        // sample periodically and self-lands the moment idle-driven flight is
+        // no longer warranted. Manual (Ctrl+Alt+F) flight is intentional and
+        // ignores input — only manual_active() being false lets us land here.
+        #[cfg(windows)]
+        if tick % INPUT_RECHECK_TICKS == 0 {
+            let idle_now = crate::idle::should_fly(
+                crate::idle::get_input_secs(),
+                screensaver_wait_secs(),
+                crate::idle::is_display_sleep_prevented(),
+            );
+            if !effective_active(manual_active(), idle_now, screensaver_enabled()) {
+                // Route through the normal controller path so mode state, the
+                // toggle-balloon-mode event, and the frontend fly_exit morph
+                // all fire exactly as a monitor-driven landing would. This
+                // also flips our own stop flag (via set_active), so the while
+                // guard ends the loop below. Skip this tick's move so the
+                // window rests where the fly_exit morph expects it.
+                set_idle_active(&app, idle_now);
+                continue;
+            }
+        }
 
         let bob = BOB_AMP_PX_PER_SEC
             * (t * std::f64::consts::TAU / BOB_PERIOD_SECS).sin();
@@ -556,6 +607,47 @@ mod tests {
     fn nothing_requested_stays_grounded() {
         assert!(!effective_active(false, false, false));
         assert!(!effective_active(false, false, true));
+    }
+
+    // ── Mover input safety net (self-land when the user returns) ────
+    // The window-mover periodically re-samples input and lands if idle-driven
+    // flight is no longer warranted, so a missed idle-monitor transition can't
+    // pin flight on forever. The decision reuses effective_active with a
+    // freshly-sampled idle reading; these lock in the branches the recheck
+    // relies on.
+
+    #[test]
+    fn mover_keeps_flying_while_user_stays_idle() {
+        // Screensaver on, user still idle → the recheck keeps the glide going.
+        assert!(effective_active(false, true, true));
+    }
+
+    #[test]
+    fn mover_self_lands_when_idle_flight_no_longer_warranted() {
+        // User came back (idle sample false) during a screensaver flight →
+        // effective drops, so the mover routes a landing even if the idle
+        // monitor never delivered its transition.
+        assert!(!effective_active(false, false, true));
+        // Same if the screensaver was disabled mid-flight.
+        assert!(!effective_active(false, true, false));
+    }
+
+    #[test]
+    fn mover_never_self_lands_during_manual_flight() {
+        // Ctrl+Alt+F flight is intentional; a not-idle input sample must NOT
+        // land her, whatever the screensaver/idle inputs read.
+        assert!(effective_active(true, false, true));
+        assert!(effective_active(true, false, false));
+        assert!(effective_active(true, true, true));
+    }
+
+    #[test]
+    fn input_recheck_cadence_is_frequent_but_cheap() {
+        // Lands within a fraction of a second of the user's return, but far
+        // less often than every movement tick.
+        assert!(INPUT_RECHECK_TICKS >= 2, "must not recheck every tick");
+        let recheck_ms = INPUT_RECHECK_TICKS * TICK_MS;
+        assert!(recheck_ms <= 1_000, "should self-land within ~1s of return");
     }
 
     // ── cruise_vx (takeoff direction from persisted facing) ────────

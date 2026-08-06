@@ -56,6 +56,26 @@ pub fn should_fly(idle_secs: u64, wait_secs: u64, display_prevented: bool) -> bo
     idle_secs >= wait_secs && !display_prevented
 }
 
+/// Whole seconds of input-idle time from a `GetTickCount64` "now" and a
+/// `GetLastInputInfo` last-input tick.
+///
+/// `dwTime` from `GetLastInputInfo` is a **32-bit** tick count that wraps every
+/// ~49.7 days. `GetTickCount64` is 64-bit and never wraps for any realistic
+/// uptime, so the two clocks disagree once uptime crosses the wrap. Subtracting
+/// the 32-bit `dwTime` from the full 64-bit now (as the old code did) then
+/// yields roughly the entire uptime instead of the true idle time — a value
+/// permanently ≥ any screensaver wait, which pins balloon/flight mode on and
+/// leaves the flight thread repositioning (and un-draggable-ing) the window
+/// forever.
+///
+/// The fix: truncate now to its low 32 bits so both operands live on the same
+/// wrapping clock, then subtract with `wrapping_sub`. That is correct for any
+/// real idle span (< 49.7 days). Pure — no OS calls, safe to unit-test.
+pub fn idle_secs_from_ticks(now_ms: u64, last_input_ms: u32) -> u64 {
+    let idle_ms = (now_ms as u32).wrapping_sub(last_input_ms);
+    idle_ms as u64 / 1_000
+}
+
 // ── Public entry point ─────────────────────────────────────────────
 
 /// Spawns the idle-monitor thread. The thread exits when `stop_flag` is set.
@@ -136,11 +156,11 @@ pub fn get_input_secs() -> u64 {
         if !GetLastInputInfo(&mut lii).as_bool() {
             return 0;
         }
-        // GetTickCount64 wraps at ~49.7 days but dwTime is a u32 tick count;
-        // take only the low 32 bits of now for the subtraction to handle wrapping.
-        let now_ms = GetTickCount64();
-        let idle_ms = now_ms.saturating_sub(lii.dwTime as u64);
-        idle_ms / 1_000
+        // dwTime is a 32-bit tick count that wraps every ~49.7 days; the wrap
+        // handling lives in idle_secs_from_ticks (which truncates now to 32 bits
+        // and subtracts with wrapping_sub). See its docs for why the naive
+        // 64-bit subtraction pins flight mode on after long uptime.
+        idle_secs_from_ticks(GetTickCount64(), lii.dwTime)
     }
 }
 
@@ -237,4 +257,59 @@ mod tests {
         assert!(should_fly(1800, 1800, false));
         assert!(!should_fly(1799, 1800, false));
     }
+
+    // ── idle_secs_from_ticks (32-bit tick wrap handling) ──────────────
+
+    /// A tick just past the 32-bit wrap boundary, plus `extra_ms`.
+    const WRAP: u64 = u32::MAX as u64 + 1; // 2^32
+
+    #[test]
+    fn idle_ticks_normal_uptime_reports_real_idle() {
+        // Well within the first 49.7 days: now and last-input share the same
+        // clock, so idle is just their difference.
+        let last_input_ms: u32 = 1_000_000;         // 1000 s after boot
+        let now_ms: u64 = 1_000_000 + 5_000;        // 5 s later
+        assert_eq!(idle_secs_from_ticks(now_ms, last_input_ms), 5);
+    }
+
+    #[test]
+    fn idle_ticks_zero_when_input_is_current() {
+        assert_eq!(idle_secs_from_ticks(2_500, 2_500), 0);
+        // Sub-second idle rounds down to 0 s — still "not idle".
+        assert_eq!(idle_secs_from_ticks(2_999, 2_500), 0);
+    }
+
+    #[test]
+    fn idle_ticks_survive_the_32_bit_wrap() {
+        // Reproduction of the balloon-mode-stuck bug: uptime has crossed the
+        // ~49.7-day wrap, so GetTickCount64 keeps climbing (WRAP + a bit) while
+        // the last-input tick has wrapped back to a small 32-bit value. The user
+        // just moved the mouse 3 s ago, so the TRUE idle time is 3 s.
+        let last_input_ms: u32 = 2_000;             // 2 s past the wrap
+        let now_ms: u64 = WRAP + 5_000;             // 5 s past the wrap
+        assert_eq!(idle_secs_from_ticks(now_ms, last_input_ms), 3);
+
+        // The old naive math — full 64-bit now minus the 32-bit last-input —
+        // would have reported ~the entire uptime instead, which is exactly what
+        // pinned flight mode on forever:
+        let naive_secs = now_ms.saturating_sub(last_input_ms as u64) / 1_000;
+        assert!(naive_secs > 49 * 24 * 3_600, "naive math inflates idle to ~uptime");
+        // …and that inflated value never drops below any screensaver wait, so
+        // should_fly would stay true no matter how recently the user typed.
+        assert!(should_fly(naive_secs, WAIT_MAX_MINS_SECS, false));
+        assert!(!should_fly(idle_secs_from_ticks(now_ms, last_input_ms), WAIT_MAX_MINS_SECS, false));
+    }
+
+    #[test]
+    fn idle_ticks_input_straddling_the_wrap_boundary() {
+        // Last input landed just BEFORE the wrap (near u32::MAX); now is just
+        // AFTER it. wrapping_sub bridges the boundary: true idle is 4 s.
+        let last_input_ms: u32 = u32::MAX - 1_000;  // 1 s before the wrap
+        let now_ms: u64 = WRAP + 3_000;             // 3 s after the wrap
+        assert_eq!(idle_secs_from_ticks(now_ms, last_input_ms), 4);
+    }
+
+    /// Longest configurable screensaver wait, in seconds — the strictest bar
+    /// the wrap-inflated idle must not clear on its own.
+    const WAIT_MAX_MINS_SECS: u64 = 30 * 60;
 }
