@@ -27,6 +27,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { useAppConfig, CHAR_SIZE_DIMS, SYS_WINDOW_DIMS } from '../composables/useAppConfig'
 import { useWeatherAvailable } from '../composables/useWeatherAvailable'
 import { TAROT_WINDOW_DIMS } from '../config/tarot'
+import { ICHING_WINDOW_DIMS } from '../config/iching'
 import { CHAT_WINDOW_DIMS } from '../config/chat'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import ChatBubble from './ChatBubble.vue'
@@ -35,6 +36,7 @@ import WeatherBadge from './WeatherBadge.vue'
 import MusicBadge from './MusicBadge.vue'
 import SleepZzz from './SleepZzz.vue'
 import TarotCard from './TarotCard.vue'
+import IChingDivination from './IChingDivination.vue'
 import ChatPanel from './ChatPanel.vue'
 import SystemStateOverlay from './SystemStateOverlay.vue'
 import ContextMenu, { type MenuAction, type ContextActionKey } from './ContextMenu.vue'
@@ -67,10 +69,11 @@ useUpdateCheck()
 // True while a full-window overlay (tarot card / chat / system state panel) is
 // open. Declared before useHitTest (which reads them) and the size watch below.
 const tarotActive = ref(false)
+const ichingActive = ref(false)
 const chatActive  = ref(false)
 const sysStateActive = ref(false)
 // Any full-window overlay is open — gates pet interaction + sprite/badge display.
-const overlayOpen = computed(() => tarotActive.value || chatActive.value || sysStateActive.value)
+const overlayOpen = computed(() => tarotActive.value || ichingActive.value || chatActive.value || sysStateActive.value)
 
 // Persistent character heading. Updated by `balloon-facing` events during
 // flight and NOT reset on landing, so the orientation she last flew in carries
@@ -134,6 +137,7 @@ watch(
 const bubbleRef  = ref<InstanceType<typeof ChatBubble> | null>(null)
 const contextRef = ref<InstanceType<typeof ContextMenu> | null>(null)
 const tarotRef   = ref<InstanceType<typeof TarotCard> | null>(null)
+const ichingRef  = ref<InstanceType<typeof IChingDivination> | null>(null)
 const chatRef    = ref<InstanceType<typeof ChatPanel> | null>(null)
 const sysStateRef = ref<InstanceType<typeof SystemStateOverlay> | null>(null)
 
@@ -205,6 +209,40 @@ async function closeTarot() {
 // ── Chat overlay ───────────────────────────────────────────────────
 // Same window-grow/restore choreography as the tarot overlay, sized via
 // CHAT_WINDOW_DIMS. The pet sprite + badges hide while chat is open.
+async function openIChing() {
+  const win = getCurrentWindow()
+  try { savedPos = await win.outerPosition() } catch { savedPos = null }
+  bubbleRef.value?.hide()
+  ichingActive.value = true
+  ichingRef.value?.open()
+  await nextTick()
+  await nextPaint()
+
+  const [lw, lh] = ICHING_WINDOW_DIMS[config.value.characterSize]
+  const sf  = await win.scaleFactor()
+  const mon = await currentMonitor()
+  const pw  = lw * sf
+  const ph  = lh * sf
+  let x = savedPos?.x ?? 0
+  let y = savedPos?.y ?? 0
+  if (mon) {
+    x = mon.position.x + (mon.size.width  - pw) / 2
+    y = mon.position.y + (mon.size.height - ph) / 2
+  }
+  await setBounds(x, y, pw, ph)
+}
+
+async function closeIChing() {
+  const win = getCurrentWindow()
+  const [lw, lh] = CHAR_SIZE_DIMS[config.value.characterSize]
+  const sf = await win.scaleFactor()
+  ichingRef.value?.dismiss()
+  await nextTick()
+  await nextPaint()
+  await setBounds(savedPos?.x ?? 0, savedPos?.y ?? 0, lw * sf, lh * sf)
+  ichingActive.value = false
+}
+
 async function openChat() {
   const win = getCurrentWindow()
   try { savedPos = await win.outerPosition() } catch { savedPos = null }
@@ -379,6 +417,10 @@ async function onContextAction(action: MenuAction) {
     await openTarot()
     return
   }
+  if (action === 'iching') {
+    await openIChing()
+    return
+  }
   if (action === 'chat') {
     await openChat()
     return
@@ -516,6 +558,7 @@ onUnmounted(() => {
   </div>
   <ContextMenu ref="contextRef" :sleeping="sleeping" @action="onContextAction" />
   <TarotCard ref="tarotRef" @close="closeTarot" />
+  <IChingDivination ref="ichingRef" @close="closeIChing" />
   <ChatPanel ref="chatRef" @close="closeChat" />
   <SystemStateOverlay ref="sysStateRef" @close="closeSysState" />
 </template>

@@ -17,7 +17,7 @@
  *  13. Clicking inside does NOT dismiss the menu.
  *  14. Hide bubble has the .bubble--hide modifier class.
  *  15. ContextActionKey excludes 'hide'.
- *  16. Each bubble-wrap carries the pet-ui-overlay class (click-through guard).
+ *  16. The scroll panel and each bubble-wrap carry the pet-ui-overlay class (click-through guard).
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
@@ -98,11 +98,11 @@ describe('ContextMenu (vertical glass bubble panel)', () => {
 
   // ── Bubble count & structure ─────────────────────────────────────────
 
-  it('renders exactly 8 bubbles', async () => {
+  it('renders exactly 9 bubbles', async () => {
     const w = mountMenu()
     await w.vm.open()
-    expect(w.findAll('.bubble-wrap')).toHaveLength(8)
-    expect(w.findAll('.bubble')).toHaveLength(8)
+    expect(w.findAll('.bubble-wrap')).toHaveLength(9)
+    expect(w.findAll('.bubble')).toHaveLength(9)
     w.unmount()
   })
 
@@ -110,7 +110,7 @@ describe('ContextMenu (vertical glass bubble panel)', () => {
     const w = mountMenu()
     await w.vm.open()
     const icons = w.findAll('.bubble-icon').map(el => el.text().trim())
-    expect(icons).toHaveLength(8)
+    expect(icons).toHaveLength(9)
     icons.forEach(icon => expect(icon.length).toBeGreaterThan(0))
     w.unmount()
   })
@@ -122,6 +122,17 @@ describe('ContextMenu (vertical glass bubble panel)', () => {
     wraps.forEach((wrap, i) => {
       expect(wrap.attributes('style')).toContain(`--i: ${i}`)
     })
+    w.unmount()
+  })
+
+  it('reserves horizontal room for hover labels while the menu scrolls', async () => {
+    const w = mountMenu()
+    await w.vm.open()
+    const panel = w.find('.bubble-panel')
+    expect(panel.exists()).toBe(true)
+    expect(panel.classes()).toContain('pet-ui-overlay')
+    await w.findAll('.bubble-wrap')[4].trigger('mouseenter')
+    expect(w.find('.bubble-tip').text()).toBe('Tarot Reading')
     w.unmount()
   })
 
@@ -146,6 +157,7 @@ describe('ContextMenu (vertical glass bubble panel)', () => {
       'Sleep',
       'Fast Learning',
       'Tarot Reading',
+      'I Ching Reading',
       'System Status',
       'Chat',
       'Hide App',
@@ -192,7 +204,7 @@ describe('ContextMenu (vertical glass bubble panel)', () => {
   })
 
   it('emits the correct action for each bubble', async () => {
-    const expected: MenuAction[] = ['pat_head', 'feed', 'sleep', 'fast_learning', 'tarot', 'sys_state', 'chat', 'hide']
+    const expected: MenuAction[] = ['pat_head', 'feed', 'sleep', 'fast_learning', 'tarot', 'iching', 'sys_state', 'chat', 'hide']
     for (let i = 0; i < expected.length; i++) {
       const w = mountMenu()
       await w.vm.open()
@@ -250,8 +262,9 @@ describe('ContextMenu (vertical glass bubble panel)', () => {
     // useHitTest's elementsFromPoint check reliably detects the panel.
     const w = mountMenu()
     await w.vm.open()
+    expect(w.find('.bubble-panel').classes()).toContain('pet-ui-overlay')
     const wraps = w.findAll('.bubble-wrap')
-    expect(wraps).toHaveLength(8)
+    expect(wraps).toHaveLength(9)
     wraps.forEach(wrap => {
       expect(wrap.classes()).toContain('pet-ui-overlay')
     })
@@ -329,10 +342,10 @@ describe('ContextMenu (vertical glass bubble panel)', () => {
 
   // ── Style modifiers ──────────────────────────────────────────────────
 
-  it('hide bubble (index 7) carries the .bubble--hide class', async () => {
+  it('hide bubble (index 8) carries the .bubble--hide class', async () => {
     const w = mountMenu()
     await w.vm.open()
-    const hideBubble = w.findAll('.bubble').at(7)
+    const hideBubble = w.findAll('.bubble').at(8)
     expect(hideBubble?.classes()).toContain('bubble--hide')
     w.unmount()
   })
@@ -341,7 +354,7 @@ describe('ContextMenu (vertical glass bubble panel)', () => {
     const w = mountMenu()
     await w.vm.open()
     const bubbles = w.findAll('.bubble')
-    bubbles.slice(0, 7).forEach(b => {
+    bubbles.slice(0, 8).forEach(b => {
       expect(b.classes()).not.toContain('bubble--hide')
     })
     w.unmount()

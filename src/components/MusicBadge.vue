@@ -501,7 +501,7 @@ onUnmounted(() => {
   gap: 6px;
   pointer-events: auto;
   user-select: none;
-  z-index: 1;
+  z-index: 1002;
 }
 
 /* ── Badge (animated Lottie speakers) ────────────────────────────── */

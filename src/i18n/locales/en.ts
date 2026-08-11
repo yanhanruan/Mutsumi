@@ -1,4 +1,5 @@
 import type { Translations } from '../types'
+import { buildIChingLocale } from '../ichingContent'
 
 export const en: Translations = {
   // ── Settings window ──────────────────────────────────────────────
@@ -155,6 +156,7 @@ export const en: Translations = {
     wake:          'Wake Up',
     fast_learning: 'Fast Learning',
     tarot:         'Tarot Reading',
+    iching:        'I Ching Reading',
     chat:          'Chat',
     sys_state:     'System Status',
     hide:          'Hide App',
@@ -249,6 +251,8 @@ export const en: Translations = {
     history:      'Recent',
     empty:        'No readings yet.',
   },
+
+  iching: buildIChingLocale('en'),
 
   // ── Chat overlay UI chrome ────────────────────────────────────────
   chat: {

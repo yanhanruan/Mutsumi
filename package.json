@@ -13,6 +13,7 @@
     "release": "node scripts/bump-version.mjs"
   },
   "dependencies": {
+    "@freizl/yijing": "^2.1.0",
     "@tauri-apps/api": "^2.11.0",
     "@tauri-apps/plugin-autostart": "^2.5.1",
     "@tauri-apps/plugin-clipboard-manager": "^2.3.2",
