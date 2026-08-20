@@ -20,6 +20,8 @@ export const zh: Translations = {
   resetMsg:          '已重置。',
   autostartOnMsg:    '已开启开机启动。',
   autostartOffMsg:   '已关闭开机启动。',
+  autostartUnavailable: '此系统暂时无法使用开机启动。',
+  autostartFailedMsg:   '无法修改开机启动设置。',
 
   // ── About window ─────────────────────────────────────────────────
   aboutTitle:             '关于',
@@ -104,7 +106,8 @@ export const zh: Translations = {
   // ── Flying screensaver ────────────────────────────────────────────
   flyingScreensaver:     '飞行屏保',
   flyingWaitLabel:       '闲置多久后开始',
-  flyingScreensaverHint: '电脑闲置一段时间后，她会在屏幕上飘来飘去。随时按 Ctrl+Alt+F 切换飞行。',
+  flyingScreensaverHint: '电脑闲置一段时间后，她会在屏幕上飘来飘去。随时按 {keys} 切换飞行。',
+  flyingScreensaverUnavailable: '此平台暂不支持闲置后自动飞行，仍可手动切换飞行模式。',
   hotkeyUnavailable:     '{keys} 已被其他应用占用，本次运行中该快捷键不可用。关闭占用它的应用并重启 Mutsumi 即可恢复。',
 
   // ── Search engine ─────────────────────────────────────────────────
@@ -141,6 +144,9 @@ export const zh: Translations = {
   apiKeyClear:          '清除',
   apiKeySavedMsg:       'API Key 已保存。',
   apiKeyClearedMsg:     'API Key 已清除。',
+  apiKeySaveFailedMsg:  '无法将 API Key 保存到系统凭据存储。',
+  apiKeyClearFailedMsg: '无法从系统凭据存储中清除 API Key。',
+  apiKeyCredentialStoreUnavailable: '系统凭据存储当前不可用，已保存的 API Key 可能尚未加载。',
   apiKeyHelp:           '如何获取 API Key？',
 
   // ── Pomodoro badge ────────────────────────────────────────────────

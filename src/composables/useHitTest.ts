@@ -36,6 +36,67 @@ export const ALPHA_CLOSE  = 48    // become interactive above this max-alpha
 export const SAMPLE_SIZE  = 5     // NxN sample region — forgiving on thin features
 
 /**
+ * Serializes native click-through changes.
+ *
+ * Tauri resolves `setIgnoreCursorEvents` asynchronously. Cursor samples can
+ * request the opposite state before an earlier call finishes, so writing a
+ * local boolean before the native call succeeds can diverge from NSWindow.
+ * This coordinator records desired and applied state separately, drains them
+ * in order, and rolls the desired state back after an error so the next cursor
+ * sample retries instead of silently assuming success.
+ */
+export class CursorIgnoreCoordinator {
+  private desired = false
+  private applied = false
+  private syncing = false
+  private readonly apply: (ignore: boolean) => Promise<void>
+  private readonly onError: (error: unknown) => void
+
+  constructor(
+    apply: (ignore: boolean) => Promise<void>,
+    onError: (error: unknown) => void = () => {},
+  ) {
+    this.apply = apply
+    this.onError = onError
+  }
+
+  isIgnoring(): boolean {
+    return this.desired
+  }
+
+  request(ignore: boolean): void {
+    this.desired = ignore
+    if (!this.syncing) {
+      this.syncing = true
+      void this.drain()
+    }
+  }
+
+  private async drain(): Promise<void> {
+    try {
+      while (this.applied !== this.desired) {
+        const target = this.desired
+        try {
+          await this.apply(target)
+          this.applied = target
+        } catch (error) {
+          this.desired = this.applied
+          this.onError(error)
+          break
+        }
+      }
+    } finally {
+      this.syncing = false
+      // A request can arrive between the loop condition and finally.
+      if (this.applied !== this.desired) {
+        this.syncing = true
+        void this.drain()
+      }
+    }
+  }
+}
+
+/**
  * Hysteresis decision: given the current ignore state and the sampled alpha,
  * return the next ignore state. Pure for unit testing.
  */
@@ -112,7 +173,6 @@ export function useHitTest(
   const canvas = document.createElement('canvas')
   const ctx    = canvas.getContext('2d', { willReadFrequently: true })!
   let unlisten: UnlistenFn | null = null
-  let ignoring = false       // current setIgnoreCursorEvents state
   let resizeTimer: number | null = null
   const { isDragging } = useInteractionLock()
   // Cache: skip the canvas redraw + getImageData readback when the
@@ -145,15 +205,10 @@ export function useHitTest(
     lastDrawnImg = img  // mark this frame as cached
   }
 
-  async function setIgnore(ignore: boolean) {
-    if (ignore === ignoring) return
-    ignoring = ignore
-    try {
-      await getCurrentWindow().setIgnoreCursorEvents(ignore)
-    } catch (e) {
-      console.warn('[hit-test] setIgnoreCursorEvents failed', e)
-    }
-  }
+  const ignoreCoordinator = new CursorIgnoreCoordinator(
+    ignore => getCurrentWindow().setIgnoreCursorEvents(ignore),
+    error => console.warn('[hit-test] setIgnoreCursorEvents failed', error),
+  )
 
   /**
    * Sample max alpha in a SAMPLE_SIZE × SAMPLE_SIZE region centered on (cx, cy).
@@ -184,14 +239,14 @@ export function useHitTest(
     // and fire a synthetic mouseleave that collapses the hover panel — which is
     // exactly the flapping loop that chopped one drag into many seeks.
     if (isDragging()) {
-      void setIgnore(false)
+      ignoreCoordinator.request(false)
       return
     }
 
     if (!pos.over_window) {
       // Outside our window — reset to interactive so a return into the
       // window with cursor over a visible pixel is detected immediately.
-      void setIgnore(false)
+      ignoreCoordinator.request(false)
       return
     }
 
@@ -204,13 +259,13 @@ export function useHitTest(
     // Overlay mode: only the overlay's own UI is interactive; the transparent
     // area around it is click-through (don't sample the hidden pet sprite).
     if (isOverlayActive?.()) {
-      void setIgnore(!overUi)
+      ignoreCoordinator.request(!overUi)
       return
     }
 
     // UI overlays take priority — never click-through over them.
     if (overUi) {
-      void setIgnore(false)
+      ignoreCoordinator.request(false)
       return
     }
 
@@ -219,8 +274,8 @@ export function useHitTest(
     redrawCurrentFrame()
     const sampleX = isMirrored?.() ? canvas.width - cssX : cssX
     const alpha = sampleMaxAlpha(Math.floor(sampleX), Math.floor(cssY))
-    const next  = shouldIgnore(ignoring, alpha)
-    void setIgnore(next)
+    const next  = shouldIgnore(ignoreCoordinator.isIgnoring(), alpha)
+    ignoreCoordinator.request(next)
   }
 
   function onResize() {
@@ -241,6 +296,6 @@ export function useHitTest(
     if (resizeTimer !== null) window.clearTimeout(resizeTimer)
     window.removeEventListener('resize', onResize)
     unlisten?.()
-    void getCurrentWindow().setIgnoreCursorEvents(false).catch(() => {})
+    ignoreCoordinator.request(false)
   })
 }

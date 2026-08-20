@@ -20,6 +20,7 @@ import {
   type CharacterSize, type SearchEngineKey, type ChatModelKey,
 } from '../composables/useAppConfig'
 import { useWeatherAvailable } from '../composables/useWeatherAvailable'
+import { usePlatformCapabilities } from '../composables/usePlatformCapabilities'
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -71,6 +72,7 @@ const affection    = ref(50)
 const mood         = ref('content')
 const status       = ref('')
 const autostart    = ref(false)
+const autostartAvailable = ref(true)
 
 // ── Character size (Task 3) ────────────────────────────────────────
 const SIZE_OPTIONS: { key: CharacterSize; labelKey: 'charSizeSmall' | 'charSizeMedium' | 'charSizeLarge' }[] = [
@@ -91,6 +93,7 @@ async function setSize(s: CharacterSize) {
 
 // ── Weather visibility ────────────────────────────────────────────
 const { weatherAvailable } = useWeatherAvailable()
+const { musicAvailable, idleScreensaverAvailable } = usePlatformCapabilities()
 const localShowWeather = ref<boolean>(config.value.showWeather)
 
 watch(() => config.value.showWeather, v => { localShowWeather.value = v })
@@ -134,6 +137,7 @@ watch(() => config.value.flyingScreensaver, v => { localFlying.value = v })
 watch(() => config.value.flyingWaitMins,    v => { localFlyingWait.value = v })
 
 async function applyFlying() {
+  if (!idleScreensaverAvailable.value) return
   // Clamp the wait into the supported range (also enforced Rust-side).
   const mins = Math.min(FLYING_WAIT_MAX_MINS,
     Math.max(FLYING_WAIT_MIN_MINS, Math.round(localFlyingWait.value || FLYING_WAIT_MIN_MINS)))
@@ -152,6 +156,7 @@ interface HotkeyStatus {
   active:      boolean
 }
 const flightHotkey = ref<HotkeyStatus | null>(null)
+const fallbackFlightAccelerator = navigator.userAgent.includes('Mac') ? '⌃⌥F' : 'Ctrl+Alt+F'
 
 async function refreshHotkeys() {
   try {
@@ -261,11 +266,23 @@ async function clearMemory() {
 // persisted on-device (never broadcast to the other window).
 const apiKeyInput = ref('')
 const apiKeyConfigured = ref(false)
+const credentialStoreAvailable = ref(true)
 const savingKey = ref(false)
 
+interface QwenKeyStatus {
+  configured: boolean
+  credentialStoreAvailable: boolean
+}
+
 async function refreshApiKeyStatus() {
-  try { apiKeyConfigured.value = await invoke<boolean>('qwen_key_status') }
-  catch { apiKeyConfigured.value = false }
+  try {
+    const result = await invoke<QwenKeyStatus>('qwen_key_status')
+    apiKeyConfigured.value = result.configured
+    credentialStoreAvailable.value = result.credentialStoreAvailable
+  } catch {
+    apiKeyConfigured.value = false
+    credentialStoreAvailable.value = false
+  }
 }
 
 async function saveApiKey() {
@@ -274,10 +291,13 @@ async function saveApiKey() {
   savingKey.value = true
   try {
     apiKeyConfigured.value = await invoke<boolean>('qwen_set_api_key', { key })
+    credentialStoreAvailable.value = true
     apiKeyInput.value = ''
     showStatus(t.value.apiKeySavedMsg)
   } catch (e) {
     console.error('save api key failed', e)
+    credentialStoreAvailable.value = false
+    showStatus(t.value.apiKeySaveFailedMsg)
   } finally {
     savingKey.value = false
   }
@@ -294,10 +314,13 @@ async function clearApiKey() {
   savingKey.value = true
   try {
     apiKeyConfigured.value = await invoke<boolean>('qwen_set_api_key', { key: '' })
+    credentialStoreAvailable.value = true
     apiKeyInput.value = ''
     showStatus(t.value.apiKeyClearedMsg)
   } catch (e) {
     console.error('clear api key failed', e)
+    credentialStoreAvailable.value = false
+    showStatus(t.value.apiKeyClearFailedMsg)
   } finally {
     savingKey.value = false
   }
@@ -323,8 +346,14 @@ async function refresh() {
 }
 
 async function refreshAutostart() {
-  try { autostart.value = await isEnabled() }
-  catch { autostart.value = false }
+  try {
+    autostart.value = await isEnabled()
+    autostartAvailable.value = true
+  } catch (e) {
+    console.error('autostart status failed', e)
+    autostart.value = false
+    autostartAvailable.value = false
+  }
 }
 
 function showStatus(msg: string) {
@@ -340,6 +369,7 @@ async function toggleAutostart() {
   } catch (e) {
     console.error('autostart toggle failed', e)
     autostart.value = !autostart.value
+    showStatus(t.value.autostartFailedMsg)
   }
 }
 
@@ -499,7 +529,10 @@ onMounted(async () => {
         <h2 class="card-title">
           <span class="card-icon">🎈</span>{{ t.flyingScreensaver }}
         </h2>
-        <p class="card-hint">{{ t.flyingScreensaverHint }}</p>
+        <p class="card-hint">{{ t.flyingScreensaverHint.replace('{keys}', flightHotkey?.accelerator ?? fallbackFlightAccelerator) }}</p>
+        <p v-if="!idleScreensaverAvailable" class="hotkey-warn">
+          ⚠️ {{ t.flyingScreensaverUnavailable }}
+        </p>
         <p v-if="flightHotkey && !flightHotkey.active" class="hotkey-warn">
           ⚠️ {{ t.hotkeyUnavailable.replace('{keys}', flightHotkey.accelerator) }}
         </p>
@@ -510,12 +543,13 @@ onMounted(async () => {
               id="flying-toggle"
               type="checkbox"
               v-model="localFlying"
+              :disabled="!idleScreensaverAvailable"
               @change="applyFlying"
             />
             <span class="thumb" />
           </label>
         </div>
-        <div class="field-row" :style="localFlying ? '' : 'opacity: 0.45; pointer-events: none;'">
+        <div class="field-row" :style="localFlying && idleScreensaverAvailable ? '' : 'opacity: 0.45; pointer-events: none;'">
           <label>{{ t.flyingWaitLabel }}</label>
           <div class="num-input">
             <input
@@ -602,6 +636,9 @@ onMounted(async () => {
           <span class="card-icon">🔑</span>{{ t.apiKey }}
         </h2>
         <p class="card-hint">{{ t.apiKeyHint }}</p>
+        <p v-if="!credentialStoreAvailable" class="system-warning">
+          ⚠️ {{ t.apiKeyCredentialStoreUnavailable }}
+        </p>
         <button type="button" class="key-help" @click="openApiKeyHelp">{{ t.apiKeyHelp }} ↗</button>
         <div class="key-row">
           <input
@@ -655,17 +692,19 @@ onMounted(async () => {
         </h2>
 
         <div class="field-row">
-          <label for="autostart-toggle">{{ t.launchOnStartup }}</label>
-          <label class="toggle">
+          <label for="autostart-toggle" :class="{ 'field-disabled': !autostartAvailable }">{{ t.launchOnStartup }}</label>
+          <label class="toggle" :class="{ 'field-disabled': !autostartAvailable }">
             <input
               id="autostart-toggle"
               type="checkbox"
               v-model="autostart"
+              :disabled="!autostartAvailable"
               @change="toggleAutostart"
             />
             <span class="thumb" />
           </label>
         </div>
+        <p v-if="!autostartAvailable" class="system-warning">⚠️ {{ t.autostartUnavailable }}</p>
 
         <!-- Auto-update check -->
         <div class="field-row" style="margin-top: 6px;">
@@ -700,7 +739,7 @@ onMounted(async () => {
         </div>
 
         <!-- Music controller visibility -->
-        <div class="field-row" style="margin-top: 6px;">
+        <div v-if="musicAvailable" class="field-row" style="margin-top: 6px;">
           <label for="music-toggle">{{ t.showMusic }}</label>
           <label class="toggle">
             <input
@@ -916,6 +955,18 @@ onMounted(async () => {
 .content::-webkit-scrollbar       { width: 4px; }
 .content::-webkit-scrollbar-track { background: transparent; }
 .content::-webkit-scrollbar-thumb { background: rgba(119, 153, 119, 0.30); border-radius: 2px; }
+
+.field-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.system-warning {
+  margin: 4px 0 0;
+  color: rgba(130, 82, 16, 0.88);
+  font-size: 11px;
+  line-height: 1.4;
+}
 
 /* ── Glass card ──────────────────────────────────────────── */
 .card {

@@ -1,6 +1,9 @@
 mod app_state;
 #[cfg(windows)]
 mod audio;
+#[cfg(target_os = "macos")]
+#[path = "audio_macos.rs"]
+mod audio;
 #[cfg(test)]
 mod benchmarks;
 mod card_export;
@@ -17,9 +20,15 @@ mod hotkeys;
 mod http;
 mod idle;
 mod late_night;
+#[cfg(target_os = "macos")]
+mod macos_lifecycle;
 #[cfg(windows)]
 mod media;
+#[cfg(target_os = "macos")]
+#[path = "media_macos.rs"]
+mod media;
 mod persistence;
+mod platform_capabilities;
 mod persona;
 mod pomodoro;
 mod search;
@@ -59,6 +68,7 @@ pub fn run() {
   let qwen_state    = services::QwenState::new(services::qwen::config_from_env())
     .expect("failed to build Qwen LLM client");
   let search_state  = search::SearchState::new(search::SearchEngine::default());
+  let credential_store_state = services::CredentialStoreState::default();
 
   tauri::Builder::default()
     // ── Single-instance guard ─────────────────────────────────────────────
@@ -88,6 +98,7 @@ pub fn run() {
     .manage(media_state)
     .manage(fish_audio_state)
     .manage(qwen_state)
+    .manage(credential_store_state)
     .manage(search_state)
     .manage(search::webview::WebviewSerp::default())
     .manage(chat::ChatBuffer::new())
@@ -116,6 +127,7 @@ pub fn run() {
       media::media_toggle_mute,
       media::media_set_volume,
       media::media_select,
+      platform_capabilities::get_platform_capabilities,
       app_state::set_tray_locale,
       window_ops::set_window_bounds,
       flight::flight_set_insets,
@@ -158,6 +170,15 @@ pub fn run() {
 
       use tauri::Manager;
 
+      // Product baseline: Mutsumi remains a regular macOS application with a
+      // permanent Dock icon, while retaining its tray/menu-bar entry.
+      #[cfg(target_os = "macos")]
+      {
+        app.handle()
+          .set_activation_policy(tauri::ActivationPolicy::Regular)?;
+        macos_lifecycle::validate_main_window_contract(app.handle())?;
+      }
+
       // Open the SQLite memory database (dynamic user data). Registered as
       // managed state; async commands access it via spawn_blocking.
       match db::Db::open(app.handle()) {
@@ -176,11 +197,20 @@ pub fn run() {
 
       // Apply a user-set 百炼 (Qwen/DashScope) API key from Settings, overriding
       // the .env default. End users without a .env rely entirely on this.
-      if let Some(key) = services::load_persisted_qwen_key() {
-        if let Some(qwen) = app.try_state::<services::QwenState>() {
-          if let Err(e) = qwen.set_api_key(&key) {
-            log::warn!("failed to apply persisted Qwen API key: {e}");
+      match services::load_persisted_qwen_key() {
+        Ok(Some(key)) => {
+          if let Some(qwen) = app.try_state::<services::QwenState>() {
+            if let Err(e) = qwen.set_api_key(&key) {
+              log::warn!("failed to apply persisted Qwen API key: {e}");
+            }
           }
+        }
+        Ok(None) => {}
+        Err(e) => {
+          if let Some(state) = app.try_state::<services::CredentialStoreState>() {
+            state.set_available(false);
+          }
+          log::warn!("failed to read Qwen API key from the OS credential store: {e}");
         }
       }
 
@@ -249,6 +279,16 @@ pub fn run() {
 
       Ok(())
     })
-    .run(tauri::generate_context!())
-    .expect("error while running tauri application");
+    .build(tauri::generate_context!())
+    .expect("error while building tauri application")
+    .run(|app, event| {
+      #[cfg(target_os = "macos")]
+      if let tauri::RunEvent::Reopen {
+        has_visible_windows,
+        ..
+      } = event
+      {
+        macos_lifecycle::handle_reopen(app, has_visible_windows);
+      }
+    });
 }

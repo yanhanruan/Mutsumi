@@ -25,6 +25,8 @@ export interface Translations {
   resetMsg:          string
   autostartOnMsg:    string
   autostartOffMsg:   string
+  autostartUnavailable: string
+  autostartFailedMsg:   string
 
   // ── About window ────────────────────────────────────────────────
   aboutTitle:             string
@@ -102,7 +104,9 @@ export interface Translations {
   // ── Flying screensaver ──────────────────────────────────────────
   flyingScreensaver:     string
   flyingWaitLabel:       string
+  /** Contains a `{keys}` placeholder for the platform-formatted shortcut. */
   flyingScreensaverHint: string
+  flyingScreensaverUnavailable: string
   /** Shown when a global hotkey failed to register ({keys} = accelerator). */
   hotkeyUnavailable:     string
 
@@ -141,6 +145,9 @@ export interface Translations {
   apiKeyClear:          string
   apiKeySavedMsg:       string
   apiKeyClearedMsg:     string
+  apiKeySaveFailedMsg:  string
+  apiKeyClearFailedMsg: string
+  apiKeyCredentialStoreUnavailable: string
   apiKeyHelp:           string
 
   // ── Pomodoro badge ──────────────────────────────────────────────

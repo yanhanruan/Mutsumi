@@ -478,6 +478,7 @@ mod real {
     const PAGE_POLL: Duration = Duration::from_millis(400);
     /// Cap on one ExecuteScript round-trip (the COM callback is normally fast;
     /// this only guards a wedged renderer).
+    #[cfg(windows)]
     const EXEC_TIMEOUT: Duration = Duration::from_secs(4);
 
     #[derive(serde::Deserialize)]
@@ -718,6 +719,7 @@ mod real {
     /// arbitrary result pages get zero app surface and the capability file stays
     /// scoped to the search engines' domains. Windows-only (WebView2), like the
     /// rest of this app's platform integrations.
+    #[cfg(windows)]
     async fn exec_script(app: &AppHandle, js: &str) -> Result<String, String> {
         use webview2_com::ExecuteScriptCompletedHandler;
         use windows::core::HSTRING;
@@ -754,6 +756,15 @@ mod real {
             Ok(Err(_)) => Err("exec channel dropped".into()),
             Err(_) => Err("script execution timed out".into()),
         }
+    }
+
+    /// Phase-1 macOS fallback. SERP extraction still uses the initialization
+    /// script/event bridge, but arbitrary result pages intentionally keep zero
+    /// Tauri IPC access. A native WKWebView result callback will replace this
+    /// explicit error when the deep-search adapter lands.
+    #[cfg(target_os = "macos")]
+    async fn exec_script(_app: &AppHandle, _js: &str) -> Result<String, String> {
+        Err("deep web search is not yet available on macOS".into())
     }
 
     /// Fetch a **result page**'s rendered HTML through the same hidden window —

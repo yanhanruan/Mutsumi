@@ -17,6 +17,7 @@ pub enum BatteryStatus {
 /// lowercase string (`"ethernet"`, `"wifi"`, `"other"`, `"offline"`).
 #[derive(Clone, Copy, Serialize)]
 #[serde(rename_all = "lowercase")]
+#[cfg_attr(not(windows), allow(dead_code))]
 pub enum NetworkKind {
     Ethernet,
     Wifi,

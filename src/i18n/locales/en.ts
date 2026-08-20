@@ -20,6 +20,8 @@ export const en: Translations = {
   resetMsg:          'Reset.',
   autostartOnMsg:    'Launch on startup enabled.',
   autostartOffMsg:   'Launch on startup disabled.',
+  autostartUnavailable: 'Launch on startup is unavailable on this system.',
+  autostartFailedMsg:   'Could not change the launch-on-startup setting.',
 
   // ── About window ─────────────────────────────────────────────────
   aboutTitle:             'about',
@@ -104,7 +106,8 @@ export const en: Translations = {
   // ── Flying screensaver ────────────────────────────────────────────
   flyingScreensaver:     'Flying Screensaver',
   flyingWaitLabel:       'Start after',
-  flyingScreensaverHint: 'She floats around the screen after the computer sits idle for a while. Ctrl+Alt+F toggles flight anytime.',
+  flyingScreensaverHint: 'She floats around the screen after the computer sits idle for a while. {keys} toggles flight anytime.',
+  flyingScreensaverUnavailable: 'Automatic idle flight is not available on this platform yet. Manual flight remains available.',
   hotkeyUnavailable:     '{keys} is in use by another app, so the shortcut is off for this session. Close that app and restart Mutsumi to get it back.',
 
   // ── Search engine ─────────────────────────────────────────────────
@@ -141,6 +144,9 @@ export const en: Translations = {
   apiKeyClear:          'Clear',
   apiKeySavedMsg:       'API key saved.',
   apiKeyClearedMsg:     'API key cleared.',
+  apiKeySaveFailedMsg:  'Could not save the API key to the system credential store.',
+  apiKeyClearFailedMsg: 'Could not clear the API key from the system credential store.',
+  apiKeyCredentialStoreUnavailable: 'The system credential store is unavailable. A saved API key may not have been loaded.',
   apiKeyHelp:           'How to get an API key?',
 
   // ── Pomodoro badge ────────────────────────────────────────────────

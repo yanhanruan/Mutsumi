@@ -1,6 +1,6 @@
 # Mutsumi macOS 适配计划
 
-> 状态：Proposal，等待 review
+> 状态：实施中；已锁定 Dock 与透明窗口 API 边界
 > 工作分支：`feat/macos-adaptation`
 > 基线：`main` / `d3b52a9`
 > 更新时间：2026-08-20
@@ -60,7 +60,14 @@ Mutsumi 当前是以 Windows 为唯一发布平台设计的 Tauri 2 桌面应用
 | 安装包 | `tauri.conf.json` 仅配置 NSIS | 无 macOS bundle/DMG | P0 |
 | CI/发布 | release 与 staging 均为 `windows-latest` | 无 macOS 构建、签名、更新产物 | P0 |
 
-当前开发机为 Apple Silicon macOS，但尚未安装 Rust 工具链，因此还没有实际运行 `cargo check`。开始实现前需要先建立可复现的本机构建环境。
+当前开发机为 Apple Silicon macOS，Rust stable 与 Tauri 构建工具链已安装；`cargo check`、`cargo test`、前端测试、前端构建和 `tauri dev` 已形成可复现基线。
+
+当前实施进度（2026-08-20）：
+
+- Phase 1 编译/启动基线已完成，未实现能力通过 capability 显式降级。
+- Phase 2 已完成 Dock 生命周期、透明窗口启动契约、全局光标、点击穿透协调和原子窗口几何；多显示器、缩放与负坐标仍需真机矩阵验收。
+- Phase 3 已完成 Finder 显示、macOS 快捷键符号和公开 API 空闲检测。空闲检测同时读取 CoreGraphics 全局输入时间与 IOKit `PreventUserIdleDisplaySleep` 聚合断言；采样失败时自动飞行保持关闭。自启动与系统凭据存储的失败状态已对用户可见，LaunchAgent 和 Keychain 的真机变更验收仍待进行。
+- Phase 4 的媒体与 WKWebView 正文深挖仍按 capability 降级，尚未开始原生专项实现。
 
 ## 5. 总体技术方案
 
@@ -113,11 +120,14 @@ src-tauri/src/platform/
 
 ### 5.3 安全和隐私原则
 
-1. 不为了音乐控制引入私有 Apple API。
-2. 不扩大任意远程网页的 Tauri IPC 权限。
-3. 麦克风、辅助功能、屏幕与系统音频等权限按需申请；拒绝授权不能阻止应用启动。
-4. API Key 继续只写入系统凭据存储，macOS 使用 Keychain。
-5. 所有原生调用都提供错误和降级状态，不使用“返回成功但什么也没做”的 fallback。
+1. 透明桌宠允许一个严格限定的例外：仅启用 Tauri/Wry 为透明
+   `WKWebView` 使用的 `macos-private-api`，仅用于官网/GitHub 直分发版本；
+   不扩大到其他系统集成，也不以此版本申请 Mac App Store 上架。
+2. 不为了音乐控制引入 `MediaRemote` 等私有 Apple API。
+3. 不扩大任意远程网页的 Tauri IPC 权限。
+4. 麦克风、辅助功能、屏幕与系统音频等权限按需申请；拒绝授权不能阻止应用启动。
+5. API Key 继续只写入系统凭据存储，macOS 使用 Keychain。
+6. 所有原生调用都提供错误和降级状态，不使用“返回成功但什么也没做”的 fallback。
 
 ## 6. 分阶段实施计划
 
@@ -302,7 +312,7 @@ src-tauri/src/platform/
 - [ ] 最低系统版本是否采用 macOS 13。
 - [ ] 是否要求首发同时支持 Intel，还是先 Apple Silicon。
 - [ ] 是否接受首个 MVP 暂不提供跨应用媒体控制。
-- [ ] 是否确认只使用公开 Apple API。
+- [x] 除 Tauri/Wry 透明窗口所需的限定例外外，系统集成只使用公开 Apple API；媒体能力继续禁止私有框架。
 - [x] Dock 图标常驻，同时保留菜单栏图标。
 - [ ] 是否按 Phase 1 → 2 → 3 → 4 → 5 → 6 的顺序实施。
 - [ ] 是否接受首版通过 GitHub Releases 分发签名/notarized DMG，不进入 Mac App Store。

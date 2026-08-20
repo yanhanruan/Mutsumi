@@ -16,6 +16,9 @@ vi.mock('@tauri-apps/api/core', () => ({
         pomodoro: { phase: 'idle', focus_mins: 25, break_mins: 5, remaining_secs: 0, running: false },
       }
     }
+    if (cmd === 'qwen_key_status') {
+      return { configured: false, credentialStoreAvailable: true }
+    }
     return null
   }),
 }))
@@ -36,12 +39,25 @@ vi.mock('@tauri-apps/plugin-autostart', () => ({
 
 import SettingsWindow from './SettingsWindow.vue'
 import { enable, disable, isEnabled } from '@tauri-apps/plugin-autostart'
+import { invoke } from '@tauri-apps/api/core'
 
 beforeEach(() => {
   _enabled = false
   vi.mocked(isEnabled).mockImplementation(async () => _enabled)
   vi.mocked(enable).mockImplementation(async () => { _enabled = true })
   vi.mocked(disable).mockImplementation(async () => { _enabled = false })
+  vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+    if (cmd === 'get_state') {
+      return {
+        pet:      { energy: 80, affection: 60, mood: 'content' },
+        pomodoro: { phase: 'idle', focus_mins: 25, break_mins: 5, remaining_secs: 0, running: false },
+      }
+    }
+    if (cmd === 'qwen_key_status') {
+      return { configured: false, credentialStoreAvailable: true }
+    }
+    return null
+  })
   vi.clearAllMocks()
   // Re-apply after clear
   vi.mocked(isEnabled).mockImplementation(async () => _enabled)
@@ -97,5 +113,49 @@ describe('SettingsWindow — autostart toggle', () => {
 
     expect(disable).toHaveBeenCalledOnce()
     expect(enable).not.toHaveBeenCalled()
+  })
+
+  it('disables the control and explains when autostart status is unavailable', async () => {
+    vi.mocked(isEnabled).mockRejectedValue(new Error('LaunchAgent unavailable'))
+    const wrapper = mount(SettingsWindow)
+    await flushPromises()
+
+    expect(wrapper.find<HTMLInputElement>('#autostart-toggle').element.disabled).toBe(true)
+    expect(wrapper.text()).toContain('Launch on startup is unavailable on this system.')
+  })
+
+  it('rolls back the toggle and reports an enable failure', async () => {
+    vi.mocked(enable).mockRejectedValue(new Error('permission denied'))
+    const wrapper = mount(SettingsWindow)
+    await flushPromises()
+
+    const checkbox = wrapper.find<HTMLInputElement>('#autostart-toggle')
+    await checkbox.setValue(true)
+    await flushPromises()
+
+    expect(checkbox.element.checked).toBe(false)
+    expect(wrapper.text()).toContain('Could not change the launch-on-startup setting.')
+  })
+
+  it('shows a persistent warning when startup Keychain reading failed', async () => {
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === 'get_state') {
+        return {
+          pet:      { energy: 80, affection: 60, mood: 'content' },
+          pomodoro: { phase: 'idle', focus_mins: 25, break_mins: 5, remaining_secs: 0, running: false },
+        }
+      }
+      if (cmd === 'qwen_key_status') {
+        return { configured: false, credentialStoreAvailable: false }
+      }
+      return null
+    })
+
+    const wrapper = mount(SettingsWindow)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain(
+      'The system credential store is unavailable. A saved API key may not have been loaded.',
+    )
   })
 })

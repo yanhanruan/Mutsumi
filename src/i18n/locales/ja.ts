@@ -20,6 +20,8 @@ export const ja: Translations = {
   resetMsg:          'リセットしました。',
   autostartOnMsg:    '自動起動を有効にしました。',
   autostartOffMsg:   '自動起動を無効にしました。',
+  autostartUnavailable: 'このシステムでは自動起動を利用できません。',
+  autostartFailedMsg:   '自動起動の設定を変更できませんでした。',
 
   // ── About window ─────────────────────────────────────────────────
   aboutTitle:             'このアプリについて',
@@ -104,7 +106,8 @@ export const ja: Translations = {
   // ── Flying screensaver ────────────────────────────────────────────
   flyingScreensaver:     'フライングスクリーンセーバー',
   flyingWaitLabel:       '開始までの待機時間',
-  flyingScreensaverHint: 'パソコンをしばらく操作しないと、画面の中をふわふわ飛び回ります。Ctrl+Alt+F でいつでも切り替えできます。',
+  flyingScreensaverHint: 'パソコンをしばらく操作しないと、画面の中をふわふわ飛び回ります。{keys} でいつでも切り替えできます。',
+  flyingScreensaverUnavailable: 'このプラットフォームではアイドル時の自動飛行はまだ利用できません。手動での飛行切り替えは利用できます。',
   hotkeyUnavailable:     '{keys} は他のアプリで使用中のため、今回の起動ではこのショートカットは無効です。該当アプリを閉じてから Mutsumi を再起動すると復活します。',
 
   // ── Search engine ─────────────────────────────────────────────────
@@ -141,6 +144,9 @@ export const ja: Translations = {
   apiKeyClear:          'クリア',
   apiKeySavedMsg:       'API キーを保存しました。',
   apiKeyClearedMsg:     'API キーをクリアしました。',
+  apiKeySaveFailedMsg:  'API キーをシステムの資格情報ストアに保存できませんでした。',
+  apiKeyClearFailedMsg: 'API キーをシステムの資格情報ストアから削除できませんでした。',
+  apiKeyCredentialStoreUnavailable: 'システムの資格情報ストアを利用できません。保存済みの API キーが読み込まれていない可能性があります。',
   apiKeyHelp:           'API キーの取得方法は？',
 
   // ── Pomodoro badge ────────────────────────────────────────────────
