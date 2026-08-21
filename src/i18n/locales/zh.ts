@@ -16,6 +16,7 @@ export const zh: Translations = {
   save:              '保存',
   resetPet:          '重置若叶睦',
   close:             '关闭',
+  minimize:          '最小化',
   savedMsg:          '已保存。',
   resetMsg:          '已重置。',
   autostartOnMsg:    '已开启开机启动。',

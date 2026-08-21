@@ -66,6 +66,15 @@ beforeEach(() => {
 })
 
 describe('SettingsWindow — autostart toggle', () => {
+  it('uses localized controls supported by the fixed-size window', async () => {
+    const wrapper = mount(SettingsWindow)
+    await flushPromises()
+
+    expect(wrapper.find('.wbtn-min').attributes('aria-label')).toBe('Minimize')
+    expect(wrapper.find('.wbtn-close').attributes('aria-label')).toBe('Close')
+    expect(wrapper.find('.wbtn-max').exists()).toBe(false)
+  })
+
   it('renders the launch-on-startup checkbox', async () => {
     const wrapper = mount(SettingsWindow)
     await flushPromises()

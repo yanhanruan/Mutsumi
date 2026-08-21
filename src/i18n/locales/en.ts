@@ -16,6 +16,7 @@ export const en: Translations = {
   save:              'Save',
   resetPet:          'Reset Mutsumi',
   close:             'Close',
+  minimize:          'Minimize',
   savedMsg:          'Saved.',
   resetMsg:          'Reset.',
   autostartOnMsg:    'Launch on startup enabled.',

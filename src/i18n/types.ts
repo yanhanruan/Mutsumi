@@ -21,6 +21,7 @@ export interface Translations {
   /** Replaces "Reset pet" — now "Reset Mutsumi" / "重置若叶睦" / "若葉睦をリセット". */
   resetPet:          string
   close:             string
+  minimize:          string
   savedMsg:          string
   resetMsg:          string
   autostartOnMsg:    string

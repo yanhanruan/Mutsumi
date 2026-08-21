@@ -4,7 +4,7 @@
  *
  * Frameless (decorations:false, transparent:true) — the entire UI is
  * painted by Vue. A custom titlebar at the top carries the drag region
- * and OS window-control buttons (minimize / maximize / close).
+ * and the controls supported by this fixed-size window (minimize / close).
  *
  * Primary theme: #779977 (sage green).
  */
@@ -21,6 +21,8 @@ import {
 } from '../composables/useAppConfig'
 import { useWeatherAvailable } from '../composables/useWeatherAvailable'
 import { usePlatformCapabilities } from '../composables/usePlatformCapabilities'
+import { isMacOSDesktop } from '../config/desktopPlatform'
+import WindowTitlebar from './WindowTitlebar.vue'
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -163,7 +165,7 @@ interface HotkeyStatus {
   active:      boolean
 }
 const flightHotkey = ref<HotkeyStatus | null>(null)
-const fallbackFlightAccelerator = navigator.userAgent.includes('Mac') ? '⌃⌥F' : 'Ctrl+Alt+F'
+const fallbackFlightAccelerator = isMacOSDesktop() ? '⌃⌥F' : 'Ctrl+Alt+F'
 
 async function refreshHotkeys() {
   try {
@@ -338,7 +340,6 @@ async function clearApiKey() {
 const win = getCurrentWindow()
 
 function minimize()    { win.minimize() }
-function maximize()    { win.toggleMaximize() }
 function closeWindow() { win.close() }
 
 // ── Data actions ───────────────────────────────────────────────────
@@ -421,26 +422,14 @@ onMounted(async () => {
       data-tauri-drag-region: the whole bar is a drag surface.
       win-controls has @mousedown.stop so clicks don't bleed into drag.
     -->
-    <header class="titlebar" data-tauri-drag-region>
-      <div class="title-identity" data-tauri-drag-region>
-        <span class="title-logo">🥒</span>
-        <span class="title-name">Mutsumi</span>
-        <span class="title-sep">·</span>
-        <span class="title-sub">{{ t.settingsTitle }}</span>
-      </div>
-
-      <div class="win-controls" @mousedown.stop>
-        <button class="wbtn wbtn-min"   @click="minimize"    title="Minimize">
-          <svg width="10" height="2" viewBox="0 0 10 2"><rect width="10" height="1.5" rx="0.75" fill="currentColor"/></svg>
-        </button>
-        <button class="wbtn wbtn-max"   @click="maximize"    title="Maximize">
-          <svg width="10" height="10" viewBox="0 0 10 10"><rect x="0.75" y="0.75" width="8.5" height="8.5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
-        </button>
-        <button class="wbtn wbtn-close" @click="closeWindow" title="Close">
-          <svg width="10" height="10" viewBox="0 0 10 10"><line x1="1" y1="1" x2="9" y2="9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="9" y1="1" x2="1" y2="9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-        </button>
-      </div>
-    </header>
+    <WindowTitlebar
+      :subtitle="t.settingsTitle"
+      :close-label="t.close"
+      :minimize-label="t.minimize"
+      minimizable
+      @minimize="minimize"
+      @close="closeWindow"
+    />
 
     <!-- ── Scrollable content ──────────────────────────────── -->
     <div class="content">
@@ -846,103 +835,6 @@ onMounted(async () => {
   filter: blur(54px);
   top: 44%; left: 48%;
   transform: translate(-50%, -50%);
-}
-
-/* ═══════════════════════════════════════════════════════════════
-   Custom titlebar
-══════════════════════════════════════════════════════════════ */
-.titlebar {
-  position: relative;
-  z-index: 10;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 40px;
-  padding: 0 10px 0 14px;
-
-  background: rgba(180, 220, 180, 0.28);
-  border-bottom: 1px solid rgba(119, 153, 119, 0.22);
-
-  /* macOS-style inset highlight */
-  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.18);
-
-  user-select: none;
-  -webkit-user-select: none;
-  cursor: default;
-}
-
-.title-identity {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex: 1;
-  min-width: 0;
-}
-
-.title-logo { font-size: 16px; line-height: 1; }
-
-.title-name {
-  font-size: 13px;
-  font-weight: 700;
-  color: #1a3a1a;
-  letter-spacing: -0.2px;
-}
-
-.title-sep {
-  font-size: 11px;
-  color: rgba(40, 80, 40, 0.35);
-}
-
-.title-sub {
-  font-size: 10px;
-  font-weight: 500;
-  color: rgba(40, 80, 40, 0.50);
-  text-transform: uppercase;
-  letter-spacing: 0.6px;
-}
-
-/* ── Window control buttons ──────────────────────────────── */
-.win-controls {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-}
-
-.wbtn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 22px;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  background: rgba(0, 0, 0, 0.06);
-  color: rgba(40, 70, 40, 0.55);
-  transition: background 100ms ease, color 100ms ease, transform 80ms ease;
-}
-
-.wbtn:hover  { background: rgba(0, 0, 0, 0.12); color: rgba(20, 50, 20, 0.85); }
-.wbtn:active { transform: scale(0.90); }
-
-/* Close — red on hover */
-.wbtn-close:hover {
-  background: rgba(220, 60, 60, 0.82);
-  color: white;
-}
-
-/* Minimize — amber on hover */
-.wbtn-min:hover {
-  background: rgba(200, 145, 30, 0.82);
-  color: white;
-}
-
-/* Maximize — green on hover */
-.wbtn-max:hover {
-  background: rgba(60, 170, 60, 0.82);
-  color: white;
 }
 
 /* ═══════════════════════════════════════════════════════════════

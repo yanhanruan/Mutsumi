@@ -16,6 +16,7 @@ export const ja: Translations = {
   save:              '保存',
   resetPet:          '若葉睦をリセット',
   close:             '閉じる',
+  minimize:          '最小化',
   savedMsg:          '保存しました。',
   resetMsg:          'リセットしました。',
   autostartOnMsg:    '自動起動を有効にしました。',
