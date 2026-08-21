@@ -4,6 +4,7 @@
 > 工作分支：`feat/macos-adaptation`
 > 基线：`main` / `d3b52a9`
 > 更新时间：2026-08-21
+> 跨设备续作：见 [`MACOS-DEVELOPMENT-HANDOFF.md`](MACOS-DEVELOPMENT-HANDOFF.md)
 
 ## 1. 背景
 
