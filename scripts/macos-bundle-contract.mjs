@@ -148,6 +148,17 @@ export function validateMacosBundleContract(snapshot, {
     warnings.push(`bundle identifier "${snapshot.identifier}" ends in .app; freeze a replacement before signed release`)
   }
 
+  if (snapshot.packageType !== 'APPL') {
+    fail(`CFBundlePackageType must be APPL, found "${snapshot.packageType}"`)
+  }
+  if (snapshot.uiElement !== undefined && snapshot.uiElement !== false) {
+    fail('LSUIElement must be absent or false for a permanent Dock icon')
+  }
+  if (snapshot.backgroundOnly !== undefined && snapshot.backgroundOnly !== false) {
+    fail('LSBackgroundOnly must be absent or false for a foreground app')
+  }
+  messages.push('bundle is a Dock-eligible foreground application')
+
   if (!Array.isArray(snapshot.dmgNames)) fail('DMG list is missing or malformed')
   const dmgNames = snapshot.dmgNames
   if (dmgNames.length !== 1

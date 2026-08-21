@@ -24,6 +24,9 @@ function snapshot(overrides = {}) {
     architectures: ['x86_64', 'arm64'],
     minimumSystemVersion: '13.0',
     identifier: 'com.mutsumi.app',
+    packageType: 'APPL',
+    uiElement: undefined,
+    backgroundOnly: undefined,
     dmgNames: ['mutsumi_1.5.3_universal.dmg'],
     dmgIntegrityValid: true,
     ...overrides,
@@ -157,8 +160,23 @@ test('builds a codesign-evaluated Developer ID requirement for numeric or letter
 
 test('accepts the current unsigned universal bundle and warns about deferred identity', () => {
   const result = validateMacosBundleContract(snapshot())
-  assert.equal(result.messages.length, 3)
+  assert.equal(result.messages.length, 4)
   assert.match(result.warnings[0], /freeze a replacement before signed release/)
+})
+
+test('requires a Dock-eligible foreground application bundle', () => {
+  assert.throws(
+    () => validateMacosBundleContract(snapshot({ packageType: 'FMWK' })),
+    /CFBundlePackageType must be APPL/,
+  )
+  assert.throws(
+    () => validateMacosBundleContract(snapshot({ uiElement: true })),
+    /LSUIElement must be absent or false/,
+  )
+  assert.throws(
+    () => validateMacosBundleContract(snapshot({ backgroundOnly: true })),
+    /LSBackgroundOnly must be absent or false/,
+  )
 })
 
 test('requires exactly the two universal Mach-O architectures', () => {

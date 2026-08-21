@@ -77,11 +77,15 @@ pub fn run() {
     // If a second instance is launched while the app is already running, the
     // plugin kills the second process and focuses the existing main window.
     .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-      use tauri::Manager;
-      if let Some(w) = app.get_webview_window("main") {
-        let _ = w.show();
-        let _ = w.set_focus();
-      }
+      // Use the same show path as the tray so a previously faded-out pet also
+      // receives `pet-show` and becomes visible again.
+      tray::show_main_faded(app);
+
+      // LaunchServices may restore the previously frontmost application when
+      // the short-lived second process exits. Rosetta makes this ordering race
+      // reproducible, so reassert focus once that process has had time to end.
+      #[cfg(target_os = "macos")]
+      macos_lifecycle::schedule_single_instance_refocus(app.clone());
     }))
     .plugin(tauri_plugin_autostart::init(
       tauri_plugin_autostart::MacosLauncher::LaunchAgent,

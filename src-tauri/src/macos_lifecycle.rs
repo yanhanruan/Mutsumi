@@ -8,7 +8,10 @@
 use objc2_app_kit::NSWindow;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
+use std::time::Duration;
+
 const REOPEN_FOCUS_PRIORITY: [&str; 4] = ["update", "settings", "about", "main"];
+const SINGLE_INSTANCE_REFOCUS_DELAY: Duration = Duration::from_millis(1_000);
 
 fn preferred_visible_label(mut is_visible: impl FnMut(&str) -> bool) -> Option<&'static str> {
     REOPEN_FOCUS_PRIORITY
@@ -73,6 +76,21 @@ pub fn handle_reopen<R: Runtime>(app: &AppHandle<R>, has_visible_windows: bool) 
 
     log::info!("[macos] restoring hidden main window after Dock reopen");
     crate::tray::show_main_faded(app);
+}
+
+/// Reassert focus after a bounded delay intended to outlast the second process.
+///
+/// The single-instance plugin notifies the existing process and immediately
+/// exits the new one. LaunchServices can restore the previously active app as
+/// that process disappears, racing the callback's first `set_focus`. Keeping
+/// the immediate focus attempt and repeating it about one second later makes
+/// activation deterministic in the native and Rosetta smoke matrix.
+pub fn schedule_single_instance_refocus<R: Runtime>(app: AppHandle<R>) {
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(SINGLE_INSTANCE_REFOCUS_DELAY).await;
+        log::info!("[macos] reasserting focus after second-instance handoff delay");
+        crate::tray::show_main_faded(&app);
+    });
 }
 
 #[cfg(test)]

@@ -65,8 +65,8 @@ Mutsumi 当前是以 Windows 为唯一发布平台设计的 Tauri 2 桌面应用
 当前实施进度（2026-08-21）：
 
 - Phase 1 编译/启动基线已完成，未实现能力通过 capability 显式降级。
-- Phase 2 已完成 Dock 生命周期、透明窗口启动契约、全局光标、点击穿透协调和原子窗口几何；多显示器、缩放与负坐标仍需真机矩阵验收。
-- Phase 3 已完成 Finder 显示、macOS 快捷键符号、公开 API 空闲检测、GPU/物理磁盘硬件详情，以及默认网络的 Wi‑Fi/Ethernet/其他/离线分类。空闲检测同时读取 CoreGraphics 全局输入时间与 IOKit `PreventUserIdleDisplaySleep` 聚合断言；采样失败时自动飞行保持关闭。硬件详情使用结构化 `system_profiler` JSON 与 `diskutil` plist；网络类型使用公开 SystemConfiguration 动态存储和接口 API，均已通过本机只读冒烟。自启动与系统凭据存储的失败状态已对用户可见；LaunchAgent 配置文件的启用状态往返、Keychain 的读写删除和单实例前台激活均已通过真机测试。实际登录启动、正常 UI 退出后的 socket 清理和休眠/锁屏/切换用户/显示器热插拔仍待真机矩阵验收。
+- Phase 2 已完成 Dock 生命周期、透明窗口启动契约、全局光标、点击穿透协调和原子窗口几何；universal app 的 Dock/LaunchServices 前台资格已形成可重放 smoke，多显示器、缩放、负坐标与真实 Dock 点击仍需真机矩阵验收。
+- Phase 3 已完成 Finder 显示、macOS 快捷键符号、公开 API 空闲检测、GPU/物理磁盘硬件详情，以及默认网络的 Wi‑Fi/Ethernet/其他/离线分类。空闲检测同时读取 CoreGraphics 全局输入时间与 IOKit `PreventUserIdleDisplaySleep` 聚合断言；采样失败时自动飞行保持关闭。硬件详情使用结构化 `system_profiler` JSON 与 `diskutil` plist；网络类型使用公开 SystemConfiguration 动态存储和接口 API，均已通过本机只读冒烟。自启动与系统凭据存储的失败状态已对用户可见；LaunchAgent 配置文件的启用状态往返、Keychain 的读写删除、单实例前台激活及标准 Quit 后 socket 清理均已通过真机测试。实际登录启动和休眠/锁屏/切换用户/显示器热插拔仍待真机矩阵验收。
 - Phase 4A 音频/媒体公开 API spike 已完成，详细决策与兼容性证据见
   [`MACOS-MEDIA-SPIKE.md`](MACOS-MEDIA-SPIKE.md)。macOS 首版使用公开
   CoreAudio 输出设备 I/O 状态驱动音频活动动画，并明确标为 `degraded`；
@@ -86,7 +86,7 @@ Mutsumi 当前是以 Windows 为唯一发布平台设计的 Tauri 2 桌面应用
   图标按钮具有 en/zh/ja 标题和无障碍标签。
 - Phase 6A 已配置桌面双平台 CI 门禁：Windows 运行前后端回归，macOS
   同时安装 `aarch64-apple-darwin` / `x86_64-apple-darwin` 目标，生成未签名
-  app/DMG，并校验 Mach-O 双架构与 macOS 13.0 最低版本。首次远程运行
+  app/DMG，并校验 Mach-O 双架构、macOS 13.0 最低版本与 Dock 前台资格。首次远程运行
   仍待验证；Developer ID、notarization、stapling 和 release/updater 资产
   聚合尚未接入。
 
@@ -224,7 +224,15 @@ Apple Silicon 真机单实例记录（2026-08-21）：
 - 首实例启动后创建 `/tmp/com_mutsumi_app_si.sock`；第二实例在约 0.8 秒内以状态 0 退出，首实例持续运行。
 - 在同一系统脚本中先将 Finder 置前，再启动第二实例，最终前台进程为 `Mutsumi`，证明通知回调会激活已有窗口。
 - 强制终止留下的陈旧 socket 能在下一次启动时被插件识别并接管；本次测试产生的 socket 已清理。
-- 标准 UI Quit 的 socket 清理仍需人工点按验证；自动发送 `Cmd+Q` 因当前终端未获 macOS 辅助功能“发送按键”权限而未执行，不据此判定应用失败。
+- 可重放脚本改用标准 macOS Quit Apple Event，不需要辅助功能“发送按键”权限；正常退出后进程、LaunchServices 注册与 `/tmp/com_mutsumi_app_si.sock` 均已消失。
+
+Apple Silicon Dock/LaunchServices 记录（2026-08-21）：
+
+- 可重放命令为 `npm run test:macos-lifecycle-smoke -- --app <Mutsumi.app> --arch arm64`；同一 universal app 也以 `--arch x86_64` 在 Rosetta 下启动验证。
+- 两种 slice 均被 LaunchServices 报告为 `ApplicationType=Foreground`、`CanBecomeFrontmost=true`、已注册并完成 ready signal；`Info.plist` 为 `CFBundlePackageType=APPL`，且没有启用 `LSUIElement` / `LSBackgroundOnly`。
+- Rosetta 首次重放暴露了第二进程退出与主实例聚焦的时序竞态；现保留即时恢复，并在约 1 秒后做一次有界聚焦重试。修复后第二次启动在两种 slice 下均只保留原 ASN 和 PID，并将已有实例重新置前。
+- 标准 Quit Apple Event 随后完成进程、LaunchServices 注册和单实例 socket 清理；失败清理只操作预检后出现且与精确 bundle 路径/PID 匹配的测试实例，确认进程消失前不会删除 socket。
+- 该 smoke 证明 Dock 前台资格与激活链路，不替代真实点击 Dock 图标、隐藏后恢复、多显示器和睡眠/唤醒人工矩阵。
 
 ### Phase 4：音频、媒体和联网搜索专项
 
@@ -313,7 +321,8 @@ Apple Silicon WKWebView 真机记录（2026-08-21）：
 - 新增 `desktop-ci` workflow，在每个 PR 与相关 main 推送时保留 Windows
   前后端回归，同时构建未签名 universal app/DMG。可复用的 bundle contract
   会校验可执行文件恰好包含 `arm64` + `x86_64`、`Info.plist` 最低 macOS
-  13.0、唯一 DMG 及 `hdiutil` 完整性；CI 产物仅保留七天，不进入 Releases。
+  13.0、`APPL`/非 Agent/非后台 Dock 资格、唯一 DMG 及 `hdiutil` 完整性；
+  CI 产物仅保留七天，不进入 Releases。
 - 本机已实际构建 universal app，`lipo` 返回 `x86_64 arm64`，bundle 最低
   系统版本为 13.0；Rust 342 项、前端 387 项测试通过。当前受控开发环境
   未能完成 `bundle_dmg.sh`，因此 DMG 仍由 workflow 首次远程运行验证。

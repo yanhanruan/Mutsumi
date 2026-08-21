@@ -86,12 +86,20 @@ if (appNames.length !== 1) fail(`expected exactly one .app in ${macosDir}, found
 const appPath = join(macosDir, appNames[0])
 const infoPlist = join(appPath, 'Contents', 'Info.plist')
 
-const executableName = required(
+const infoPlistJson = required(
   'plutil',
-  ['-extract', 'CFBundleExecutable', 'raw', infoPlist],
-  'reading CFBundleExecutable',
+  ['-convert', 'json', '-o', '-', infoPlist],
+  'reading Info.plist',
 )
-if (executableName !== basename(executableName)
+let info
+try {
+  info = JSON.parse(infoPlistJson)
+} catch (error) {
+  fail(`Info.plist JSON could not be parsed: ${error.message}`)
+}
+const executableName = info.CFBundleExecutable
+if (typeof executableName !== 'string'
+  || executableName !== basename(executableName)
   || executableName === '.'
   || executableName === '..'
   || executableName.includes('\\')) {
@@ -109,16 +117,8 @@ try {
 const architectures = executablePresent
   ? required('lipo', ['-archs', executablePath], 'reading Mach-O architectures').split(/\s+/).filter(Boolean)
   : []
-const minimumSystemVersion = required(
-  'plutil',
-  ['-extract', 'LSMinimumSystemVersion', 'raw', infoPlist],
-  'reading LSMinimumSystemVersion',
-)
-const identifier = required(
-  'plutil',
-  ['-extract', 'CFBundleIdentifier', 'raw', infoPlist],
-  'reading CFBundleIdentifier',
-)
+const minimumSystemVersion = info.LSMinimumSystemVersion
+const identifier = info.CFBundleIdentifier
 const dmgNames = entriesAt(dmgDir, (entry) => entry.isFile() && entry.name.toLowerCase().endsWith('.dmg'))
 const dmgPath = dmgNames.length === 1 ? join(dmgDir, dmgNames[0]) : null
 const dmgIntegrity = dmgPath ? run('hdiutil', ['verify', dmgPath]) : { ok: false, output: '' }
@@ -130,6 +130,9 @@ const snapshot = {
   architectures,
   minimumSystemVersion,
   identifier,
+  packageType: info.CFBundlePackageType,
+  uiElement: info.LSUIElement,
+  backgroundOnly: info.LSBackgroundOnly,
   dmgNames,
   dmgIntegrityValid: dmgIntegrity.ok,
 }

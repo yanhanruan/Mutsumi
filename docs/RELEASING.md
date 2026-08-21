@@ -16,7 +16,8 @@ request/main-branch gate. Its Windows job runs the existing frontend and Rust
 regression suite. Its macOS job installs both Apple Rust targets and builds one
 `universal-apple-darwin` app and DMG. The reusable bundle verifier requires the
 executable to contain exactly `arm64` and `x86_64`, checks macOS 13.0 and the
-bundle identifier from `Info.plist`, requires exactly one DMG, and runs
+bundle identifier from `Info.plist`, rejects Agent/background-only bundle flags
+that would remove the permanent Dock icon, requires exactly one DMG, and runs
 `hdiutil verify` against it:
 
 ```bash
@@ -36,6 +37,29 @@ The existing `release.yml` and `staging-release.yml` remain Windows-only until
 the signed/notarized macOS jobs and multi-platform updater-manifest gate are
 implemented together. Keeping this boundary explicit prevents an unsigned CI
 DMG from being mistaken for the Phase 6 release deliverable.
+
+On a logged-in Mac, the opt-in lifecycle smoke launches a built app through
+LaunchServices, verifies the requested Mach-O slice is a ready foreground/Dock
+application, launches it a second time to exercise singleton activation, then
+sends a standard macOS Quit Apple Event and verifies the process, LaunchServices
+registration and single-instance socket are cleaned up. It refuses to run when
+an instance with the same bundle identifier is already open:
+
+```bash
+npm run test:macos-lifecycle-smoke -- \
+  --app src-tauri/target/universal-apple-darwin/release/bundle/macos/mutsumi.app \
+  --arch arm64
+
+# On Apple Silicon with Rosetta installed, also exercise the Intel slice:
+npm run test:macos-lifecycle-smoke -- \
+  --app src-tauri/target/universal-apple-darwin/release/bundle/macos/mutsumi.app \
+  --arch x86_64
+```
+
+This smoke intentionally moves focus away from Mutsumi and then brings Mutsumi
+back to the foreground while it runs. It proves LaunchServices/Dock eligibility
+and activation, but it does not replace manual clicking of the Dock icon,
+window hide/restore, multi-display or sleep/wake testing.
 
 The release verifier already has a tested `--require-macos-universal` contract
 for that future cut-over. It requires one DMG for direct installation and one
