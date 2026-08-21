@@ -225,14 +225,19 @@ pub fn run() {
         g.pomodoro.break_mins = pom.break_mins;
       }
 
-      // Audio detector (Windows only).
-      #[cfg(windows)]
+      // Platform audio-activity detector. Windows reads per-session peak
+      // meters; macOS uses the public default-output-device I/O state and
+      // reports that less precise signal as a degraded capability.
+      #[cfg(any(windows, target_os = "macos"))]
       {
         let stop_flag = Arc::new(AtomicBool::new(false));
         let _ = &stop_flag;   // not stored — runs for app lifetime
         audio::spawn(app.handle().clone(), stop_flag);
+      }
 
-        // Media transport controller (SMTC now-playing + transport).
+      // Media transport controller (Windows SMTC now-playing + transport).
+      #[cfg(windows)]
+      {
         let media_stop_flag = Arc::new(AtomicBool::new(false));
         let _ = &media_stop_flag;
         media::spawn(app.handle().clone(), media_stop_flag);

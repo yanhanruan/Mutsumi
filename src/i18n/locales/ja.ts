@@ -99,6 +99,8 @@ export const ja: Translations = {
 
   // ── Music controller visibility ───────────────────────────────────
   showMusic: '音楽コントローラーを表示',
+  showAudioActivity: 'オーディオ動作バッジを表示',
+  audioActivityDegradedHint: '出力デバイスの I/O から推定するため、無音のまま開いているストリームも再生中と表示される場合があります。',
 
   // ── Sleep "zzz" effect visibility ─────────────────────────────────
   showZzz: '寝るときの zzz を表示',

@@ -57,7 +57,9 @@ fn current() -> PlatformCapabilities {
     use CapabilityStatus::{Available, Degraded, Unavailable};
 
     PlatformCapabilities {
-        audio_activity: Unavailable,
+        // Public CoreAudio reports default-output I/O, not sample amplitude;
+        // silent-but-open streams can therefore keep the signal active.
+        audio_activity: Degraded,
         media_metadata: Unavailable,
         media_transport: Unavailable,
         system_volume: Unavailable,
@@ -112,7 +114,7 @@ mod tests {
     #[test]
     fn macos_baseline_reports_available_degraded_and_unavailable_features() {
         let capabilities = current();
-        assert_eq!(capabilities.audio_activity, CapabilityStatus::Unavailable);
+        assert_eq!(capabilities.audio_activity, CapabilityStatus::Degraded);
         assert_eq!(capabilities.idle_detection, CapabilityStatus::Available);
         assert_eq!(capabilities.global_cursor, CapabilityStatus::Available);
         assert_eq!(

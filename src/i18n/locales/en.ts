@@ -99,6 +99,8 @@ export const en: Translations = {
 
   // ── Music controller visibility ───────────────────────────────────
   showMusic: 'Show Music Controller',
+  showAudioActivity: 'Show Audio Activity Badge',
+  audioActivityDegradedHint: 'Audio activity is estimated from output-device I/O and may remain active for silent streams.',
 
   // ── Sleep "zzz" effect visibility ─────────────────────────────────
   showZzz: 'Show Sleep "zzz"',

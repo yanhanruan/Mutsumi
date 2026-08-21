@@ -34,16 +34,30 @@ beforeEach(() => {
 })
 
 describe('usePlatformCapabilities', () => {
-  it('hides music only when both native inputs are explicitly unavailable', async () => {
+  it('hides music when every audio and media capability is explicitly unavailable', async () => {
     const { first } = await freshComposable(() => Promise.resolve(macCapabilities))
     expect(first.resolved.value).toBe(true)
     expect(first.musicAvailable.value).toBe(false)
   })
 
-  it('keeps music visible when either audio activity or metadata is available', async () => {
-    const capabilities = { ...macCapabilities, audioActivity: 'available' as const }
+  it('keeps the audio animation visible for a degraded activity signal', async () => {
+    const capabilities = { ...macCapabilities, audioActivity: 'degraded' as const }
     const { first } = await freshComposable(() => Promise.resolve(capabilities))
     expect(first.musicAvailable.value).toBe(true)
+    expect(first.audioActivityDegraded.value).toBe(true)
+  })
+
+  it('hides the controller panel when only audio activity is available', async () => {
+    const capabilities = { ...macCapabilities, audioActivity: 'degraded' as const }
+    const { first } = await freshComposable(() => Promise.resolve(capabilities))
+    expect(first.musicAvailable.value).toBe(true)
+    expect(first.musicPanelAvailable.value).toBe(false)
+  })
+
+  it('keeps the controller panel when media metadata is supported', async () => {
+    const capabilities = { ...macCapabilities, mediaMetadata: 'available' as const }
+    const { first } = await freshComposable(() => Promise.resolve(capabilities))
+    expect(first.musicPanelAvailable.value).toBe(true)
   })
 
   it('fails open when the capability command is unavailable', async () => {
@@ -51,6 +65,7 @@ describe('usePlatformCapabilities', () => {
     expect(first.resolved.value).toBe(true)
     expect(first.capabilities.value).toBeNull()
     expect(first.musicAvailable.value).toBe(true)
+    expect(first.musicPanelAvailable.value).toBe(true)
   })
 
   it('disables automatic idle flight when idle detection becomes unavailable', async () => {

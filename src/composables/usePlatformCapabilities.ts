@@ -49,12 +49,32 @@ export function usePlatformCapabilities() {
     if (!resolved.value || !capabilities.value) return true
     return capabilities.value.audioActivity !== 'unavailable'
       || capabilities.value.mediaMetadata !== 'unavailable'
+      || capabilities.value.mediaTransport !== 'unavailable'
   })
+
+  // An audio-only macOS implementation should animate the badge/pet without
+  // exposing a dead now-playing panel. Fail open until capability resolution
+  // so established Windows behaviour is never hidden by transient IPC errors.
+  const musicPanelAvailable = computed(() => {
+    if (!resolved.value || !capabilities.value) return true
+    return capabilities.value.mediaMetadata !== 'unavailable'
+      || capabilities.value.mediaTransport !== 'unavailable'
+  })
+
+  const audioActivityDegraded = computed(() =>
+    capabilities.value?.audioActivity === 'degraded')
 
   const idleScreensaverAvailable = computed(() => {
     if (!resolved.value || !capabilities.value) return true
     return capabilities.value.idleDetection === 'available'
   })
 
-  return { capabilities, resolved, musicAvailable, idleScreensaverAvailable }
+  return {
+    capabilities,
+    resolved,
+    musicAvailable,
+    musicPanelAvailable,
+    audioActivityDegraded,
+    idleScreensaverAvailable,
+  }
 }

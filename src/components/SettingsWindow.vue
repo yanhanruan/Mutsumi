@@ -8,7 +8,7 @@
  *
  * Primary theme: #779977 (sage green).
  */
-import { onMounted, onUnmounted, nextTick, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, nextTick, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { enable, disable, isEnabled } from '@tauri-apps/plugin-autostart'
@@ -93,7 +93,12 @@ async function setSize(s: CharacterSize) {
 
 // ── Weather visibility ────────────────────────────────────────────
 const { weatherAvailable } = useWeatherAvailable()
-const { musicAvailable, idleScreensaverAvailable } = usePlatformCapabilities()
+const {
+  musicAvailable,
+  musicPanelAvailable,
+  audioActivityDegraded,
+  idleScreensaverAvailable,
+} = usePlatformCapabilities()
 const localShowWeather = ref<boolean>(config.value.showWeather)
 
 watch(() => config.value.showWeather, v => { localShowWeather.value = v })
@@ -104,6 +109,8 @@ async function toggleWeather() {
 
 // ── Music controller visibility ───────────────────────────────────
 const localShowMusic = ref<boolean>(config.value.showMusic)
+const musicToggleLabel = computed(() =>
+  musicPanelAvailable.value ? t.value.showMusic : t.value.showAudioActivity)
 
 watch(() => config.value.showMusic, v => { localShowMusic.value = v })
 
@@ -740,7 +747,7 @@ onMounted(async () => {
 
         <!-- Music controller visibility -->
         <div v-if="musicAvailable" class="field-row" style="margin-top: 6px;">
-          <label for="music-toggle">{{ t.showMusic }}</label>
+          <label for="music-toggle">{{ musicToggleLabel }}</label>
           <label class="toggle">
             <input
               id="music-toggle"
@@ -751,6 +758,9 @@ onMounted(async () => {
             <span class="thumb" />
           </label>
         </div>
+        <p v-if="musicAvailable && audioActivityDegraded" class="system-warning">
+          ⚠️ {{ t.audioActivityDegradedHint }}
+        </p>
 
         <!-- Sleep "zzz" effect visibility -->
         <div class="field-row" style="margin-top: 6px;">

@@ -99,6 +99,8 @@ export const zh: Translations = {
 
   // ── Music controller visibility ───────────────────────────────────
   showMusic: '显示音乐控制器',
+  showAudioActivity: '显示音频活动徽章',
+  audioActivityDegradedHint: '音频活动根据输出设备 I/O 估算，静音但未关闭的音频流也可能显示为活动。',
 
   // ── Sleep "zzz" effect visibility ─────────────────────────────────
   showZzz: '显示睡眠 zzz 效果',

@@ -97,6 +97,8 @@ export interface Translations {
 
   // ── Music controller visibility ─────────────────────────────────
   showMusic: string
+  showAudioActivity: string
+  audioActivityDegradedHint: string
 
   // ── Sleep "zzz" effect visibility ───────────────────────────────
   showZzz: string
