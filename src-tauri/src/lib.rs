@@ -22,6 +22,8 @@ mod idle;
 mod late_night;
 #[cfg(target_os = "macos")]
 mod macos_lifecycle;
+#[cfg(all(test, target_os = "macos"))]
+mod macos_system_integration_tests;
 #[cfg(windows)]
 mod media;
 #[cfg(target_os = "macos")]

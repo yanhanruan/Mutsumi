@@ -50,6 +50,9 @@ battery = "0.7.8"    # battery level + charge-rate time estimate
 # Test-only async runtime for the (ignored) live API smoke tests.
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+# Exercise the same LaunchAgent backend used transitively by
+# tauri-plugin-autostart without requiring a Tauri window in the live smoke.
+auto-launch = "0.5"
 
 # ── Release size optimizations ─────────────────────────────────────
 [profile.release]
