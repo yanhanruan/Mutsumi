@@ -84,6 +84,11 @@ Mutsumi 当前是以 Windows 为唯一发布平台设计的 Tauri 2 桌面应用
   可用操作使用左侧交通灯（设置为红/黄，关于与更新仅红色关闭），
   其他平台保留右侧控件；固定尺寸窗口不再展示无效的最大化操作，
   图标按钮具有 en/zh/ja 标题和无障碍标签。
+- Phase 6A 已配置桌面双平台 CI 门禁：Windows 运行前后端回归，macOS
+  同时安装 `aarch64-apple-darwin` / `x86_64-apple-darwin` 目标，生成未签名
+  app/DMG，并校验 Mach-O 双架构与 macOS 13.0 最低版本。首次远程运行
+  仍待验证；Developer ID、notarization、stapling 和 release/updater 资产
+  聚合尚未接入。
 
 ## 5. 总体技术方案
 
@@ -303,6 +308,22 @@ Apple Silicon WKWebView 真机记录（2026-08-21）：
 5. 更新发布资产校验脚本，使 updater manifest 同时校验 Windows 和 macOS。
 6. 完成从旧 macOS 版本到 staging 版本的真实升级测试。
 
+当前记录（2026-08-21）：
+
+- 新增 `desktop-ci` workflow，在相关 PR 与 main 推送时保留 Windows
+  前后端回归，同时构建未签名 universal app/DMG，并用 `lipo` 校验
+  `arm64` + `x86_64`、用 bundle `Info.plist` 校验最低 macOS 13.0。CI
+  产物仅保留七天，不进入 Releases。
+- 本机已实际构建 universal app，`lipo` 返回 `x86_64 arm64`，bundle 最低
+  系统版本为 13.0；Rust 342 项、前端 387 项测试通过。当前受控开发环境
+  未能完成 `bundle_dmg.sh`，因此 DMG 仍由 workflow 首次远程运行验证。
+  Developer ID 签名、notarization/stapling、Gatekeeper 与真实 Intel 启动
+  仍待完成。现有 staging/release workflow 继续保持 Windows-only，直到
+  多平台 updater manifest 能作为一个整体通过资产门禁。
+- 本机原生 bundle 验证同时发现现有 identifier `com.mutsumi.app` 以
+  `.app` 结尾，Tauri 明确提示可能与 macOS bundle 扩展冲突。该标识符在
+  接入 Developer ID 前必须完成产品确认并冻结；本阶段不擅自改变身份。
+
 验收：
 
 - 新机器可从 DMG 安装，Gatekeeper 不显示未签名或损坏警告。
@@ -349,6 +370,7 @@ Apple Silicon WKWebView 真机记录（2026-08-21）：
 | 系统音频采集需要高权限或受系统版本限制 | 首次授权体验差，兼容范围缩小 | 音频功能与核心应用解耦，默认最少权限 |
 | WKWebView 与 WebView2 行为差异 | 搜索正文回读、challenge 流程不稳定 | 建立平台 bridge 和真实引擎基准，保持超时降级 |
 | 透明窗口和点击穿透存在系统差异 | 核心桌宠体验受损 | Phase 2 独立验收，多显示器真机测试 |
+| `com.mutsumi.app` 以 `.app` 结尾且尚未冻结 macOS bundle identity | 签名后再修改会改变应用身份，影响升级与系统授权连续性 | 接入 Developer ID 前确定长期 identifier，并在 CI 校验 Info.plist |
 | 签名、notarization、updater 资产组合复杂 | 用户无法安装或升级 | staging 发布先行，发布脚本增加平台资产契约校验 |
 | 平台抽象改动影响 Windows | 现有用户回归 | 保持命令/事件契约稳定，CI 双平台门禁 |
 

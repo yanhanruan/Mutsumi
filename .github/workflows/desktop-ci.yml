@@ -1,0 +1,129 @@
+# Cross-platform pull-request/main gate. The macOS job intentionally produces
+# an unsigned, short-lived CI artifact: Developer ID signing, notarization and
+# release aggregation are separate Phase 6 gates and must never be implied.
+name: desktop-ci
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/desktop-ci.yml'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'src/**'
+      - 'src-tauri/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-regression:
+    name: Windows regression
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Frontend tests and build
+        run: |
+          npm test
+          npm run build
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+          shared-key: windows-regression
+
+      - name: Rust tests (Windows)
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+  universal-bundle:
+    name: unsigned universal bundle
+    runs-on: macos-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Frontend tests
+        run: npm test
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+          shared-key: macos-universal
+
+      - name: Rust tests (native macOS)
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Build unsigned universal app and DMG
+        run: npx tauri build --target universal-apple-darwin --bundles app,dmg --ci --no-sign
+
+      - name: Verify universal bundle contract
+        shell: bash
+        run: |
+          app="src-tauri/target/universal-apple-darwin/release/bundle/macos/mutsumi.app"
+          executable="$app/Contents/MacOS/Mutsumi"
+          dmg_dir="src-tauri/target/universal-apple-darwin/release/bundle/dmg"
+
+          if [ ! -x "$executable" ]; then
+            echo "::error::Universal app executable is missing: $executable"
+            exit 1
+          fi
+
+          lipo "$executable" -verify_arch arm64 x86_64
+          echo "universal executable: $(lipo -archs "$executable")"
+
+          minimum_system=$(plutil -extract LSMinimumSystemVersion raw "$app/Contents/Info.plist")
+          if [ "$minimum_system" != "13.0" ]; then
+            echo "::error::LSMinimumSystemVersion is $minimum_system, expected 13.0"
+            exit 1
+          fi
+          echo "minimum macOS: $minimum_system"
+
+          dmg_count=$(find "$dmg_dir" -maxdepth 1 -type f -name '*.dmg' | wc -l | tr -d ' ')
+          if [ "$dmg_count" != "1" ]; then
+            echo "::error::Expected exactly one DMG in $dmg_dir, found $dmg_count"
+            find "$dmg_dir" -maxdepth 1 -type f -print || true
+            exit 1
+          fi
+
+      - name: Upload unsigned CI bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-macos-universal-${{ github.sha }}
+          path: |
+            src-tauri/target/universal-apple-darwin/release/bundle/macos/mutsumi.app
+            src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+          retention-days: 7

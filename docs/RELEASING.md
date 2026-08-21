@@ -9,6 +9,25 @@ manually after the upgrade smoke test — see the release gate below and
 [`TESTING-UPDATES.md`](TESTING-UPDATES.md). Once published, the running app
 checks the manifest once a day and offers an in-app update.
 
+## macOS CI build baseline (not a release)
+
+[`desktop-ci.yml`](../.github/workflows/desktop-ci.yml) is a separate pull
+request/main-branch gate. Its Windows job runs the existing frontend and Rust
+regression suite. Its macOS job installs both Apple Rust targets and builds one
+`universal-apple-darwin` app and DMG, verifies the executable contains `arm64`
+and `x86_64`, and checks that the bundle declares macOS 13.0 as its minimum.
+
+Its artifact is deliberately named `unsigned-macos-universal-*`, retained for
+only seven days, and is **not uploaded to GitHub Releases**. It exists to prove
+the cross-architecture compile and packaging chain before Developer ID secrets
+are connected. It has not passed signing, notarization, stapling or Gatekeeper
+checks and must not be distributed to users.
+
+The existing `release.yml` and `staging-release.yml` remain Windows-only until
+the signed/notarized macOS jobs and multi-platform updater-manifest gate are
+implemented together. Keeping this boundary explicit prevents an unsigned CI
+DMG from being mistaken for the Phase 6 release deliverable.
+
 ## One-time setup (before the first signed release)
 
 The auto-updater verifies every download against a signing key, so you must
