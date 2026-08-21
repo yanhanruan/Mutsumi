@@ -43,6 +43,7 @@ jobs:
       - name: Frontend tests and build
         run: |
           npm test
+          npm run test:release-contract
           npm run build
 
       - uses: dtolnay/rust-toolchain@stable
@@ -72,7 +73,9 @@ jobs:
         run: npm ci
 
       - name: Frontend tests
-        run: npm test
+        run: |
+          npm test
+          npm run test:release-contract
 
       - uses: dtolnay/rust-toolchain@stable
         with:

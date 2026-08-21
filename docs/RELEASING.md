@@ -28,6 +28,11 @@ the signed/notarized macOS jobs and multi-platform updater-manifest gate are
 implemented together. Keeping this boundary explicit prevents an unsigned CI
 DMG from being mistaken for the Phase 6 release deliverable.
 
+The release verifier already has a tested `--require-macos-universal` contract
+for that future cut-over. It requires one DMG for direct installation and one
+signed `.app.tar.gz` updater archive referenced by both `darwin-aarch64` and
+`darwin-x86_64`. The current workflows deliberately do not enable the flag yet.
+
 ## One-time setup (before the first signed release)
 
 The auto-updater verifies every download against a signing key, so you must
@@ -116,8 +121,9 @@ tag push
   users even though the release object already exists.
 - The verification step blocks the "partial upload" hazard: it fails the
   workflow unless the draft carries the installer, its `.sig`, and a
-  `latest.json` whose version and download URL match the actually-uploaded
-  assets.
+  `latest.json` whose version and every platform download URL match assets on
+  that release. Each embedded manifest signature must exactly match its
+  uploaded `.sig` file; a merely non-empty but stale signature is rejected.
 - For the smoke test (and for exercising failure cases like tampered
   signatures against a real build), follow
   [`TESTING-UPDATES.md`](TESTING-UPDATES.md) — it also documents the
@@ -140,10 +146,15 @@ workflow — [`verify-published-release.yml`](../.github/workflows/verify-publis
 — runs on the `release: published` event (i.e. the moment you click **Publish**)
 and via [`heal-published-release.mjs`](../scripts/heal-published-release.mjs):
 
-1. reads the live `latest.json` → the exact installer URL clients will fetch;
+1. reads the live `latest.json` → every distinct updater URL clients may fetch;
 2. if the release isn't bound to `vX.Y.Z`, **rebinds it** (PATCH `tag_name`,
    the same fix as editing the tag in the UI) using the in-CI `GITHUB_TOKEN`;
-3. verifies the URL actually resolves, and **fails loudly** if it still doesn't.
+3. verifies every URL actually resolves, and **fails loudly** if any still does
+   not.
+
+Drafts remain owned by the pre-publish gate. Prereleases are also skipped here:
+the rolling staging release must stay bound to the literal `staging` tag and
+must never be "healed" onto a production `vX.Y.Z` tag.
 
 So a normal release self-heals after you publish. If you ever need to re-run it
 by hand (e.g. to repair an old release), trigger the workflow manually:

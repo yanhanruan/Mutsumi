@@ -43,7 +43,9 @@ jobs:
         run: npm ci
 
       - name: Unit tests (gate)
-        run: npm test
+        run: |
+          npm test
+          npm run test:release-contract
 
       - uses: dtolnay/rust-toolchain@stable
 

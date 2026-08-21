@@ -152,12 +152,20 @@ Run the **staging-release** workflow (GitHub → Actions → staging-release →
 4. runs [`scripts/verify-release-assets.mjs`](../scripts/verify-release-assets.mjs),
    which fails the workflow unless the release carries exactly one
    `*-setup.exe`, its `.sig`, and a `latest.json` whose version matches the
-   committed version and whose URL points at the actually-uploaded installer.
+   committed version, whose platform URLs point at actually-uploaded assets,
+   and whose embedded signatures exactly match the uploaded `.sig` contents.
 
 Step 4 is the guard against the **partial-success** hazard: a release that
 exists (clients see an update) but whose installer/signature/manifest is
 missing or mismatched (every update attempt fails). The same script gates
-production drafts in `release.yml`.
+production drafts in `release.yml`. Its tested `--require-macos-universal`
+mode additionally requires one DMG and one signed `.app.tar.gz` shared by the
+`darwin-aarch64` and `darwin-x86_64` manifest entries; the flag stays disabled
+until the signed macOS release job is added.
+
+The production post-publish healer ignores this prerelease. The rolling channel
+must remain attached to the literal `staging` tag rather than being rebound to
+the build's `vX.Y.Z` version tag.
 
 ---
 
@@ -209,7 +217,7 @@ whenever the updater config changes) is the readiness bar.
 | 5 | An old Windows client really upgrades | Layer 4 runbook |
 | 6 | Invalid signatures are rejected | Layer 2 `bad-signature` |
 | 7 | Download failures never display as success | Layer 1 reducer + Layer 2 `interrupt` |
-| 8 | Incomplete `latest.json` can't ship a broken update | manifest contract checks in `verify-release-assets.mjs` |
+| 8 | Incomplete or signature-mismatched `latest.json` can't ship a broken update | pure contract tests + `verify-release-assets.mjs` |
 | 9 | A Windows smoke test has run | Layer 4, step 3–4 |
 
 The production flow in [`RELEASING.md`](RELEASING.md) enforces the gate:

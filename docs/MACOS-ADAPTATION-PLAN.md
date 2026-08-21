@@ -323,6 +323,14 @@ Apple Silicon WKWebView 真机记录（2026-08-21）：
 - 本机原生 bundle 验证同时发现现有 identifier `com.mutsumi.app` 以
   `.app` 结尾，Tauri 明确提示可能与 macOS bundle 扩展冲突。该标识符在
   接入 Developer ID 前必须完成产品确认并冻结；本阶段不擅自改变身份。
+- Phase 6B 已把 release/updater 资产检查拆成可单测的纯契约：现有 Windows
+  release 继续要求 NSIS，且 manifest 的每个 platform entry 都必须指向本
+  release 中的非空资产，内嵌 signature 必须与上传的 `.sig` 原文完全一致。
+  `--require-macos-universal` 门禁额外要求唯一 DMG，以及同时供
+  `darwin-aarch64` / `darwin-x86_64` 使用的同一个签名 `.app.tar.gz`；该开关
+  会在签名 macOS workflow 接入时启用，当前 Windows-only release 不会被
+  伪装成双平台完成。post-publish gate 已改为验证所有唯一 updater URL，
+  并明确跳过 draft/prerelease，避免把 rolling `staging` 错绑到生产版本 tag。
 
 验收：
 
@@ -340,6 +348,8 @@ Apple Silicon WKWebView 真机记录（2026-08-21）：
 - Rust 单元测试和 macOS/Windows `cargo check`。
 - 平台抽象的 contract tests。
 - release asset 与 updater manifest 校验。
+- release contract 的纯单测（平台缺失、资产错链、签名不一致、staging tag
+  与 universal macOS 组合）。
 
 真机冒烟矩阵：
 
