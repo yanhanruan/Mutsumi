@@ -14,8 +14,17 @@ checks the manifest once a day and offers an in-app update.
 [`desktop-ci.yml`](../.github/workflows/desktop-ci.yml) is a separate pull
 request/main-branch gate. Its Windows job runs the existing frontend and Rust
 regression suite. Its macOS job installs both Apple Rust targets and builds one
-`universal-apple-darwin` app and DMG, verifies the executable contains `arm64`
-and `x86_64`, and checks that the bundle declares macOS 13.0 as its minimum.
+`universal-apple-darwin` app and DMG. The reusable bundle verifier requires the
+executable to contain exactly `arm64` and `x86_64`, checks macOS 13.0 and the
+bundle identifier from `Info.plist`, requires exactly one DMG, and runs
+`hdiutil verify` against it:
+
+```bash
+node scripts/verify-macos-bundle.mjs \
+  --bundle-dir src-tauri/target/universal-apple-darwin/release/bundle \
+  --mode unsigned \
+  --expected-minimum-system-version 13.0
+```
 
 Its artifact is deliberately named `unsigned-macos-universal-*`, retained for
 only seven days, and is **not uploaded to GitHub Releases**. It exists to prove
@@ -32,6 +41,26 @@ The release verifier already has a tested `--require-macos-universal` contract
 for that future cut-over. It requires one DMG for direct installation and one
 signed `.app.tar.gz` updater archive referenced by both `darwin-aarch64` and
 `darwin-x86_64`. The current workflows deliberately do not enable the flag yet.
+
+Before enabling a signed macOS workflow, freeze a long-lived bundle identifier.
+The current `com.mutsumi.app` is explicitly tracked as **must resolve before
+formal signing**; changing it is not part of the unsigned CI baseline. Then run
+the prepared signed bundle gate with that exact value:
+
+```bash
+node scripts/verify-macos-bundle.mjs \
+  --bundle-dir src-tauri/target/universal-apple-darwin/release/bundle \
+  --mode signed \
+  --expected-identifier '<frozen-bundle-identifier>' \
+  --expected-minimum-system-version 13.0
+```
+
+Signed mode rejects an identifier ending in `.app` and requires a valid
+Developer ID Application signature, hardened runtime, secure timestamp,
+readable distribution entitlements without `get-task-allow`, Gatekeeper
+acceptance for the app and DMG, and a notarization ticket stapled to the DMG.
+It is implemented as a future release gate but is not run by today's unsigned
+CI or Windows-only release workflows.
 
 ## One-time setup (before the first signed release)
 

@@ -13,6 +13,7 @@ on:
       - '.github/workflows/desktop-ci.yml'
       - 'package.json'
       - 'package-lock.json'
+      - 'scripts/**'
       - 'src/**'
       - 'src-tauri/**'
 
@@ -93,33 +94,11 @@ jobs:
         run: npx tauri build --target universal-apple-darwin --bundles app,dmg --ci --no-sign
 
       - name: Verify universal bundle contract
-        shell: bash
-        run: |
-          app="src-tauri/target/universal-apple-darwin/release/bundle/macos/mutsumi.app"
-          executable="$app/Contents/MacOS/Mutsumi"
-          dmg_dir="src-tauri/target/universal-apple-darwin/release/bundle/dmg"
-
-          if [ ! -x "$executable" ]; then
-            echo "::error::Universal app executable is missing: $executable"
-            exit 1
-          fi
-
-          lipo "$executable" -verify_arch arm64 x86_64
-          echo "universal executable: $(lipo -archs "$executable")"
-
-          minimum_system=$(plutil -extract LSMinimumSystemVersion raw "$app/Contents/Info.plist")
-          if [ "$minimum_system" != "13.0" ]; then
-            echo "::error::LSMinimumSystemVersion is $minimum_system, expected 13.0"
-            exit 1
-          fi
-          echo "minimum macOS: $minimum_system"
-
-          dmg_count=$(find "$dmg_dir" -maxdepth 1 -type f -name '*.dmg' | wc -l | tr -d ' ')
-          if [ "$dmg_count" != "1" ]; then
-            echo "::error::Expected exactly one DMG in $dmg_dir, found $dmg_count"
-            find "$dmg_dir" -maxdepth 1 -type f -print || true
-            exit 1
-          fi
+        run: >-
+          node scripts/verify-macos-bundle.mjs
+          --bundle-dir src-tauri/target/universal-apple-darwin/release/bundle
+          --mode unsigned
+          --expected-minimum-system-version 13.0
 
       - name: Upload unsigned CI bundle
         uses: actions/upload-artifact@v4

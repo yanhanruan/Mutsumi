@@ -2,6 +2,7 @@
   "bundle": {
     "targets": ["app", "dmg"],
     "macOS": {
+      "hardenedRuntime": true,
       "minimumSystemVersion": "13.0"
     }
   }

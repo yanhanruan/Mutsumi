@@ -310,10 +310,10 @@ Apple Silicon WKWebView 真机记录（2026-08-21）：
 
 当前记录（2026-08-21）：
 
-- 新增 `desktop-ci` workflow，在相关 PR 与 main 推送时保留 Windows
-  前后端回归，同时构建未签名 universal app/DMG，并用 `lipo` 校验
-  `arm64` + `x86_64`、用 bundle `Info.plist` 校验最低 macOS 13.0。CI
-  产物仅保留七天，不进入 Releases。
+- 新增 `desktop-ci` workflow，在每个 PR 与相关 main 推送时保留 Windows
+  前后端回归，同时构建未签名 universal app/DMG。可复用的 bundle contract
+  会校验可执行文件恰好包含 `arm64` + `x86_64`、`Info.plist` 最低 macOS
+  13.0、唯一 DMG 及 `hdiutil` 完整性；CI 产物仅保留七天，不进入 Releases。
 - 本机已实际构建 universal app，`lipo` 返回 `x86_64 arm64`，bundle 最低
   系统版本为 13.0；Rust 342 项、前端 387 项测试通过。当前受控开发环境
   未能完成 `bundle_dmg.sh`，因此 DMG 仍由 workflow 首次远程运行验证。
@@ -322,7 +322,10 @@ Apple Silicon WKWebView 真机记录（2026-08-21）：
   多平台 updater manifest 能作为一个整体通过资产门禁。
 - 本机原生 bundle 验证同时发现现有 identifier `com.mutsumi.app` 以
   `.app` 结尾，Tauri 明确提示可能与 macOS bundle 扩展冲突。该标识符在
-  接入 Developer ID 前必须完成产品确认并冻结；本阶段不擅自改变身份。
+  接入 Developer ID 前必须完成产品确认并冻结。产品已决定将此项标为
+  “正式签名前处理”：它不阻塞未签名 CI 与测试，本阶段不擅自改变身份；
+  signed bundle contract 会要求显式传入冻结后的 identifier，并拒绝以
+  `.app` 结尾的值。
 - Phase 6B 已把 release/updater 资产检查拆成可单测的纯契约：现有 Windows
   release 继续要求 NSIS，且 manifest 的每个 platform entry 都必须指向本
   release 中的非空资产，内嵌 signature 必须与上传的 `.sig` 原文完全一致。
@@ -331,6 +334,12 @@ Apple Silicon WKWebView 真机记录（2026-08-21）：
   会在签名 macOS workflow 接入时启用，当前 Windows-only release 不会被
   伪装成双平台完成。post-publish gate 已改为验证所有唯一 updater URL，
   并明确跳过 draft/prerelease，避免把 rolling `staging` 错绑到生产版本 tag。
+- Phase 6C 已把 app/DMG 本体检查拆成可单测的纯契约与 macOS CLI。当前
+  `desktop-ci` 启用 unsigned 模式；future signed 模式已经定义 Developer ID
+  Application 签名、hardened runtime、安全时间戳、禁止
+  `get-task-allow`、app/DMG Gatekeeper 接受以及 DMG stapling 门禁，但在
+  identifier、证书与 notarization 凭据就绪前不会启用。macOS 配置显式固定
+  `hardenedRuntime: true`，当前无需特殊 entitlement。
 
 验收：
 
@@ -380,7 +389,7 @@ Apple Silicon WKWebView 真机记录（2026-08-21）：
 | 系统音频采集需要高权限或受系统版本限制 | 首次授权体验差，兼容范围缩小 | 音频功能与核心应用解耦，默认最少权限 |
 | WKWebView 与 WebView2 行为差异 | 搜索正文回读、challenge 流程不稳定 | 建立平台 bridge 和真实引擎基准，保持超时降级 |
 | 透明窗口和点击穿透存在系统差异 | 核心桌宠体验受损 | Phase 2 独立验收，多显示器真机测试 |
-| `com.mutsumi.app` 以 `.app` 结尾且尚未冻结 macOS bundle identity | 签名后再修改会改变应用身份，影响升级与系统授权连续性 | 接入 Developer ID 前确定长期 identifier，并在 CI 校验 Info.plist |
+| `com.mutsumi.app` 以 `.app` 结尾且尚未冻结 macOS bundle identity | 签名后再修改会改变应用身份，影响升级与系统授权连续性 | 已标为“正式签名前处理”；接入 Developer ID 前确定长期 identifier，signed contract 拒绝未冻结或仍以 `.app` 结尾的值 |
 | 签名、notarization、updater 资产组合复杂 | 用户无法安装或升级 | staging 发布先行，发布脚本增加平台资产契约校验 |
 | 平台抽象改动影响 Windows | 现有用户回归 | 保持命令/事件契约稳定，CI 双平台门禁 |
 
@@ -395,6 +404,7 @@ Apple Silicon WKWebView 真机记录（2026-08-21）：
 - [x] Dock 图标常驻，同时保留菜单栏图标。
 - [ ] 是否按 Phase 1 → 2 → 3 → 4 → 5 → 6 的顺序实施。
 - [ ] 是否接受首版通过 GitHub Releases 分发签名/notarized DMG，不进入 Mac App Store。
+- [ ] 正式签名前是否已经冻结长期 bundle identifier，并用 signed bundle contract 校验产物。
 
 ## 10. 建议的首个实施切片
 

@@ -163,6 +163,14 @@ mode additionally requires one DMG and one signed `.app.tar.gz` shared by the
 `darwin-aarch64` and `darwin-x86_64` manifest entries; the flag stays disabled
 until the signed macOS release job is added.
 
+The macOS package itself has a separate bundle contract. Unsigned desktop CI
+runs `scripts/verify-macos-bundle.mjs --mode unsigned` to check the universal
+architectures, minimum OS, bundle metadata and DMG integrity. Its dormant
+`--mode signed` adds Developer ID, hardened-runtime, timestamp, entitlement,
+Gatekeeper and stapled-notarization checks. Do not enable signed mode until the
+long-lived bundle identifier has been frozen; that decision is explicitly a
+formal-signing prerequisite rather than a blocker for the current CI baseline.
+
 The production post-publish healer ignores this prerelease. The rolling channel
 must remain attached to the literal `staging` tag rather than being rebound to
 the build's `vX.Y.Z` version tag.
@@ -219,6 +227,8 @@ whenever the updater config changes) is the readiness bar.
 | 7 | Download failures never display as success | Layer 1 reducer + Layer 2 `interrupt` |
 | 8 | Incomplete or signature-mismatched `latest.json` can't ship a broken update | pure contract tests + `verify-release-assets.mjs` |
 | 9 | A Windows smoke test has run | Layer 4, step 3–4 |
+| 10 | The unsigned macOS universal app/DMG satisfies its bundle contract | `desktop-ci.yml` + `verify-macos-bundle.mjs --mode unsigned` |
+| 11 | A signed macOS app/DMG passes Developer ID, Gatekeeper and stapling checks | Formal-signing gate: `verify-macos-bundle.mjs --mode signed` (not enabled yet) |
 
 The production flow in [`RELEASING.md`](RELEASING.md) enforces the gate:
 releases are created as **drafts**, verified automatically, smoke-tested via
