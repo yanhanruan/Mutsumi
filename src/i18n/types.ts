@@ -34,6 +34,12 @@ export interface Translations {
   aboutAppSummary:        string
   aboutAppSummaryBody:    string
   aboutMainFeatures:      string
+  aboutCompanionFeature:  string
+  aboutAudioActivityFeature: string
+  aboutAudioActivityDegradedFeature: string
+  aboutMediaControllerFeature: string
+  aboutMediaControllerDegradedFeature: string
+  /** Platform-neutral features appended after capability-specific entries. */
   aboutFeaturesList:      string[]
   aboutDeveloper:            string
   aboutAcknowledgements:     string

@@ -8,10 +8,15 @@ import { getVersion } from '@tauri-apps/api/app'
 import { invoke } from '@tauri-apps/api/core'
 import { detectLocale, setLocale, useI18n } from '../i18n'
 import { useAppConfig } from '../composables/useAppConfig'
+import { usePlatformCapabilities } from '../composables/usePlatformCapabilities'
+import { buildAboutFeatures } from '../config/aboutFeatures'
 
 const { t, locale } = useI18n()
 const { config } = useAppConfig()
+const { capabilities } = usePlatformCapabilities()
 const win = getCurrentWindow()
+
+const aboutFeatures = computed(() => buildAboutFeatures(t.value, capabilities.value))
 
 const yohoUrl = 'https://github.com/yanhanruan'
 const mutsumiHeadUrl = 'https://github.com/qichengwang408-lab'
@@ -134,7 +139,7 @@ function closeWindow() { win.close() }
       <section class="card">
         <h2 class="card-title">{{ t.aboutMainFeatures }}</h2>
         <ul class="feature-list">
-          <li v-for="feature in t.aboutFeaturesList" :key="feature">{{ feature }}</li>
+          <li v-for="feature in aboutFeatures" :key="feature">{{ feature }}</li>
         </ul>
       </section>
 

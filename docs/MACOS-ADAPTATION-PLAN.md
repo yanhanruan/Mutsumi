@@ -76,6 +76,10 @@ Mutsumi 当前是以 Windows 为唯一发布平台设计的 Tauri 2 桌面应用
   补齐正文深挖；脚本结果由 Rust 主动拉取，任意正文域没有加入 Tauri
   capability。Apple Silicon 真机 14 组 DuckDuckGo 中/日/英质量用例全部
   完成，5 组成功从正文提取补强结果，未出现脚本超时、回调丢失或执行错误。
+- Phase 5A 已将 About 功能清单接入运行时 capability：macOS 仅展示
+  已实现的输出设备 I/O 音频活动，不再宣称或展示不可用的
+  SMTC 媒体控制。平台差异文案已补齐 en/zh/ja，README 与下载说明
+  明确标记 Windows 已发布、macOS 13+ 适配中且尚无公开签名 DMG。
 
 ## 5. 总体技术方案
 
@@ -264,6 +268,15 @@ Apple Silicon WKWebView 真机记录（2026-08-21）：
 2. 为所有新增文案补齐 `Translations` 类型及 `en` / `zh` / `ja` 翻译。
 3. 适配 macOS 字体、快捷键符号、滚动条和安全区域。
 4. 更新 About、README、下载说明和功能差异说明。
+
+当前记录（2026-08-21）：
+
+- Settings 已根据 capability 隐藏不可用媒体面板、禁用不可用的
+  闲置飞行，并对 macOS 降级音频活动给出三语说明。
+- About 功能清单现在使用同一 capability contract；capability 未解析
+  或 IPC 失败时保守地只展示平台无关功能，不会伪造媒体能力。
+- README 已记录 Windows/macOS 功能差异、开发状态与当前下载边界。
+- macOS 字体、滚动条、安全区和三种语言的视觉矩阵仍待真机验收。
 
 验收：
 
