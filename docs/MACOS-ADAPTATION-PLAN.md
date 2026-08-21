@@ -71,7 +71,11 @@ Mutsumi 当前是以 Windows 为唯一发布平台设计的 Tauri 2 桌面应用
   [`MACOS-MEDIA-SPIKE.md`](MACOS-MEDIA-SPIKE.md)。macOS 首版使用公开
   CoreAudio 输出设备 I/O 状态驱动音频活动动画，并明确标为 `degraded`；
   跨应用元数据/控制保持 `unavailable`，不采用私有 `MediaRemote` 或需要
-  系统音频捕获权限的振幅采样。WKWebView 正文深挖仍按 capability 降级。
+  系统音频捕获权限的振幅采样。
+- Phase 4B 已通过 WKWebView 原生 `evaluateJavaScript` completion callback
+  补齐正文深挖；脚本结果由 Rust 主动拉取，任意正文域没有加入 Tauri
+  capability。Apple Silicon 真机 14 组 DuckDuckGo 中/日/英质量用例全部
+  完成，5 组成功从正文提取补强结果，未出现脚本超时、回调丢失或执行错误。
 
 ## 5. 总体技术方案
 
@@ -233,6 +237,17 @@ Apple Silicon 真机单实例记录（2026-08-21）：
 2. 为 WKWebView 实现正文页面脚本执行与结果回读。
 3. 不把任意正文域加入可调用 Tauri IPC 的 capability 范围。
 4. 保持超时、取消、休眠恢复和无网络情况下的安全降级。
+
+Apple Silicon WKWebView 真机记录（2026-08-21）：
+
+- 可重放命令为 `MUTSUMI_SERP_QUALITY=duckduckgo npm run tauri dev`；质量
+  harness 使用 `src-tauri/src/search/bench.rs` 中固定的 14 组用例，
+  macOS 报告写入 `~/Library/Logs/com.mutsumi.app/serp-quality-report.md`。
+- DuckDuckGo 14 组中/日/英质量用例全部完成 SERP 渲染、解析和最多两条结果输出。
+- 天气、股价和汇率等 5 组触发正文深挖并成功回读渲染后 HTML；其中一组首条正文无相关信息后继续使用第二条结果成功补强，验证了既有 fallback 顺序。
+- 全程未出现 `evaluateJavaScript` 错误、回调 channel 丢失或脚本执行超时。
+- 正文回读由 Rust 通过 WKWebView completion callback 拉取；`webview-serp` capability 仍只授权搜索引擎域，未加入任何正文结果域。
+- macOS 13、Intel、断网/恢复、休眠/唤醒和真实 challenge 人工解锁仍进入发布前矩阵。
 
 验收：
 

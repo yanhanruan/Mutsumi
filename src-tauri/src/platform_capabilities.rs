@@ -68,9 +68,10 @@ fn current() -> PlatformCapabilities {
         idle_detection: Available,
         global_cursor: Available,
         atomic_window_geometry: Available,
-        // Rendered SERPs work through the initialization-script event bridge;
-        // only arbitrary result-page deepening is unavailable in Phase 1.
-        deep_web_search: Degraded,
+        // SERPs report through the scoped event bridge; arbitrary result pages
+        // are pulled through WKWebView's native evaluateJavaScript callback and
+        // receive no Tauri capability of their own.
+        deep_web_search: Available,
         // sysinfo supplies CPU/RAM/volumes; structured system_profiler JSON and
         // diskutil plists supply GPU and physical-drive details.
         hardware_details: Available,
@@ -121,7 +122,7 @@ mod tests {
             capabilities.atomic_window_geometry,
             CapabilityStatus::Available
         );
-        assert_eq!(capabilities.deep_web_search, CapabilityStatus::Degraded);
+        assert_eq!(capabilities.deep_web_search, CapabilityStatus::Available);
         assert_eq!(capabilities.hardware_details, CapabilityStatus::Available);
         assert_eq!(capabilities.reveal_in_folder, CapabilityStatus::Available);
     }
