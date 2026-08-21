@@ -308,6 +308,7 @@ export const en: Translations = {
     network:     'Network',
     online:      'Online',
     offline:     'Offline',
+    unavailable: 'Unavailable',
     wifi:        'Wi-Fi',
     ethernet:    'Ethernet',
     uptime:      'Uptime',

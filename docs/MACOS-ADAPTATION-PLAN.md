@@ -66,7 +66,7 @@ Mutsumi 当前是以 Windows 为唯一发布平台设计的 Tauri 2 桌面应用
 
 - Phase 1 编译/启动基线已完成，未实现能力通过 capability 显式降级。
 - Phase 2 已完成 Dock 生命周期、透明窗口启动契约、全局光标、点击穿透协调和原子窗口几何；多显示器、缩放与负坐标仍需真机矩阵验收。
-- Phase 3 已完成 Finder 显示、macOS 快捷键符号、公开 API 空闲检测，以及 GPU/物理磁盘硬件详情。空闲检测同时读取 CoreGraphics 全局输入时间与 IOKit `PreventUserIdleDisplaySleep` 聚合断言；采样失败时自动飞行保持关闭。硬件详情使用结构化 `system_profiler` JSON 与 `diskutil` plist，并已通过本机只读冒烟。自启动与系统凭据存储的失败状态已对用户可见，LaunchAgent 和 Keychain 的真机变更验收仍待进行。
+- Phase 3 已完成 Finder 显示、macOS 快捷键符号、公开 API 空闲检测、GPU/物理磁盘硬件详情，以及默认网络的 Wi‑Fi/Ethernet/其他/离线分类。空闲检测同时读取 CoreGraphics 全局输入时间与 IOKit `PreventUserIdleDisplaySleep` 聚合断言；采样失败时自动飞行保持关闭。硬件详情使用结构化 `system_profiler` JSON 与 `diskutil` plist；网络类型使用公开 SystemConfiguration 动态存储和接口 API，均已通过本机只读冒烟。自启动与系统凭据存储的失败状态已对用户可见，LaunchAgent 和 Keychain 的真机变更验收仍待进行。
 - Phase 4 的媒体与 WKWebView 正文深挖仍按 capability 降级，尚未开始原生专项实现。
 
 ## 5. 总体技术方案

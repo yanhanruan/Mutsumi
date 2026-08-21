@@ -15,9 +15,8 @@ pub enum BatteryStatus {
 
 /// How the machine is currently reaching the network. Serializes to a plain
 /// lowercase string (`"ethernet"`, `"wifi"`, `"other"`, `"offline"`).
-#[derive(Clone, Copy, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
-#[cfg_attr(not(windows), allow(dead_code))]
 pub enum NetworkKind {
     Ethernet,
     Wifi,
@@ -25,6 +24,8 @@ pub enum NetworkKind {
     /// (cellular, a VPN tunnel as the only default route, etc.).
     Other,
     Offline,
+    /// The native adapter failed, so connectivity cannot be stated reliably.
+    Unavailable,
 }
 
 #[derive(Clone, Serialize)]
@@ -113,10 +114,9 @@ fn detect_network() -> NetworkKind {
     }
 }
 
-/// Non-Windows fallback: no portable Wi-Fi/Ethernet distinction without extra
-/// dependencies, so just report a generic connected/offline state from
-/// interface traffic.
-#[cfg(not(windows))]
+/// Fallback for platforms without a native adapter: report only generic
+/// connected/offline state from interface traffic.
+#[cfg(not(any(windows, target_os = "macos")))]
 fn detect_network(networks: &sysinfo::Networks) -> NetworkKind {
     for (name, data) in networks {
         let n = name.to_lowercase();
@@ -128,6 +128,247 @@ fn detect_network(networks: &sysinfo::Networks) -> NetworkKind {
         }
     }
     NetworkKind::Offline
+}
+
+#[cfg(target_os = "macos")]
+mod macos_network {
+    use super::NetworkKind;
+    use core::ffi::{c_char, c_void};
+    use std::collections::HashMap;
+    use std::ptr;
+    use std::sync::{Mutex, OnceLock};
+
+    type CfTypeRef = *const c_void;
+    type CfStringRef = *const c_void;
+    type CfArrayRef = *const c_void;
+    type CfDictionaryRef = *const c_void;
+    type ScNetworkInterfaceRef = *const c_void;
+
+    const CF_STRING_ENCODING_UTF8: u32 = 0x0800_0100;
+    const GLOBAL_IPV4_KEY: &core::ffi::CStr = c"State:/Network/Global/IPv4";
+    const GLOBAL_IPV6_KEY: &core::ffi::CStr = c"State:/Network/Global/IPv6";
+    const PRIMARY_INTERFACE_KEY: &core::ffi::CStr = c"PrimaryInterface";
+
+    #[link(name = "SystemConfiguration", kind = "framework")]
+    unsafe extern "C" {
+        fn SCDynamicStoreCopyValue(store: CfTypeRef, key: CfStringRef) -> CfTypeRef;
+        fn SCNetworkInterfaceCopyAll() -> CfArrayRef;
+        fn SCNetworkInterfaceGetBSDName(interface: ScNetworkInterfaceRef) -> CfStringRef;
+        fn SCNetworkInterfaceGetInterfaceType(interface: ScNetworkInterfaceRef) -> CfStringRef;
+    }
+
+    #[link(name = "CoreFoundation", kind = "framework")]
+    unsafe extern "C" {
+        fn CFStringCreateWithCString(
+            allocator: CfTypeRef,
+            c_str: *const c_char,
+            encoding: u32,
+        ) -> CfStringRef;
+        fn CFStringGetCString(
+            string: CfStringRef,
+            buffer: *mut c_char,
+            buffer_size: isize,
+            encoding: u32,
+        ) -> u8;
+        fn CFStringGetLength(string: CfStringRef) -> isize;
+        fn CFStringGetMaximumSizeForEncoding(length: isize, encoding: u32) -> isize;
+        fn CFDictionaryGetValue(dictionary: CfDictionaryRef, key: CfTypeRef) -> CfTypeRef;
+        fn CFArrayGetCount(array: CfArrayRef) -> isize;
+        fn CFArrayGetValueAtIndex(array: CfArrayRef, index: isize) -> CfTypeRef;
+        fn CFGetTypeID(value: CfTypeRef) -> usize;
+        fn CFStringGetTypeID() -> usize;
+        fn CFDictionaryGetTypeID() -> usize;
+        fn CFArrayGetTypeID() -> usize;
+        fn CFRelease(value: CfTypeRef);
+    }
+
+    struct OwnedCf(CfTypeRef);
+
+    impl OwnedCf {
+        fn new(value: CfTypeRef, context: &str) -> Result<Self, String> {
+            if value.is_null() {
+                Err(format!("{context} returned null"))
+            } else {
+                Ok(Self(value))
+            }
+        }
+    }
+
+    impl Drop for OwnedCf {
+        fn drop(&mut self) {
+            // SAFETY: Only Create/Copy-rule objects are wrapped by `OwnedCf`.
+            unsafe { CFRelease(self.0) }
+        }
+    }
+
+    fn cf_string(value: CfStringRef) -> Result<String, String> {
+        if value.is_null() {
+            return Err("Core Foundation string was null".into());
+        }
+        // SAFETY: `value` is borrowed from a live SystemConfiguration or Core
+        // Foundation object. Type validation happens before string APIs.
+        unsafe {
+            if CFGetTypeID(value) != CFStringGetTypeID() {
+                return Err("Core Foundation value was not a string".into());
+            }
+            let length = CFStringGetLength(value);
+            let capacity = CFStringGetMaximumSizeForEncoding(length, CF_STRING_ENCODING_UTF8)
+                .checked_add(1)
+                .filter(|capacity| *capacity > 0)
+                .ok_or_else(|| "invalid Core Foundation string length".to_string())?;
+            let mut buffer = vec![0u8; capacity as usize];
+            if CFStringGetCString(
+                value,
+                buffer.as_mut_ptr().cast(),
+                capacity,
+                CF_STRING_ENCODING_UTF8,
+            ) == 0
+            {
+                return Err("failed to convert Core Foundation string to UTF-8".into());
+            }
+            let nul = buffer
+                .iter()
+                .position(|byte| *byte == 0)
+                .unwrap_or(buffer.len());
+            String::from_utf8(buffer[..nul].to_vec())
+                .map_err(|error| format!("invalid UTF-8 from Core Foundation: {error}"))
+        }
+    }
+
+    fn make_cf_string(value: &core::ffi::CStr) -> Result<OwnedCf, String> {
+        // SAFETY: `value` is NUL-terminated and remains alive during the call.
+        let string = unsafe {
+            CFStringCreateWithCString(ptr::null(), value.as_ptr(), CF_STRING_ENCODING_UTF8)
+        };
+        OwnedCf::new(string, "CFStringCreateWithCString")
+    }
+
+    fn primary_interface_for(store_key: &core::ffi::CStr) -> Result<Option<String>, String> {
+        let store_key = make_cf_string(store_key)?;
+        // SAFETY: A null store is explicitly accepted by SCDynamicStoreCopyValue
+        // for a one-shot read. The returned value follows the Copy ownership rule.
+        let value = unsafe { SCDynamicStoreCopyValue(ptr::null(), store_key.0) };
+        if value.is_null() {
+            return Ok(None);
+        }
+        let value = OwnedCf::new(value, "SCDynamicStoreCopyValue")?;
+        // SAFETY: Type IDs are valid for any live CFType.
+        if unsafe { CFGetTypeID(value.0) != CFDictionaryGetTypeID() } {
+            return Err("primary-network state was not a dictionary".into());
+        }
+
+        let primary_key = make_cf_string(PRIMARY_INTERFACE_KEY)?;
+        // SAFETY: `value` is a validated dictionary; the returned string is
+        // borrowed and remains live until `value` is dropped.
+        let interface = unsafe { CFDictionaryGetValue(value.0, primary_key.0) };
+        if interface.is_null() {
+            Ok(None)
+        } else {
+            cf_string(interface).map(Some)
+        }
+    }
+
+    fn classify_interface_type(interface_type: &str) -> NetworkKind {
+        match interface_type {
+            "IEEE80211" => NetworkKind::Wifi,
+            "Ethernet" => NetworkKind::Ethernet,
+            _ => NetworkKind::Other,
+        }
+    }
+
+    fn build_interface_map() -> Result<HashMap<String, NetworkKind>, String> {
+        // SAFETY: SCNetworkInterfaceCopyAll returns a retained CFArray.
+        let interfaces = unsafe { SCNetworkInterfaceCopyAll() };
+        let interfaces = OwnedCf::new(interfaces, "SCNetworkInterfaceCopyAll")?;
+        // SAFETY: Type IDs are valid for any live CFType.
+        if unsafe { CFGetTypeID(interfaces.0) != CFArrayGetTypeID() } {
+            return Err("SCNetworkInterfaceCopyAll did not return an array".into());
+        }
+
+        let mut result = HashMap::new();
+        // SAFETY: `interfaces` is a validated array, and every index is within
+        // the count returned by Core Foundation.
+        let count = unsafe { CFArrayGetCount(interfaces.0) };
+        for index in 0..count {
+            let interface = unsafe { CFArrayGetValueAtIndex(interfaces.0, index) };
+            if interface.is_null() {
+                continue;
+            }
+            let name = unsafe { SCNetworkInterfaceGetBSDName(interface) };
+            let interface_type = unsafe { SCNetworkInterfaceGetInterfaceType(interface) };
+            let (Ok(name), Ok(interface_type)) = (cf_string(name), cf_string(interface_type))
+            else {
+                continue;
+            };
+            result.insert(name, classify_interface_type(&interface_type));
+        }
+        Ok(result)
+    }
+
+    pub(super) fn detect() -> Result<NetworkKind, String> {
+        static INTERFACES: OnceLock<Mutex<HashMap<String, NetworkKind>>> = OnceLock::new();
+        let primary = match primary_interface_for(GLOBAL_IPV4_KEY)? {
+            Some(interface) => Some(interface),
+            None => primary_interface_for(GLOBAL_IPV6_KEY)?,
+        };
+        let Some(primary) = primary else {
+            return Ok(NetworkKind::Offline);
+        };
+
+        let interfaces = INTERFACES.get_or_init(|| Mutex::new(HashMap::new()));
+        let mut interfaces = interfaces
+            .lock()
+            .map_err(|_| "macOS network-interface cache was poisoned".to_string())?;
+        if interfaces.is_empty() {
+            *interfaces = build_interface_map()?;
+        }
+        if let Some(kind) = interfaces.get(&primary).copied() {
+            return Ok(kind);
+        }
+
+        // A newly connected USB/Thunderbolt adapter may not have existed when
+        // the map was first built. Refresh on a miss so route changes recover
+        // without restarting the app; transient build errors are not cached.
+        *interfaces = build_interface_map()?;
+        Ok(interfaces
+            .get(&primary)
+            .copied()
+            .unwrap_or(NetworkKind::Other))
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn classifies_public_system_configuration_interface_types() {
+            assert!(matches!(
+                classify_interface_type("IEEE80211"),
+                NetworkKind::Wifi
+            ));
+            assert!(matches!(
+                classify_interface_type("Ethernet"),
+                NetworkKind::Ethernet
+            ));
+            assert!(matches!(
+                classify_interface_type("IPSec"),
+                NetworkKind::Other
+            ));
+        }
+
+        #[test]
+        fn live_network_query_returns_a_known_kind() {
+            let kind = detect().expect("SystemConfiguration network query");
+            eprintln!("SystemConfiguration primary network kind: {kind:?}");
+            assert!(matches!(
+                kind,
+                NetworkKind::Ethernet
+                    | NetworkKind::Wifi
+                    | NetworkKind::Other
+                    | NetworkKind::Offline
+            ));
+        }
+    }
 }
 
 /// Estimates battery time-to-full / time-to-empty from the *actual* rate at
@@ -279,8 +520,10 @@ fn spawn(app: AppHandle, stop_flag: Arc<AtomicBool>) {
         // Windows classifies the link via `GetAdaptersAddresses` (see
         // `detect_network`) and never reads sysinfo's `Networks`; only the
         // portable fallback maintains one.
-        #[cfg(not(windows))]
+        #[cfg(not(any(windows, target_os = "macos")))]
         let mut networks = sysinfo::Networks::new_with_refreshed_list();
+        #[cfg(target_os = "macos")]
+        let mut network_error_reported = false;
 
         let battery_manager = battery::Manager::new().ok();
         // Derives a stable time estimate from the real charge-rate (see doc).
@@ -305,11 +548,30 @@ fn spawn(app: AppHandle, stop_flag: Arc<AtomicBool>) {
             };
 
             // Network — distinguish Ethernet / Wi-Fi / other / offline.
-            #[cfg(not(windows))]
+            #[cfg(not(any(windows, target_os = "macos")))]
             networks.refresh(true);
             #[cfg(windows)]
             let network = detect_network();
-            #[cfg(not(windows))]
+            #[cfg(target_os = "macos")]
+            let network = match macos_network::detect() {
+                Ok(kind) => {
+                    if network_error_reported {
+                        log::info!("macOS network-type detection recovered");
+                        network_error_reported = false;
+                    }
+                    kind
+                }
+                Err(error) => {
+                    if !network_error_reported {
+                        log::warn!(
+                            "macOS network-type detection unavailable: {error}"
+                        );
+                        network_error_reported = true;
+                    }
+                    NetworkKind::Unavailable
+                }
+            };
+            #[cfg(not(any(windows, target_os = "macos")))]
             let network = detect_network(&networks);
 
             // Uptime
@@ -377,6 +639,14 @@ mod tests {
         // Only 10 s of data — below MIN_SPAN_SECS — so no estimate yet.
         let last = run(&mut e, 0.50, -0.01 / 60.0, 10, false);
         assert_eq!(last, None);
+    }
+
+    #[test]
+    fn unavailable_network_kind_has_an_explicit_wire_value() {
+        assert_eq!(
+            serde_json::to_string(&NetworkKind::Unavailable).unwrap(),
+            "\"unavailable\""
+        );
     }
 
     #[test]

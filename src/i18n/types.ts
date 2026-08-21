@@ -279,6 +279,7 @@ export interface Translations {
     network:     string
     online:      string
     offline:     string
+    unavailable: string
     wifi:        string
     ethernet:    string
     uptime:      string

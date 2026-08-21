@@ -308,6 +308,7 @@ export const zh: Translations = {
     network:     '网络',
     online:      '在线',
     offline:     '离线',
+    unavailable: '暂时无法检测',
     wifi:        'Wi-Fi',
     ethernet:    '有线网络',
     uptime:      '运行时间',

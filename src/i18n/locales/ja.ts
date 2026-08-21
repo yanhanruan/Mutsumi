@@ -308,6 +308,7 @@ export const ja: Translations = {
     network:     'ネットワーク',
     online:      'オンライン',
     offline:     'オフライン',
+    unavailable: '現在検出できません',
     wifi:        'Wi-Fi',
     ethernet:    '有線LAN',
     uptime:      '起動時間',
