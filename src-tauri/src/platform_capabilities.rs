@@ -69,9 +69,9 @@ fn current() -> PlatformCapabilities {
         // Rendered SERPs work through the initialization-script event bridge;
         // only arbitrary result-page deepening is unavailable in Phase 1.
         deep_web_search: Degraded,
-        // sysinfo provides the portable subset; GPU and physical drive details
-        // still use Windows-specific implementations.
-        hardware_details: Degraded,
+        // sysinfo supplies CPU/RAM/volumes; structured system_profiler JSON and
+        // diskutil plists supply GPU and physical-drive details.
+        hardware_details: Available,
         reveal_in_folder: Available,
     }
 }
@@ -120,7 +120,7 @@ mod tests {
             CapabilityStatus::Available
         );
         assert_eq!(capabilities.deep_web_search, CapabilityStatus::Degraded);
-        assert_eq!(capabilities.hardware_details, CapabilityStatus::Degraded);
+        assert_eq!(capabilities.hardware_details, CapabilityStatus::Available);
         assert_eq!(capabilities.reveal_in_folder, CapabilityStatus::Available);
     }
 }

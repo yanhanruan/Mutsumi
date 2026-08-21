@@ -92,3 +92,5 @@ windows = { version = "0.61", features = [
 [target.'cfg(target_os = "macos")'.dependencies]
 # Public AppKit NSWindow::setFrame:display: for atomic pet-window geometry.
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSWindow"] }
+# Parse the structured XML property lists emitted by macOS diskutil.
+plist = "1.10"

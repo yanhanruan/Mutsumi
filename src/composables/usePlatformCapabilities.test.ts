@@ -11,7 +11,7 @@ const macCapabilities: PlatformCapabilities = {
   globalCursor:    'available',
   atomicWindowGeometry: 'available',
   deepWebSearch:   'degraded',
-  hardwareDetails: 'degraded',
+  hardwareDetails: 'available',
   revealInFolder:  'available',
 }
 
