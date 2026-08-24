@@ -3,7 +3,7 @@
 > 状态：实施中；已锁定 Dock 与透明窗口 API 边界
 > 工作分支：`feat/macos-adaptation`
 > 基线：`main` / `d3b52a9`
-> 更新时间：2026-08-24
+> 更新时间：2026-08-25
 > 跨设备续作：见 [`MACOS-DEVELOPMENT-HANDOFF.md`](MACOS-DEVELOPMENT-HANDOFF.md)
 > 最新真机证据：见 [`MACOS-DESKTOP-TEST-RECORD.md`](MACOS-DESKTOP-TEST-RECORD.md)
 
@@ -64,10 +64,10 @@ Mutsumi 当前是以 Windows 为唯一发布平台设计的 Tauri 2 桌面应用
 
 当前开发机为 Apple Silicon macOS，Rust stable 与 Tauri 构建工具链已安装；`cargo check`、`cargo test`、前端测试、前端构建和 `tauri dev` 已形成可复现基线。
 
-当前实施进度（2026-08-24）：
+当前实施进度（2026-08-25）：
 
 - Phase 1 编译/启动基线已完成，未实现能力通过 capability 显式降级。
-- Phase 2 已完成 Dock 生命周期、透明窗口启动契约、全局光标、点击穿透协调和原子窗口几何；universal app 的 Dock/LaunchServices 前台资格已形成可重放 smoke，Dock 常驻、菜单栏入口、隐藏恢复及设置/关于恢复优先级已通过人工验收。单实例延迟重聚焦现会在公开 CoreGraphics 检测到用户焦点相关输入时取消，并以包含系统睡眠的公开 Mach 连续时钟丢弃超过两秒的陈旧任务；修复后的最终物理切走确认、更新窗口优先级、多显示器、缩放和负坐标仍待真机矩阵验收。
+- Phase 2 已完成 Dock 生命周期、透明窗口启动契约、全局光标、点击穿透协调和原子窗口几何；universal app 的 Dock/LaunchServices 前台资格已形成可重放 smoke，Dock 常驻、菜单栏入口、隐藏恢复及设置/关于恢复优先级已通过人工验收。单实例延迟重聚焦现会在公开 CoreGraphics 检测到用户焦点相关输入时取消，并以包含系统睡眠的公开 Mach 连续时钟丢弃超过两秒的陈旧任务；产品决定将修复后的物理切走端到端确认保留为正式发布前 pending，不阻塞当前适配。更新窗口优先级、多显示器、缩放和负坐标仍待真机矩阵验收。
 - Phase 3 已完成 Finder 显示、macOS 快捷键符号、公开 API 空闲检测、GPU/物理磁盘硬件详情，以及默认网络的 Wi‑Fi/Ethernet/其他/离线分类。空闲检测同时读取 CoreGraphics 全局输入时间与 IOKit `PreventUserIdleDisplaySleep` 聚合断言；采样失败时自动飞行保持关闭。硬件详情使用结构化 `system_profiler` JSON 与 `diskutil` plist；网络类型使用公开 SystemConfiguration 动态存储和接口 API，均已通过本机只读冒烟。自启动与系统凭据存储的失败状态已对用户可见；LaunchAgent 配置文件的启用状态往返、Keychain 的读写删除、单实例前台激活及标准 Quit 后 socket 清理均已通过真机测试。实际登录启动和休眠/锁屏/切换用户/显示器热插拔仍待真机矩阵验收。
 - Phase 4A 音频/媒体公开 API spike 已完成，详细决策与兼容性证据见
   [`MACOS-MEDIA-SPIKE.md`](MACOS-MEDIA-SPIKE.md)。macOS 首版使用公开
@@ -327,7 +327,7 @@ Apple Silicon WKWebView 真机记录（2026-08-21）：
   CI 产物仅保留七天，不进入 Releases。
 - Apple M5 真机已实际构建 universal app 与 unsigned DMG；`lipo` 返回
   `x86_64 arm64`，bundle 最低系统版本为 13.0，`hdiutil verify` 通过。Rust
-  342 项、前端 387 项、发布/bundle/生命周期纯契约 57 项通过；原生 arm64 与
+  347 项、前端 387 项、发布/bundle/生命周期纯契约 57 项通过；原生 arm64 与
   Rosetta x86_64 生命周期 smoke 均确认前台启动、单实例激活及正常退出清理。
   详细环境、命令、受控沙箱失败说明和仍待人工矩阵见
   [`MACOS-DESKTOP-TEST-RECORD.md`](MACOS-DESKTOP-TEST-RECORD.md)。Developer ID

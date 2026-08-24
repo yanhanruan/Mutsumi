@@ -1,12 +1,12 @@
 # Mutsumi macOS 开发交接与续作指南
 
-> 更新时间：2026-08-24
+> 更新时间：2026-08-25
 >
 > 工作分支：`feat/macos-adaptation`
 >
 > 主分支基线：`main` / `d3b52a9`
 >
-> 续作起点：`a0f9d00 docs(macOS): add cross-device development handoff`
+> 续作起点：`002c7a8 fix(macOS): respect user focus changes`
 
 这份文档用于在另一台 Mac 上恢复开发上下文。产品与技术决策仍以
 [`MACOS-ADAPTATION-PLAN.md`](MACOS-ADAPTATION-PLAN.md) 为准，发布边界以
@@ -86,7 +86,7 @@ reCAPTCHA；它同样不会随 Git 同步。如确有需要，应通过安全渠
 
 ## 3. 当前已经完成的范围
 
-截至功能锚点 `75516f7`：
+截至功能锚点 `002c7a8`：
 
 - Phase 1：macOS 编译/启动基线、capability 模型和不可用能力的显式降级。
 - Phase 2：透明桌宠窗口、全局光标、点击穿透、原子窗口几何、Dock 常驻契约，
@@ -111,7 +111,8 @@ reCAPTCHA；它同样不会随 Git 同步。如确有需要，应通过安全渠
 - Dock 生命周期 smoke 在 Apple Silicon 原生 arm64 和 Rosetta x86_64 下通过。
 - Dock 常驻、透明窗口、菜单栏入口、隐藏恢复、设置/关于恢复优先级和标准第二实例
   激活已通过人工验收；延迟重聚焦会在检测到用户焦点相关输入或陈旧任务时取消。
-  当前执行进程没有发布合成输入的辅助功能权限，因此修复后物理切走仍需一次最终确认。
+  当前执行进程没有发布合成输入的辅助功能权限；产品已将修复后的物理切走端到端
+  确认保留为正式发布前 pending，不阻塞当前适配开发。
 
 Rosetta 结果只证明 Intel slice 能在 Apple Silicon 转译环境中运行，不替代真实
 Intel Mac 验收。
@@ -179,12 +180,12 @@ cargo test --manifest-path src-tauri/Cargo.toml \
 
 优先级建议如下，前三项都不依赖正式签名凭据：
 
-1. 在个人 Mac 完成真实桌面人工矩阵，并把系统版本、CPU、显示器布局、结果和
-   失败证据补回 PRD 或独立测试记录。
-2. 创建 Draft PR，触发 `desktop-ci` 的 Windows regression 和 unsigned
+1. 创建 Draft PR，触发 `desktop-ci` 的 Windows regression 和 unsigned
    universal bundle 两个 job，确认 GitHub-hosted macOS 能实际产出并验证 DMG。
-3. 根据远程 CI 结果修复脚本、缓存、路径或构建时间问题，并保持 unsigned
+2. 根据远程 CI 结果修复脚本、缓存、路径或构建时间问题，并保持 unsigned
    artifact 不进入 Releases。
+3. 继续记录可用设备上的真实桌面矩阵；缺少显示器、权限状态或外设时保留 pending，
+   不让非阻塞人工项中断可自动完成的开发，但仍不得据此宣称发布门禁通过。
 4. 有真实 Intel Mac 时，下载同一 universal 构建验证启动、单实例与正常退出；
    没有真机就继续把它保留为待验收，不能用 Rosetta 冒充完成。
 5. 正式签名前再处理 bundle identifier、Developer ID、notarization、stapling
@@ -198,7 +199,8 @@ cargo test --manifest-path src-tauri/Cargo.toml \
 
 - [ ] 从 Finder、Dock 和菜单栏分别启动/激活应用。
 - [ ] 隐藏主窗口后点击 Dock，确认恢复和聚焦；检查设置、关于、更新窗口。
-- [ ] 快速连续启动第二实例，观察约 1 秒的聚焦重试是否出现抢焦点或叠加。
+- [ ] 正式发布前启动第二实例，在约 1 秒重试窗口内用物理鼠标或键盘切到其他应用，
+      确认 Mutsumi 不会抢回焦点并记录结果。
 - [ ] 单屏、双屏、负坐标、不同缩放比例及主副屏切换。
 - [ ] 外接显示器插拔后的窗口位置、点击穿透和动画恢复。
 - [ ] 睡眠/唤醒、锁屏/解锁、网络断开/恢复。
@@ -218,8 +220,9 @@ cargo test --manifest-path src-tauri/Cargo.toml \
   workflow 时必须用刚签出的 Mutsumi 产物跑完整 gate。
 - `macos-private-api` 例外只允许 Tauri/Wry 的透明 WKWebView，且只面向
   官网/GitHub 直分发；不得扩大到 `MediaRemote` 等私有系统能力。
-- 当前 singleton refocus 在回调后约 1 秒再次聚焦。原生与 Rosetta smoke 已通过，
-  但用户在这一秒内主动切走时仍可能被抢回；若真机复现，再实现去重/代际取消。
+- 当前 singleton refocus 在回调后约 1 秒有界重试。原生与 Rosetta smoke 已通过；
+  公开 CoreGraphics 输入采样和 Mach 连续时钟已覆盖主动切走与睡眠后陈旧任务，
+  纯决策测试已通过，最终 OS 级物理输入端到端确认保留到正式发布前。
 - 仓库现有 Rust 格式并非全量 `cargo fmt --check` clean；不要为了一个功能提交
   机械格式化无关历史文件。只保持本次 diff 聚焦并运行 `git diff --check`。
 
@@ -227,12 +230,13 @@ cargo test --manifest-path src-tauri/Cargo.toml \
 
 项目 canonical 规则的唯一来源是 [`rules/AGENTS.md`](rules/AGENTS.md)。它要求：
 
-- 每次 commit 前必须让 Terra/high reviewer 对完整 staged diff 按 PRD 做只读审查。
+- 每次 commit 前必须新建 5.6-sol/high reviewer，对完整 staged diff 按 PRD 做只读审查。
 - 主 agent 要独立核实报告，修复确定问题；任何审查后改动都必须重新 review。
-- reviewer 通过后仍要等待用户明确说 `commit`，不能自行提交。
+- 用户已在 2026-08-25 授权持续开发期间自主提交：reviewer 通过后可直接 commit，
+  不再逐次请求确认；该授权不包含 push、创建 PR、发布、签名或其他远程状态变更。
 
 本次 macOS 分支另有一项明确的交接约定：按模块暂存和提交，不能夹带无关
-文件；达到一次 commit 的标准时先提醒用户，再进入上述 review/commit 流程。
+文件；达到一次 commit 的标准时进入上述 review/commit 流程并自主继续。
 
 当前工作电脑根目录的 `AGENTS.md` 是未跟踪的本地导入文件，不会随 Git 分支同步。
 若个人电脑上的 Codex 没有自动加载项目规则，可在仓库根目录创建本地
