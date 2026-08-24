@@ -126,6 +126,20 @@ export function parseMacosLifecycleArgs(argv) {
   return { appPath, architecture, timeoutMs }
 }
 
+export function validateMacosLifecycleExecution({
+  requestedArchitecture,
+  executableAvailable = false,
+} = {}) {
+  if (requestedArchitecture !== 'arm64' && requestedArchitecture !== 'x86_64') {
+    fail(`unsupported requested architecture: "${requestedArchitecture}"`)
+  }
+  if (executableAvailable === true) return
+  if (requestedArchitecture === 'x86_64') {
+    fail('x86_64 lifecycle smoke requires an Intel Mac or Rosetta 2 on Apple Silicon')
+  }
+  fail('arm64 lifecycle smoke requires Apple Silicon')
+}
+
 function requireTrue(value, message) {
   if (value !== true) fail(message)
 }

@@ -3,8 +3,9 @@
 > 状态：实施中；已锁定 Dock 与透明窗口 API 边界
 > 工作分支：`feat/macos-adaptation`
 > 基线：`main` / `d3b52a9`
-> 更新时间：2026-08-21
+> 更新时间：2026-08-24
 > 跨设备续作：见 [`MACOS-DEVELOPMENT-HANDOFF.md`](MACOS-DEVELOPMENT-HANDOFF.md)
+> 最新真机证据：见 [`MACOS-DESKTOP-TEST-RECORD.md`](MACOS-DESKTOP-TEST-RECORD.md)
 
 ## 1. 背景
 
@@ -63,7 +64,7 @@ Mutsumi 当前是以 Windows 为唯一发布平台设计的 Tauri 2 桌面应用
 
 当前开发机为 Apple Silicon macOS，Rust stable 与 Tauri 构建工具链已安装；`cargo check`、`cargo test`、前端测试、前端构建和 `tauri dev` 已形成可复现基线。
 
-当前实施进度（2026-08-21）：
+当前实施进度（2026-08-24）：
 
 - Phase 1 编译/启动基线已完成，未实现能力通过 capability 显式降级。
 - Phase 2 已完成 Dock 生命周期、透明窗口启动契约、全局光标、点击穿透协调和原子窗口几何；universal app 的 Dock/LaunchServices 前台资格已形成可重放 smoke，多显示器、缩放、负坐标与真实 Dock 点击仍需真机矩阵验收。
@@ -317,19 +318,22 @@ Apple Silicon WKWebView 真机记录（2026-08-21）：
 5. 更新发布资产校验脚本，使 updater manifest 同时校验 Windows 和 macOS。
 6. 完成从旧 macOS 版本到 staging 版本的真实升级测试。
 
-当前记录（2026-08-21）：
+当前记录（2026-08-24）：
 
 - 新增 `desktop-ci` workflow，在每个 PR 与相关 main 推送时保留 Windows
   前后端回归，同时构建未签名 universal app/DMG。可复用的 bundle contract
   会校验可执行文件恰好包含 `arm64` + `x86_64`、`Info.plist` 最低 macOS
   13.0、`APPL`/非 Agent/非后台 Dock 资格、唯一 DMG 及 `hdiutil` 完整性；
   CI 产物仅保留七天，不进入 Releases。
-- 本机已实际构建 universal app，`lipo` 返回 `x86_64 arm64`，bundle 最低
-  系统版本为 13.0；Rust 342 项、前端 387 项测试通过。当前受控开发环境
-  未能完成 `bundle_dmg.sh`，因此 DMG 仍由 workflow 首次远程运行验证。
-  Developer ID 签名、notarization/stapling、Gatekeeper 与真实 Intel 启动
-  仍待完成。现有 staging/release workflow 继续保持 Windows-only，直到
-  多平台 updater manifest 能作为一个整体通过资产门禁。
+- Apple M5 真机已实际构建 universal app 与 unsigned DMG；`lipo` 返回
+  `x86_64 arm64`，bundle 最低系统版本为 13.0，`hdiutil verify` 通过。Rust
+  342 项、前端 387 项、发布/bundle/生命周期纯契约 57 项通过；原生 arm64 与
+  Rosetta x86_64 生命周期 smoke 均确认前台启动、单实例激活及正常退出清理。
+  详细环境、命令、受控沙箱失败说明和仍待人工矩阵见
+  [`MACOS-DESKTOP-TEST-RECORD.md`](MACOS-DESKTOP-TEST-RECORD.md)。Developer ID
+  签名、notarization/stapling、Gatekeeper、真实 Intel 启动和 GitHub-hosted
+  首次远程运行仍待完成。现有 staging/release workflow 继续保持 Windows-only，
+  直到多平台 updater manifest 能作为一个整体通过资产门禁。
 - 本机原生 bundle 验证同时发现现有 identifier `com.mutsumi.app` 以
   `.app` 结尾，Tauri 明确提示可能与 macOS bundle 扩展冲突。该标识符在
   接入 Developer ID 前必须完成产品确认并冻结。产品已决定将此项标为

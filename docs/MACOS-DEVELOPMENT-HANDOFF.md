@@ -1,16 +1,18 @@
 # Mutsumi macOS 开发交接与续作指南
 
-> 更新时间：2026-08-21
+> 更新时间：2026-08-24
 >
 > 工作分支：`feat/macos-adaptation`
 >
 > 主分支基线：`main` / `d3b52a9`
 >
-> 最近功能锚点：`75516f7 feat(macOS): verify Dock lifecycle and singleton focus`
+> 续作起点：`a0f9d00 docs(macOS): add cross-device development handoff`
 
 这份文档用于在另一台 Mac 上恢复开发上下文。产品与技术决策仍以
 [`MACOS-ADAPTATION-PLAN.md`](MACOS-ADAPTATION-PLAN.md) 为准，发布边界以
-[`RELEASING.md`](RELEASING.md) 为准；本文只负责“如何接上当前进度”。
+[`RELEASING.md`](RELEASING.md) 为准；最新本机证据见
+[`MACOS-DESKTOP-TEST-RECORD.md`](MACOS-DESKTOP-TEST-RECORD.md)，本文只负责
+“如何接上当前进度”。
 
 ## 1. 十分钟恢复工作区
 
@@ -102,8 +104,10 @@ reCAPTCHA；它同样不会随 Git 同步。如确有需要，应通过安全渠
 
 - Rust：342 passed / 36 ignored。
 - 前端：25 files / 387 passed。
-- 发布与生命周期纯契约：56/56 passed。
+- 发布、bundle 与生命周期纯契约：57/57 passed。
 - universal app 同时包含 `arm64` 和 `x86_64`，最低系统版本为 macOS 13.0。
+- unsigned DMG 已在正常交互式用户会话中生成并通过 `hdiutil verify`；受控文件
+  沙箱仍不能代表完整的 `hdiutil`/Finder DMG 环境。
 - Dock 生命周期 smoke 在 Apple Silicon 原生 arm64 和 Rosetta x86_64 下通过。
 
 Rosetta 结果只证明 Intel slice 能在 Apple Silicon 转译环境中运行，不替代真实
@@ -139,15 +143,17 @@ node scripts/verify-macos-bundle.mjs \
 若本机 DMG 工具链失败，可先用 `--bundles app` 验证应用本体，但这不能代替
 CI 中的 DMG 生成和 `hdiutil verify`。
 
-生命周期 smoke 会主动切换前台应用。运行前先正常退出所有 Mutsumi 实例；脚本
-检测到同 bundle identifier 或相同 executable 的已有实例时会拒绝继续：
+生命周期 smoke 会主动切换前台应用。运行前先正常退出所有 Mutsumi 实例，执行
+期间不要点击其他窗口或切换 Space；脚本检测到同 bundle identifier 或相同
+executable 的已有实例时会拒绝继续：
 
 ```bash
 npm run test:macos-lifecycle-smoke -- \
   --app src-tauri/target/universal-apple-darwin/release/bundle/macos/mutsumi.app \
   --arch arm64
 
-# 仅限已安装 Rosetta 的 Apple Silicon，或对应 Intel 环境：
+# 仅限已安装 Rosetta 的 Apple Silicon，或对应 Intel 环境；脚本会在启动前
+# 直接探测并拒绝当前系统不能执行的目标 slice：
 npm run test:macos-lifecycle-smoke -- \
   --app src-tauri/target/universal-apple-darwin/release/bundle/macos/mutsumi.app \
   --arch x86_64

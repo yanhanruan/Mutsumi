@@ -19,6 +19,7 @@ import {
   parseLsappinfoAsns,
   parseLsappinfoInfo,
   parseMacosLifecycleArgs,
+  validateMacosLifecycleExecution,
   validateMacosLifecycleSnapshot,
 } from './macos-lifecycle-contract.mjs'
 
@@ -212,6 +213,20 @@ let ownedAsn = null
 let ownedPid = null
 let launchAttempted = false
 let gracefulExitComplete = false
+
+try {
+  const executableAvailable = run(
+    'arch',
+    [`-${parsedArgs.architecture}`, '/usr/bin/true'],
+  ).ok
+  validateMacosLifecycleExecution({
+    requestedArchitecture: parsedArgs.architecture,
+    executableAvailable,
+  })
+} catch (error) {
+  console.error(`::error::${error.message}`)
+  process.exit(1)
+}
 
 function currentOwnershipFacts() {
   const currentAsns = findAsns(identifier)

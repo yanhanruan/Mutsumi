@@ -9,6 +9,7 @@ import {
   parseLsappinfoAsns,
   parseLsappinfoInfo,
   parseMacosLifecycleArgs,
+  validateMacosLifecycleExecution,
   validateMacosLifecycleSnapshot,
 } from './macos-lifecycle-contract.mjs'
 
@@ -80,6 +81,36 @@ test('CLI rejects malformed timeouts, typos, duplicates and positional arguments
   assert.throws(
     () => parseMacosLifecycleArgs(['--app', APP_PATH, '--app', APP_PATH, '--arch', 'arm64']),
     /duplicate argument: "--app"/,
+  )
+})
+
+test('execution preflight requires the requested architecture to run', () => {
+  assert.doesNotThrow(() => validateMacosLifecycleExecution({
+    requestedArchitecture: 'arm64',
+    executableAvailable: true,
+  }))
+  assert.doesNotThrow(() => validateMacosLifecycleExecution({
+    requestedArchitecture: 'x86_64',
+    executableAvailable: true,
+  }))
+  assert.throws(
+    () => validateMacosLifecycleExecution({
+      requestedArchitecture: 'x86_64',
+    }),
+    /requires an Intel Mac or Rosetta 2/,
+  )
+  assert.throws(
+    () => validateMacosLifecycleExecution({
+      requestedArchitecture: 'arm64',
+    }),
+    /requires Apple Silicon/,
+  )
+  assert.throws(
+    () => validateMacosLifecycleExecution({
+      requestedArchitecture: 'powerpc',
+      executableAvailable: true,
+    }),
+    /unsupported requested architecture/,
   )
 })
 
