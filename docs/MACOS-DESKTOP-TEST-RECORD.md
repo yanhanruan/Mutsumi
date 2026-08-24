@@ -1,8 +1,8 @@
 # macOS 桌面真机测试记录
 
-> 测试窗口：2026-08-23 至 2026-08-24
+> 测试窗口：2026-08-23 至 2026-08-25
 >
-> 记录更新：2026-08-25（产品 pending 决策；无新增通过测试）
+> 记录更新：2026-08-25（本机自动化复验与产品 pending 决策）
 >
 > 分支：`feat/macos-adaptation`
 >
@@ -45,6 +45,13 @@
 | unsigned DMG | 通过 | `mutsumi_1.5.3_universal.dmg` 生成，`hdiutil verify` 通过 |
 | arm64 生命周期 | 通过 | 前台启动、第二实例复用/激活、标准 Quit、socket 清理 |
 | x86_64 Rosetta 生命周期 | 通过 | 确认 `LSArchitecture=x86_64`，其余生命周期契约同样通过 |
+
+2026-08-25 在 `4ed1d0d` 上重新执行本机可复现的 CI 主体：Vue/Vitest
+387/387、发布/bundle/生命周期纯契约 57/57、前端生产构建、Rust 347 passed /
+36 ignored（含 doctest）均通过；同一功能源码的现有 universal app/DMG 再次通过
+unsigned bundle contract。当前受控 shell 的默认 `PATH` 未暴露 Cargo 工具链，
+最终复验显式指定 rustup stable 的 `rustc` / `rustdoc` 后以零退出码完成；这不是
+代码或远程 `desktop-ci` 的失败。
 
 DMG 在受控文件沙箱中首次运行 `bundle_dmg.sh` 失败；同一命令在正常交互式用户
 会话中完成 Finder 布局、压缩和完整性校验。该失败属于测试执行环境限制，不是

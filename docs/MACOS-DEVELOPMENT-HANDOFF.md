@@ -114,6 +114,9 @@ reCAPTCHA；它同样不会随 Git 同步。如确有需要，应通过安全渠
   当前执行进程没有发布合成输入的辅助功能权限；产品已将修复后的物理切走端到端
   确认保留为正式发布前 pending，不阻塞当前适配开发。
 
+2026-08-25 已在 `4ed1d0d` 重新执行本机可复现的 CI 主体与 unsigned bundle
+contract，以上 Vue、纯契约、前端构建、Rust 和 universal app/DMG 结果保持通过。
+
 Rosetta 结果只证明 Intel slice 能在 Apple Silicon 转译环境中运行，不替代真实
 Intel Mac 验收。
 
