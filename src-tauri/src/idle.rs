@@ -160,6 +160,15 @@ fn sample_idle_conditions() -> Result<(u64, bool), String> {
     ))
 }
 
+/// Returns the sub-second idle time for macOS keyboard, mouse-button and
+/// scrolling events that can express an intentional focus change. This public
+/// CoreGraphics query does not install an event tap or require Accessibility
+/// permission, and deliberately ignores passive pointer movement.
+#[cfg(target_os = "macos")]
+pub(crate) fn macos_focus_input_idle_seconds() -> Result<f64, String> {
+    macos::get_focus_input_seconds()
+}
+
 // ── OS query helpers (Windows) ─────────────────────────────────────
 
 /// Returns the number of whole seconds since the last OS-wide mouse or
@@ -233,6 +242,18 @@ mod macos {
 
     const CG_EVENT_SOURCE_COMBINED_SESSION_STATE: i32 = 0;
     const CG_ANY_INPUT_EVENT_TYPE: u32 = u32::MAX;
+    const CG_EVENT_LEFT_MOUSE_DOWN: u32 = 1;
+    const CG_EVENT_RIGHT_MOUSE_DOWN: u32 = 3;
+    const CG_EVENT_KEY_DOWN: u32 = 10;
+    const CG_EVENT_SCROLL_WHEEL: u32 = 22;
+    const CG_EVENT_OTHER_MOUSE_DOWN: u32 = 25;
+    const CG_FOCUS_INPUT_EVENT_TYPES: [u32; 5] = [
+        CG_EVENT_LEFT_MOUSE_DOWN,
+        CG_EVENT_RIGHT_MOUSE_DOWN,
+        CG_EVENT_KEY_DOWN,
+        CG_EVENT_SCROLL_WHEEL,
+        CG_EVENT_OTHER_MOUSE_DOWN,
+    ];
     const CF_STRING_ENCODING_UTF8: u32 = 0x0800_0100;
     const CF_NUMBER_INT_TYPE: isize = 9;
     const IOKIT_SUCCESS: i32 = 0;
@@ -280,16 +301,17 @@ mod macos {
         }
     }
 
-    /// Returns whole seconds since the last keyboard, mouse, or tablet event in
-    /// the current login session. This public CoreGraphics query does not
-    /// install an event tap and therefore needs no Accessibility permission.
-    pub(super) fn get_input_secs() -> Result<u64, String> {
-        // SAFETY: Both enum values come directly from CGEventTypes.h and the
-        // function has no pointer arguments or caller-owned output.
+    /// Returns seconds since the last keyboard, mouse, or tablet event in the
+    /// current login session with the sub-second precision supplied by
+    /// CoreGraphics. This public query does not install an event tap and
+    /// therefore needs no Accessibility permission.
+    fn seconds_since_event(event_type: u32) -> Result<f64, String> {
+        // SAFETY: The state and event values come directly from CGEventTypes.h,
+        // and the function has no pointer arguments or caller-owned output.
         let seconds = unsafe {
             CGEventSourceSecondsSinceLastEventType(
                 CG_EVENT_SOURCE_COMBINED_SESSION_STATE,
-                CG_ANY_INPUT_EVENT_TYPE,
+                event_type,
             )
         };
 
@@ -297,7 +319,24 @@ mod macos {
             return Err(format!("CoreGraphics returned invalid idle time {seconds}"));
         }
 
-        Ok(seconds.floor().min(u64::MAX as f64) as u64)
+        Ok(seconds)
+    }
+
+    pub(super) fn get_input_seconds() -> Result<f64, String> {
+        seconds_since_event(CG_ANY_INPUT_EVENT_TYPE)
+    }
+
+    pub(super) fn get_focus_input_seconds() -> Result<f64, String> {
+        CG_FOCUS_INPUT_EVENT_TYPES
+            .into_iter()
+            .map(seconds_since_event)
+            .try_fold(f64::INFINITY, |minimum, seconds| {
+                seconds.map(|value| minimum.min(value))
+            })
+    }
+
+    pub(super) fn get_input_secs() -> Result<u64, String> {
+        Ok(get_input_seconds()?.floor().min(u64::MAX as f64) as u64)
     }
 
     /// Returns whether any process currently holds the public IOKit
@@ -423,6 +462,7 @@ mod tests {
     #[test]
     fn macos_public_idle_queries_return_valid_samples() {
         assert!(macos::get_input_secs().is_ok());
+        assert!(macos::get_focus_input_seconds().is_ok());
         assert!(macos::is_display_sleep_prevented().is_ok());
     }
 

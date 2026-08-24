@@ -102,13 +102,16 @@ reCAPTCHA；它同样不会随 Git 同步。如确有需要，应通过安全渠
 
 最近一次完整本机基线：
 
-- Rust：342 passed / 36 ignored。
+- Rust：347 passed / 36 ignored。
 - 前端：25 files / 387 passed。
 - 发布、bundle 与生命周期纯契约：57/57 passed。
 - universal app 同时包含 `arm64` 和 `x86_64`，最低系统版本为 macOS 13.0。
 - unsigned DMG 已在正常交互式用户会话中生成并通过 `hdiutil verify`；受控文件
   沙箱仍不能代表完整的 `hdiutil`/Finder DMG 环境。
 - Dock 生命周期 smoke 在 Apple Silicon 原生 arm64 和 Rosetta x86_64 下通过。
+- Dock 常驻、透明窗口、菜单栏入口、隐藏恢复、设置/关于恢复优先级和标准第二实例
+  激活已通过人工验收；延迟重聚焦会在检测到用户焦点相关输入或陈旧任务时取消。
+  当前执行进程没有发布合成输入的辅助功能权限，因此修复后物理切走仍需一次最终确认。
 
 Rosetta 结果只证明 Intel slice 能在 Apple Silicon 转译环境中运行，不替代真实
 Intel Mac 验收。
