@@ -330,7 +330,7 @@ Apple Silicon WKWebView 真机记录（2026-08-21）：
   `x86_64 arm64`，bundle 最低系统版本为 13.0，`hdiutil verify` 通过。Rust
   347 项、前端 387 项、发布/bundle/生命周期纯契约 57 项通过；原生 arm64 与
   Rosetta x86_64 生命周期 smoke 均确认前台启动、单实例激活及正常退出清理。
-  Draft PR #18 的最终 `desktop-ci` run 32815861642 已在 GitHub-hosted
+  Draft PR #18 中验证官方 Action v7 升级的 `desktop-ci` run 32815861642 已在 GitHub-hosted
   `windows-latest` / `macos-latest` 完整通过；checkout、setup-node 与
   upload-artifact 均升级到官方 v7，首轮 run 暴露的 Node.js 20 Action 弃用
   提示已消失。详细环境、命令、受控沙箱失败说明和仍待人工矩阵见
@@ -373,7 +373,10 @@ Apple Silicon WKWebView 真机记录（2026-08-21）：
   证书和 `.p8` 只写入 `RUNNER_TEMP`，构建后以 `if: always()` best-effort 清理；
   runner 被强制终止时不能宣称 cleanup step 必然执行。静态 workflow 契约可
   自动验证结构，当前发布/bundle/生命周期/workflow 纯契约为 76/76；真实 Apple
-  凭据、签名身份和 notarization 服务结果不能伪造。
+  凭据、签名身份和 notarization 服务结果不能伪造。接线提交 `b027006` 的 Draft
+  PR run 32828050890 已在 Windows/macOS 分别用时 2 分 28 秒与 8 分 32 秒通过，
+  annotations 均为空；该 run 只执行双平台回归、静态契约与 unsigned universal
+  bundle，不读取 release secrets，也不构成 signed/notarized 正例。
 
 验收：
 

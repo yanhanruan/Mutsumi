@@ -6,7 +6,7 @@
 >
 > 主分支基线：`main` / `d3b52a9`
 >
-> 续作起点：`d54d0c5 ci: upgrade official actions to Node 24`
+> 当前实现锚点：`b027006 build(macOS): add signed universal release workflows`
 
 这份文档用于在另一台 Mac 上恢复开发上下文。产品与技术决策仍以
 [`MACOS-ADAPTATION-PLAN.md`](MACOS-ADAPTATION-PLAN.md) 为准，发布边界以
@@ -86,7 +86,7 @@ reCAPTCHA；它同样不会随 Git 同步。如确有需要，应通过安全渠
 
 ## 3. 当前已经完成的范围
 
-截至功能锚点 `002c7a8`：
+当前已完成范围（实现锚点 `b027006`）：
 
 - Phase 1：macOS 编译/启动基线、capability 模型和不可用能力的显式降级。
 - Phase 2：透明桌宠窗口、全局光标、点击穿透、原子窗口几何、Dock 常驻契约，
@@ -122,20 +122,21 @@ contract，以上 Vue、纯契约、前端构建、Rust 和 universal app/DMG �
 随后 Draft PR `desktop-ci` 已在 clean runner 重建 app/DMG 并通过完整 unsigned
 bundle contract。
 
-Draft PR [#18](https://github.com/yanhanruan/Mutsumi/pull/18) 已创建；最终证据锚点
-`d0cec0a` 的
-[`desktop-ci` run 32822830132](https://github.com/yanhanruan/Mutsumi/actions/runs/32822830132)
-在 GitHub-hosted runner 上完整通过：Windows regression 2 分 39 秒，macOS
-unsigned universal bundle 10 分 45 秒。后者明确验证新 identifier、macOS 13.0、
-双架构和 DMG 完整性，上传七天 artifact `9554071608`；annotations 为 0。
+Draft PR [#18](https://github.com/yanhanruan/Mutsumi/pull/18) 已创建；当前证据锚点
+`b027006` 的
+[`desktop-ci` run 32828050890](https://github.com/yanhanruan/Mutsumi/actions/runs/32828050890)
+在 GitHub-hosted runner 上完整通过：Windows regression 2 分 28 秒，macOS
+unsigned universal bundle 8 分 32 秒。后者明确验证新 identifier、macOS 13.0、
+双架构和 DMG 完整性，上传七天 artifact `9555918530`；两个 job annotations 均为空。
 当前 signed workflow 切片已在本机通过 workflow YAML、三个 release shell 脚本
 语法、前端 387/387、production build 与纯契约 76/76；两个 workflow 会先做
 缺失/基础格式 secret preflight，再进入 Windows → macOS → final release jobs。
 final job 会先验证 release ID/tag/channel，再把 `tauri-action@v1` API asset ID
-绑定到同一 release 后重写为受控 tag 的公开下载 URL；staging reset 失败不再被吞掉，最终 tag 还必须指向 workflow
-source SHA，且两个平台在 signed workflow 内均运行 Rust tests。这些结果只证明
-接线和 fail-closed 结构，不代表证书密码、Developer ID 身份或真实 notarization
-服务通过。
+绑定到同一 release 后重写为受控 tag 的公开下载 URL；staging reset 失败不再
+被吞掉，最终 tag 还必须指向 workflow source SHA，且两个平台在 signed workflow
+内均运行 Rust tests。远程 `desktop-ci` 只执行这些静态契约和 unsigned 构建，
+没有读取 Apple/release secrets 或触发 signed workflow。这些结果只证明接线和
+fail-closed 结构，不代表证书密码、Developer ID 身份或真实 notarization 服务通过。
 
 Rosetta 结果只证明 Intel slice 能在 Apple Silicon 转译环境中运行，不替代真实
 Intel Mac 验收。

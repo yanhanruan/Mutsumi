@@ -2,11 +2,11 @@
 
 > 测试窗口：2026-08-23 至 2026-08-25
 >
-> 记录更新：2026-08-25（本机/远程自动化复验、identifier 证据与产品 pending 决策）
+> 记录更新：2026-08-25（本机/远程自动化复验、release workflow 证据与产品 pending 决策）
 >
 > 分支：`feat/macos-adaptation`
 >
-> 当前 unsigned 证据锚点：`d0cec0a fix(macOS): freeze release bundle identifier`
+> 当前 unsigned 证据锚点：`b027006 build(macOS): add signed universal release workflows`
 >
 > 证据范围：未签名开发产物；不代表可分发、已签名或已 notarize
 
@@ -38,7 +38,7 @@
 | Vue/Vitest | 通过 | 25 个测试文件，387 项通过 |
 | 前端生产构建 | 通过 | `vue-tsc -b` 与 Vite production build 完成 |
 | Rust 测试 | 通过 | 348 项通过，36 项按设计 ignored |
-| 发布、bundle、生命周期纯契约 | 通过 | 59/59；包含 macOS-only identifier 兼容契约 |
+| 发布、bundle、生命周期与 workflow 纯契约 | 通过 | 76/76；包含 identifier、v1 URL normalization、release channel 与 staging provenance 契约 |
 | universal app | 通过 | Mach-O 恰好包含 `arm64` 与 `x86_64` |
 | 最低系统版本 | 通过 | `LSMinimumSystemVersion=13.0` |
 | Dock 前台资格 | 通过 | `APPL`，非 `LSUIElement`，非 `LSBackgroundOnly` |
@@ -57,7 +57,7 @@ unsigned bundle contract。当前受控 shell 的默认 `PATH` 未暴露 Cargo �
 
 DMG 在受控文件沙箱中首次运行 `bundle_dmg.sh` 失败；同一命令在正常交互式用户
 会话中完成 Finder 布局、压缩和完整性校验。该失败属于测试执行环境限制，不是
-bundle 内容失败。Draft PR #18 的最终远程 `macos-latest` job 已独立重建并验证
+bundle 内容失败。Draft PR #18 后续的远程 `macos-latest` job 已独立重建并验证
 同一 unsigned universal app/DMG，证明 GitHub-hosted 环境不受该本机沙箱限制。
 
 2026-08-25，证据锚点 `d54d0c5` 的
@@ -65,7 +65,7 @@ bundle 内容失败。Draft PR #18 的最终远程 `macos-latest` job 已独立�
 完整通过：Windows regression 用时 2 分 41 秒，macOS unsigned universal job
 用时 7 分 28 秒。两边实际运行 `actions/checkout@v7` 与
 `actions/setup-node@v7`，macOS 另用 `actions/upload-artifact@v7` 完成上传；
-此前首轮远程运行暴露的 Node.js 20 Action 弃用提示不再出现。最终 run 唯一
+此前首轮远程运行暴露的 Node.js 20 Action 弃用提示不再出现。该次 run 唯一
 annotation 是已知的 `com.mutsumi.app` identifier 正式签名前门禁，不影响
 unsigned CI，也不代表该 identifier 已获准用于签名发布。
 
@@ -77,6 +77,17 @@ contract 明确输出 `io.github.yanhanruan.mutsumi`、`arm64` + `x86_64`、macO
 13.0、Dock 前台资格及 DMG 完整性。job annotations 为 0；七天 artifact ID
 `9554071608` 上传成功。该证据关闭旧 identifier warning，但仍然只代表 unsigned
 CI，不代表 Developer ID 签名、Gatekeeper 或 notarization 已通过。
+
+signed workflow 接线提交 `b027006` 的
+[`desktop-ci` run 32828050890](https://github.com/yanhanruan/Mutsumi/actions/runs/32828050890)
+也完整通过：Windows regression 2 分 28 秒，macOS unsigned universal job
+8 分 32 秒。两边均实际执行 76/76 纯契约和各自 Rust 回归；macOS 在 clean runner
+重新生成双架构 app/DMG、通过 unsigned bundle contract，并上传七天 artifact
+`9555918530`（449,258,997 bytes，SHA-256
+`23a967b51fd2b8bd89662dcb5207bcceeb3c2c66cfe9bf674d866b0e0d96555d`）。两个
+job annotations 均为空。该 PR workflow 不读取 Apple/release secrets，也不触发
+`staging-release.yml` 或 `release.yml`，所以只能证明静态 workflow 契约、双平台
+回归与 unsigned bundle，不能把 Developer ID/notarization 正例标记为通过。
 
 ## 3. macOS 原生探针
 
@@ -152,7 +163,7 @@ Draft PR 首轮双平台 job 均通过，但 GitHub 将旧版 `actions/checkout@
 `actions/setup-node@v4` 和 `actions/upload-artifact@v4` 强制切到 Node.js 24，
 同时产生 Node.js 20 弃用 annotation。根据三个官方 Action 的当前 major，四个
 workflow 已统一升级到 `@v7`；项目测试所用 `node-version: 22`、workflow 权限、
-触发条件、发布命令和 unsigned artifact 边界均未改变。最终远程 run 已证明三种
+触发条件、发布命令和 unsigned artifact 边界均未改变。验证 Action 升级的远程 run 已证明三种
 v7 Action 在 `windows-latest` / `macos-latest` 上实际通过，且弃用提示消失。
 
 ## 5. 尚未完成，不能标记通过
