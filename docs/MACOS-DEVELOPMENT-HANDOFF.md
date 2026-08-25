@@ -209,10 +209,11 @@ Draft PR 与首次双平台远程 CI 已完成。后续优先级建议如下；�
    不让非阻塞人工项中断可自动完成的开发，但仍不得据此宣称发布门禁通过。
 2. 有真实 Intel Mac 时，下载同一 universal 构建验证启动、单实例与正常退出；
    没有真机就继续把它保留为待验收，不能用 Rosetta 冒充完成。
-3. signed/notarized staging 与 production workflow 已接线；自动化工作完成后，
-   统一配置 Developer ID/App Store Connect/updater repo secrets，先运行 rolling
-   staging，再用刚签出的产物完成 Gatekeeper、安装和跨版本更新人工验收。没有
-   凭据时不得伪造 signed 正例，也不得触发 production tag。
+3. signed/notarized staging 与 production workflow 已接线；2026-08-25 的仓库
+   secret 名称审计只看到 `TAURI_SIGNING_PRIVATE_KEY`。首次签名前应由持有密钥的人
+   核实它与已提交 updater 公钥匹配，再配置缺失的 Developer ID/App Store Connect
+   secrets，先运行 rolling staging，再用刚签出的产物完成 Gatekeeper、安装和跨版本
+   更新人工验收。没有凭据时不得伪造 signed 正例，也不得触发 production tag。
 
 单纯 push `feat/macos-adaptation` 不会通过 workflow 的 `push` 入口触发
 `desktop-ci`，因为该入口只监听 `main`；当前 Draft PR #18 会让后续相关路径变更
@@ -220,8 +221,9 @@ Draft PR 与首次双平台远程 CI 已完成。后续优先级建议如下；�
 
 ## 6. 尚未完成的真机矩阵
 
-- [ ] 从 Finder、Dock 和菜单栏分别启动/激活应用。
-- [ ] 隐藏主窗口后点击 Dock，确认恢复和聚焦；检查设置、关于、更新窗口。
+- [ ] 从 Finder 直接启动/激活应用；Dock、菜单栏入口和隐藏后点击 Dock 恢复已通过，
+      不重复列为 pending。
+- [ ] 使用真实可用更新载荷验证更新窗口最高恢复优先级；设置/关于恢复优先级已通过。
 - [ ] 正式发布前启动第二实例，在约 1 秒重试窗口内用物理鼠标或键盘切到其他应用，
       确认 Mutsumi 不会抢回焦点并记录结果。
 - [ ] 单屏、双屏、负坐标、不同缩放比例及主副屏切换。

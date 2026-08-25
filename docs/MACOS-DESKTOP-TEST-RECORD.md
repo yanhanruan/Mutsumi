@@ -168,6 +168,7 @@ v7 Action 在 `windows-latest` / `macos-latest` 上实际通过，且弃用提�
 
 ## 5. 尚未完成，不能标记通过
 
+- 从 Finder 直接启动/激活应用；Dock、菜单栏入口和隐藏后点击 Dock 恢复已经通过。
 - 更新窗口存在可用更新载荷时的最高恢复优先级。
 - 正式发布前：修复后单实例约 1 秒延迟期间由用户物理切走的一次最终端到端确认。
 - 双屏、负坐标、不同缩放、主副屏切换和显示器热插拔；本机本轮只有单屏。
@@ -177,3 +178,5 @@ v7 Action 在 `windows-latest` / `macos-latest` 上实际通过，且弃用提�
 - 耳机、USB、HDMI、蓝牙、AirPlay 和暂时无默认输出设备的 CoreAudio 矩阵。
 - 真实 Intel Mac；Rosetta 结果不能替代 Intel 硬件。
 - 签名/notarized staging DMG 安装与真实跨版本自动更新。
+- 仓库 secret 名称审计目前只看到 `TAURI_SIGNING_PRIVATE_KEY`；仍需由持有密钥的人
+  核实它与已提交 updater 公钥匹配，并配置六项 Apple 签名/notarization secrets。
