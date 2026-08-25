@@ -6,7 +6,7 @@
 >
 > 主分支基线：`main` / `d3b52a9`
 >
-> 续作起点：`002c7a8 fix(macOS): respect user focus changes`
+> 续作起点：`d54d0c5 ci: upgrade official actions to Node 24`
 
 这份文档用于在另一台 Mac 上恢复开发上下文。产品与技术决策仍以
 [`MACOS-ADAPTATION-PLAN.md`](MACOS-ADAPTATION-PLAN.md) 为准，发布边界以
@@ -117,6 +117,15 @@ reCAPTCHA；它同样不会随 Git 同步。如确有需要，应通过安全渠
 2026-08-25 已在 `4ed1d0d` 重新执行本机可复现的 CI 主体与 unsigned bundle
 contract，以上 Vue、纯契约、前端构建、Rust 和 universal app/DMG 结果保持通过。
 
+Draft PR [#18](https://github.com/yanhanruan/Mutsumi/pull/18) 已创建；最终证据锚点
+`d54d0c5` 的
+[`desktop-ci` run 32815861642](https://github.com/yanhanruan/Mutsumi/actions/runs/32815861642)
+在 GitHub-hosted runner 上完整通过：Windows regression 2 分 41 秒，macOS
+unsigned universal bundle 7 分 28 秒。后者重新构建 app/DMG、通过 bundle
+contract 并上传七天保留的未签名 artifact。checkout/setup-node/upload-artifact
+已升级到官方 v7，首轮 run 的 Node.js 20 Action 弃用提示在最终 run 中消失。
+唯一剩余 annotation 是已知的 identifier 正式签名前门禁。
+
 Rosetta 结果只证明 Intel slice 能在 Apple Silicon 转译环境中运行，不替代真实
 Intel Mac 验收。
 
@@ -179,24 +188,21 @@ cargo test --manifest-path src-tauri/Cargo.toml \
   -- --ignored --nocapture
 ```
 
-## 5. 周末最值得继续的工作
+## 5. 接下来最值得继续的工作
 
-优先级建议如下，前三项都不依赖正式签名凭据：
+Draft PR 与首次双平台远程 CI 已完成。后续优先级建议如下；人工/硬件项统一保留到
+自动化开发结束后执行，pending 不代表发布通过：
 
-1. 创建 Draft PR，触发 `desktop-ci` 的 Windows regression 和 unsigned
-   universal bundle 两个 job，确认 GitHub-hosted macOS 能实际产出并验证 DMG。
-2. 根据远程 CI 结果修复脚本、缓存、路径或构建时间问题，并保持 unsigned
-   artifact 不进入 Releases。
-3. 继续记录可用设备上的真实桌面矩阵；缺少显示器、权限状态或外设时保留 pending，
+1. 继续记录可用设备上的真实桌面矩阵；缺少显示器、权限状态或外设时保留 pending，
    不让非阻塞人工项中断可自动完成的开发，但仍不得据此宣称发布门禁通过。
-4. 有真实 Intel Mac 时，下载同一 universal 构建验证启动、单实例与正常退出；
+2. 有真实 Intel Mac 时，下载同一 universal 构建验证启动、单实例与正常退出；
    没有真机就继续把它保留为待验收，不能用 Rosetta 冒充完成。
-5. 正式签名前再处理 bundle identifier、Developer ID、notarization、stapling
+3. 正式签名前再处理 bundle identifier、Developer ID、notarization、stapling
    和 macOS updater/release workflow，不在普通测试阶段临时猜产品身份。
 
-单纯 push `feat/macos-adaptation` 不会触发当前 `desktop-ci`，因为 workflow 的
-`push` 入口只监听 `main`。合并前需要双平台远程证据时，应创建 Draft PR；PR
-事件会运行 Windows 和 macOS 两个 job。
+单纯 push `feat/macos-adaptation` 不会通过 workflow 的 `push` 入口触发
+`desktop-ci`，因为该入口只监听 `main`；当前 Draft PR #18 会让后续相关路径变更
+通过 `pull_request` 事件继续运行 Windows 和 macOS 两个 job。
 
 ## 6. 尚未完成的真机矩阵
 
@@ -236,7 +242,8 @@ cargo test --manifest-path src-tauri/Cargo.toml \
 - 每次 commit 前必须新建 5.6-sol/high reviewer，对完整 staged diff 按 PRD 做只读审查。
 - 主 agent 要独立核实报告，修复确定问题；任何审查后改动都必须重新 review。
 - 用户已在 2026-08-25 授权持续开发期间自主提交：reviewer 通过后可直接 commit，
-  不再逐次请求确认；该授权不包含 push、创建 PR、发布、签名或其他远程状态变更。
+  不再逐次请求确认；用户随后明确授权维护当前分支 push 与 Draft PR #18。该授权
+  不包含 merge、转为 Ready for review、发布、签名或其他远程状态变更。
 
 本次 macOS 分支另有一项明确的交接约定：按模块暂存和提交，不能夹带无关
 文件；达到一次 commit 的标准时进入上述 review/commit 流程并自主继续。

@@ -88,9 +88,9 @@ Mutsumi 当前是以 Windows 为唯一发布平台设计的 Tauri 2 桌面应用
   图标按钮具有 en/zh/ja 标题和无障碍标签。
 - Phase 6A 已配置桌面双平台 CI 门禁：Windows 运行前后端回归，macOS
   同时安装 `aarch64-apple-darwin` / `x86_64-apple-darwin` 目标，生成未签名
-  app/DMG，并校验 Mach-O 双架构、macOS 13.0 最低版本与 Dock 前台资格。首次远程运行
-  仍待验证；Developer ID、notarization、stapling 和 release/updater 资产
-  聚合尚未接入。
+  app/DMG，并校验 Mach-O 双架构、macOS 13.0 最低版本与 Dock 前台资格。
+  Draft PR #18 的 GitHub-hosted Windows/macOS job 已完整通过；Developer ID、
+  notarization、stapling 和 release/updater 资产聚合尚未接入。
 
 ## 5. 总体技术方案
 
@@ -318,7 +318,7 @@ Apple Silicon WKWebView 真机记录（2026-08-21）：
 5. 更新发布资产校验脚本，使 updater manifest 同时校验 Windows 和 macOS。
 6. 完成从旧 macOS 版本到 staging 版本的真实升级测试。
 
-当前记录（2026-08-24）：
+当前记录（2026-08-25）：
 
 - 新增 `desktop-ci` workflow，在每个 PR 与相关 main 推送时保留 Windows
   前后端回归，同时构建未签名 universal app/DMG。可复用的 bundle contract
@@ -329,11 +329,14 @@ Apple Silicon WKWebView 真机记录（2026-08-21）：
   `x86_64 arm64`，bundle 最低系统版本为 13.0，`hdiutil verify` 通过。Rust
   347 项、前端 387 项、发布/bundle/生命周期纯契约 57 项通过；原生 arm64 与
   Rosetta x86_64 生命周期 smoke 均确认前台启动、单实例激活及正常退出清理。
-  详细环境、命令、受控沙箱失败说明和仍待人工矩阵见
+  Draft PR #18 的最终 `desktop-ci` run 32815861642 已在 GitHub-hosted
+  `windows-latest` / `macos-latest` 完整通过；checkout、setup-node 与
+  upload-artifact 均升级到官方 v7，首轮 run 暴露的 Node.js 20 Action 弃用
+  提示已消失。详细环境、命令、受控沙箱失败说明和仍待人工矩阵见
   [`MACOS-DESKTOP-TEST-RECORD.md`](MACOS-DESKTOP-TEST-RECORD.md)。Developer ID
-  签名、notarization/stapling、Gatekeeper、真实 Intel 启动和 GitHub-hosted
-  首次远程运行仍待完成。现有 staging/release workflow 继续保持 Windows-only，
-  直到多平台 updater manifest 能作为一个整体通过资产门禁。
+  签名、notarization/stapling、Gatekeeper 和真实 Intel 启动仍待完成。现有
+  staging/release workflow 继续保持 Windows-only，直到多平台 updater manifest
+  能作为一个整体通过资产门禁。
 - 本机原生 bundle 验证同时发现现有 identifier `com.mutsumi.app` 以
   `.app` 结尾，Tauri 明确提示可能与 macOS bundle 扩展冲突。该标识符在
   接入 Developer ID 前必须完成产品确认并冻结。产品已决定将此项标为
@@ -413,7 +416,8 @@ Apple Silicon WKWebView 真机记录（2026-08-21）：
 
 - [ ] 最低系统版本是否采用 macOS 13。
 - [ ] 是否要求首发同时支持 Intel，还是先 Apple Silicon。
-- [ ] 是否接受首个 MVP 暂不提供跨应用媒体控制。
+- [x] 首个 macOS MVP 的媒体元数据、播放控制与系统音量明确不可用；音频活动仅为
+      degraded，且不采用私有 `MediaRemote`。
 - [x] 除 Tauri/Wry 透明窗口所需的限定例外外，系统集成只使用公开 Apple API；媒体能力继续禁止私有框架。
 - [x] Dock 图标常驻，同时保留菜单栏图标。
 - [ ] 是否按 Phase 1 → 2 → 3 → 4 → 5 → 6 的顺序实施。

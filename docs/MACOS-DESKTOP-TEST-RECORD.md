@@ -2,11 +2,11 @@
 
 > 测试窗口：2026-08-23 至 2026-08-25
 >
-> 记录更新：2026-08-25（本机自动化复验与产品 pending 决策）
+> 记录更新：2026-08-25（本机/远程自动化复验与产品 pending 决策）
 >
 > 分支：`feat/macos-adaptation`
 >
-> 当前证据锚点：`002c7a8 fix(macOS): respect user focus changes`
+> 当前证据锚点：`d54d0c5 ci: upgrade official actions to Node 24`
 >
 > 证据范围：未签名开发产物；不代表可分发、已签名或已 notarize
 
@@ -45,6 +45,8 @@
 | unsigned DMG | 通过 | `mutsumi_1.5.3_universal.dmg` 生成，`hdiutil verify` 通过 |
 | arm64 生命周期 | 通过 | 前台启动、第二实例复用/激活、标准 Quit、socket 清理 |
 | x86_64 Rosetta 生命周期 | 通过 | 确认 `LSArchitecture=x86_64`，其余生命周期契约同样通过 |
+| Draft PR Windows regression | 通过 | `windows-latest` 前端、发布契约、生产构建与 Rust 回归均通过 |
+| Draft PR macOS universal | 通过 | `macos-latest` 构建并验证 app/DMG，上传七天保留的未签名 artifact |
 
 2026-08-25 在 `4ed1d0d` 上重新执行本机可复现的 CI 主体：Vue/Vitest
 387/387、发布/bundle/生命周期纯契约 57/57、前端生产构建、Rust 347 passed /
@@ -55,7 +57,17 @@ unsigned bundle contract。当前受控 shell 的默认 `PATH` 未暴露 Cargo �
 
 DMG 在受控文件沙箱中首次运行 `bundle_dmg.sh` 失败；同一命令在正常交互式用户
 会话中完成 Finder 布局、压缩和完整性校验。该失败属于测试执行环境限制，不是
-bundle 内容失败。远程 `macos-latest` CI 仍需通过 Draft PR 独立验证。
+bundle 内容失败。Draft PR #18 的最终远程 `macos-latest` job 已独立重建并验证
+同一 unsigned universal app/DMG，证明 GitHub-hosted 环境不受该本机沙箱限制。
+
+2026-08-25，证据锚点 `d54d0c5` 的
+[`desktop-ci` run 32815861642](https://github.com/yanhanruan/Mutsumi/actions/runs/32815861642)
+完整通过：Windows regression 用时 2 分 41 秒，macOS unsigned universal job
+用时 7 分 28 秒。两边实际运行 `actions/checkout@v7` 与
+`actions/setup-node@v7`，macOS 另用 `actions/upload-artifact@v7` 完成上传；
+此前首轮远程运行暴露的 Node.js 20 Action 弃用提示不再出现。最终 run 唯一
+annotation 是已知的 `com.mutsumi.app` identifier 正式签名前门禁，不影响
+unsigned CI，也不代表该 identifier 已获准用于签名发布。
 
 ## 3. macOS 原生探针
 
@@ -125,6 +137,15 @@ Vite/PostCSS/nanoid/brace-expansion 的构建与测试依赖图。它们没有�
 验证提交中自动升级，避免把依赖维护混入平台验收；后续应以独立安全维护提交更新
 锁文件并同时跑 Windows/macOS 回归。没有执行 `npm audit fix`。
 
+### 4.4 GitHub Actions Node.js 20 弃用提示
+
+Draft PR 首轮双平台 job 均通过，但 GitHub 将旧版 `actions/checkout@v4`、
+`actions/setup-node@v4` 和 `actions/upload-artifact@v4` 强制切到 Node.js 24，
+同时产生 Node.js 20 弃用 annotation。根据三个官方 Action 的当前 major，四个
+workflow 已统一升级到 `@v7`；项目测试所用 `node-version: 22`、workflow 权限、
+触发条件、发布命令和 unsigned artifact 边界均未改变。最终远程 run 已证明三种
+v7 Action 在 `windows-latest` / `macos-latest` 上实际通过，且弃用提示消失。
+
 ## 5. 尚未完成，不能标记通过
 
 - 更新窗口存在可用更新载荷时的最高恢复优先级。
@@ -136,4 +157,3 @@ Vite/PostCSS/nanoid/brace-expansion 的构建与测试依赖图。它们没有�
 - 耳机、USB、HDMI、蓝牙、AirPlay 和暂时无默认输出设备的 CoreAudio 矩阵。
 - 真实 Intel Mac；Rosetta 结果不能替代 Intel 硬件。
 - 签名/notarized staging DMG 安装与真实跨版本自动更新。
-- GitHub Draft PR 的 Windows regression 与 macOS universal 两个远程 job。
