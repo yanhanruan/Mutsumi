@@ -120,6 +120,9 @@ impl QwenState {
 // Stored in the OS credential store via `keyring` (Windows Credential Manager /
 // macOS Keychain / Linux Secret Service) — never plaintext on disk.
 
+// This is a credential namespace, not the platform bundle identifier. Keep the
+// established value stable so changing the macOS bundle identity does not make
+// an existing API key disappear from Keychain or Windows Credential Manager.
 const KEYRING_SERVICE: &str = "com.mutsumi.app";
 const KEYRING_USER: &str = "dashscope_api_key";
 
@@ -277,5 +280,11 @@ mod tests {
 
         state.set_api_key(" replacement-key ").unwrap();
         assert_eq!(state.api_key_snapshot(), "replacement-key");
+    }
+
+    #[test]
+    fn credential_namespace_remains_compatible_with_existing_installations() {
+        assert_eq!(KEYRING_SERVICE, "com.mutsumi.app");
+        assert_eq!(KEYRING_USER, "dashscope_api_key");
     }
 }

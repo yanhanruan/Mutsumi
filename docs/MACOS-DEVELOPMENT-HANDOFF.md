@@ -100,7 +100,7 @@ reCAPTCHA；它同样不会随 Git 同步。如确有需要，应通过安全渠
 - Phase 6A–6C：Windows/macOS 桌面 CI、universal unsigned bundle contract、
   updater/release asset contract，以及尚未接线的 signed bundle gate。
 
-最近一次完整本机基线：
+最近一次完整 app/DMG 本机基线（`4ed1d0d`）：
 
 - Rust：347 passed / 36 ignored。
 - 前端：25 files / 387 passed。
@@ -116,6 +116,10 @@ reCAPTCHA；它同样不会随 Git 同步。如确有需要，应通过安全渠
 
 2026-08-25 已在 `4ed1d0d` 重新执行本机可复现的 CI 主体与 unsigned bundle
 contract，以上 Vue、纯契约、前端构建、Rust 和 universal app/DMG 结果保持通过。
+当前 identifier 切片又通过前端 387/387、Rust 348 passed / 36 ignored 与纯契约
+59/59，并用 app-only universal 构建确认新 identifier、macOS 13.0 和双架构；
+本轮本机没有重新生成 DMG，必须由该切片推送后的 Draft PR `desktop-ci` 重建
+app/DMG 后，才能把新 identifier 的完整 unsigned bundle 证据记为通过。
 
 Draft PR [#18](https://github.com/yanhanruan/Mutsumi/pull/18) 已创建；最终证据锚点
 `d54d0c5` 的
@@ -197,8 +201,9 @@ Draft PR 与首次双平台远程 CI 已完成。后续优先级建议如下；�
    不让非阻塞人工项中断可自动完成的开发，但仍不得据此宣称发布门禁通过。
 2. 有真实 Intel Mac 时，下载同一 universal 构建验证启动、单实例与正常退出；
    没有真机就继续把它保留为待验收，不能用 Rosetta 冒充完成。
-3. 正式签名前再处理 bundle identifier、Developer ID、notarization、stapling
-   和 macOS updater/release workflow，不在普通测试阶段临时猜产品身份。
+3. macOS identifier 已冻结为 `io.github.yanhanruan.mutsumi`；下一步接入
+   Developer ID、notarization、stapling 和 macOS updater/release workflow，
+   但没有凭据时不得伪造 signed 正例。
 
 单纯 push `feat/macos-adaptation` 不会通过 workflow 的 `push` 入口触发
 `desktop-ci`，因为该入口只监听 `main`；当前 Draft PR #18 会让后续相关路径变更
@@ -223,8 +228,9 @@ Draft PR 与首次双平台远程 CI 已完成。后续优先级建议如下；�
 
 - macOS 产物目前是未签名 CI baseline，不可对用户分发。
 - `release.yml` 和 `staging-release.yml` 目前仍是 Windows-only。
-- `com.mutsumi.app` 以 `.app` 结尾；产品已决定标记为“正式签名前处理”。接入
-  Developer ID 前必须确定并冻结长期 identifier。
+- 长期 macOS identifier 已冻结为 `io.github.yanhanruan.mutsumi`，仅写在
+  macOS overlay；根配置的 `com.mutsumi.app` 保留给 Windows，避免迁移现有
+  app-data 与凭据命名空间。后续不得再把二者误当成同一个跨平台 identifier。
 - signed bundle contract 已写好，但没有真实 Developer ID/notarized 正例；启用
   workflow 时必须用刚签出的 Mutsumi 产物跑完整 gate。
 - `macos-private-api` 例外只允许 Tauri/Wry 的透明 WKWebView，且只面向

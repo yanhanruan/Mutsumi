@@ -66,16 +66,18 @@ for that future cut-over. It requires one DMG for direct installation and one
 signed `.app.tar.gz` updater archive referenced by both `darwin-aarch64` and
 `darwin-x86_64`. The current workflows deliberately do not enable the flag yet.
 
-Before enabling a signed macOS workflow, freeze a long-lived bundle identifier.
-The current `com.mutsumi.app` is explicitly tracked as **must resolve before
-formal signing**; changing it is not part of the unsigned CI baseline. Then run
-the prepared signed bundle gate with that exact value:
+The long-lived macOS bundle identifier is frozen as
+`io.github.yanhanruan.mutsumi` in the platform-only
+`src-tauri/tauri.macos.conf.json` overlay. The base identifier remains
+`com.mutsumi.app` so existing Windows app-data and credential namespaces do not
+move. Every signed macOS build must run the prepared bundle gate with the frozen
+value:
 
 ```bash
 node scripts/verify-macos-bundle.mjs \
   --bundle-dir src-tauri/target/universal-apple-darwin/release/bundle \
   --mode signed \
-  --expected-identifier '<frozen-bundle-identifier>' \
+  --expected-identifier io.github.yanhanruan.mutsumi \
   --expected-minimum-system-version 13.0
 ```
 
@@ -83,8 +85,8 @@ Signed mode rejects an identifier ending in `.app` and requires a valid
 Developer ID Application signature, hardened runtime, secure timestamp,
 readable distribution entitlements without `get-task-allow`, Gatekeeper
 acceptance for the app and DMG, and a notarization ticket stapled to the DMG.
-It is implemented as a future release gate but is not run by today's unsigned
-CI or Windows-only release workflows.
+It is implemented as a future release gate but is not yet run by today's
+unsigned CI or Windows-only release workflows.
 
 ## One-time setup (before the first signed release)
 

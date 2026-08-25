@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import {
@@ -8,6 +9,8 @@ import {
   parseMacosBundleArgs,
   validateMacosBundleContract,
 } from './macos-bundle-contract.mjs'
+
+const MACOS_IDENTIFIER = 'io.github.yanhanruan.mutsumi'
 
 const SIGNATURE_DETAILS = [
   'CodeDirectory v=20500 size=12345 flags=0x10000(runtime) hashes=350+7 location=embedded',
@@ -23,7 +26,7 @@ function snapshot(overrides = {}) {
     executablePresent: true,
     architectures: ['x86_64', 'arm64'],
     minimumSystemVersion: '13.0',
-    identifier: 'com.mutsumi.app',
+    identifier: MACOS_IDENTIFIER,
     packageType: 'APPL',
     uiElement: undefined,
     backgroundOnly: undefined,
@@ -35,7 +38,7 @@ function snapshot(overrides = {}) {
 
 function signedSnapshot(overrides = {}) {
   return snapshot({
-    identifier: 'com.example.mutsumi',
+    identifier: MACOS_IDENTIFIER,
     signatureValid: true,
     signatureDetails: SIGNATURE_DETAILS,
     developerIdRequirementValid: true,
@@ -52,8 +55,22 @@ function signedSnapshot(overrides = {}) {
 
 const SIGNED_OPTIONS = {
   mode: 'signed',
-  expectedIdentifier: 'com.example.mutsumi',
+  expectedIdentifier: MACOS_IDENTIFIER,
 }
+
+test('freezes a macOS-only identifier without moving the Windows data namespace', () => {
+  const baseConfig = JSON.parse(readFileSync(
+    new URL('../src-tauri/tauri.conf.json', import.meta.url),
+    'utf8',
+  ))
+  const macosConfig = JSON.parse(readFileSync(
+    new URL('../src-tauri/tauri.macos.conf.json', import.meta.url),
+    'utf8',
+  ))
+
+  assert.equal(baseConfig.identifier, 'com.mutsumi.app')
+  assert.equal(macosConfig.identifier, MACOS_IDENTIFIER)
+})
 
 test('CLI requires an explicit mode and accepts the documented unsigned invocation', () => {
   assert.deepEqual(
@@ -158,9 +175,14 @@ test('builds a codesign-evaluated Developer ID requirement for numeric or letter
   )
 })
 
-test('accepts the current unsigned universal bundle and warns about deferred identity', () => {
+test('accepts the current unsigned universal bundle with the frozen identity', () => {
   const result = validateMacosBundleContract(snapshot())
   assert.equal(result.messages.length, 4)
+  assert.deepEqual(result.warnings, [])
+})
+
+test('keeps warning about a legacy .app-suffixed unsigned identity', () => {
+  const result = validateMacosBundleContract(snapshot({ identifier: 'com.mutsumi.app' }))
   assert.match(result.warnings[0], /freeze a replacement before signed release/)
 })
 

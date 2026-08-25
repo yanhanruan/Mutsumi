@@ -167,9 +167,9 @@ The macOS package itself has a separate bundle contract. Unsigned desktop CI
 runs `scripts/verify-macos-bundle.mjs --mode unsigned` to check the universal
 architectures, minimum OS, bundle metadata and DMG integrity. Its dormant
 `--mode signed` adds Developer ID, hardened-runtime, timestamp, entitlement,
-Gatekeeper and stapled-notarization checks. Do not enable signed mode until the
-long-lived bundle identifier has been frozen; that decision is explicitly a
-formal-signing prerequisite rather than a blocker for the current CI baseline.
+Gatekeeper and stapled-notarization checks. The macOS-only identifier is now
+frozen as `io.github.yanhanruan.mutsumi`; signed mode must require that exact
+value while the Windows base identifier and data namespace remain unchanged.
 
 The production post-publish healer ignores this prerelease. The rolling channel
 must remain attached to the literal `staging` tag rather than being rebound to

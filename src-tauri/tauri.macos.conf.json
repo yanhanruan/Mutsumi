@@ -1,4 +1,5 @@
 {
+  "identifier": "io.github.yanhanruan.mutsumi",
   "bundle": {
     "targets": ["app", "dmg"],
     "macOS": {

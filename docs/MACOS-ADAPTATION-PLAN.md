@@ -337,12 +337,16 @@ Apple Silicon WKWebView 真机记录（2026-08-21）：
   签名、notarization/stapling、Gatekeeper 和真实 Intel 启动仍待完成。现有
   staging/release workflow 继续保持 Windows-only，直到多平台 updater manifest
   能作为一个整体通过资产门禁。
-- 本机原生 bundle 验证同时发现现有 identifier `com.mutsumi.app` 以
-  `.app` 结尾，Tauri 明确提示可能与 macOS bundle 扩展冲突。该标识符在
-  接入 Developer ID 前必须完成产品确认并冻结。产品已决定将此项标为
-  “正式签名前处理”：它不阻塞未签名 CI 与测试，本阶段不擅自改变身份；
-  signed bundle contract 会要求显式传入冻结后的 identifier，并拒绝以
-  `.app` 结尾的值。
+- 本机原生 bundle 验证发现原 identifier `com.mutsumi.app` 以 `.app` 结尾，
+  Tauri 明确提示可能与 macOS bundle 扩展冲突。产品已在正式签名前冻结
+  `io.github.yanhanruan.mutsumi`，并仅通过 `tauri.macos.conf.json` 覆盖 macOS；
+  根配置继续使用原值，避免迁移 Windows app-data 与凭据命名空间。signed bundle
+  contract 会要求新 identifier 精确匹配，并继续拒绝以 `.app` 结尾的值。本机
+  `--target universal-apple-darwin --bundles app --no-sign` 构建已确认 overlay
+  生效，产物仍为 `arm64` + `x86_64`、最低 macOS 13.0；该切片的前端
+  387/387、Rust 348 passed / 36 ignored 与纯契约 59/59 均通过。本轮没有在本机
+  重建 DMG，必须等待推送后的 Draft PR `desktop-ci` 提供新 identifier 的完整
+  app/DMG 证据。
 - Phase 6B 已把 release/updater 资产检查拆成可单测的纯契约：现有 Windows
   release 继续要求 NSIS，且 manifest 的每个 platform entry 都必须指向本
   release 中的非空资产，内嵌 signature 必须与上传的 `.sig` 原文完全一致。
@@ -406,7 +410,7 @@ Apple Silicon WKWebView 真机记录（2026-08-21）：
 | 系统音频采集需要高权限或受系统版本限制 | 首次授权体验差，兼容范围缩小 | 音频功能与核心应用解耦，默认最少权限 |
 | WKWebView 与 WebView2 行为差异 | 搜索正文回读、challenge 流程不稳定 | 建立平台 bridge 和真实引擎基准，保持超时降级 |
 | 透明窗口和点击穿透存在系统差异 | 核心桌宠体验受损 | Phase 2 独立验收，多显示器真机测试 |
-| `com.mutsumi.app` 以 `.app` 结尾且尚未冻结 macOS bundle identity | 签名后再修改会改变应用身份，影响升级与系统授权连续性 | 已标为“正式签名前处理”；接入 Developer ID 前确定长期 identifier，signed contract 拒绝未冻结或仍以 `.app` 结尾的值 |
+| macOS bundle identity 在签名后发生变化 | 改变应用身份，影响升级与系统授权连续性 | 已冻结 `io.github.yanhanruan.mutsumi`，仅由 macOS overlay 覆盖；signed contract 要求精确匹配 |
 | 签名、notarization、updater 资产组合复杂 | 用户无法安装或升级 | staging 发布先行，发布脚本增加平台资产契约校验 |
 | 平台抽象改动影响 Windows | 现有用户回归 | 保持命令/事件契约稳定，CI 双平台门禁 |
 
@@ -414,15 +418,16 @@ Apple Silicon WKWebView 真机记录（2026-08-21）：
 
 请重点确认：
 
-- [ ] 最低系统版本是否采用 macOS 13。
-- [ ] 是否要求首发同时支持 Intel，还是先 Apple Silicon。
+- [x] 最低系统版本采用 macOS 13。
+- [x] 首发同时支持 Apple Silicon 与 Intel，产出 universal 包。
 - [x] 首个 macOS MVP 的媒体元数据、播放控制与系统音量明确不可用；音频活动仅为
       degraded，且不采用私有 `MediaRemote`。
 - [x] 除 Tauri/Wry 透明窗口所需的限定例外外，系统集成只使用公开 Apple API；媒体能力继续禁止私有框架。
 - [x] Dock 图标常驻，同时保留菜单栏图标。
 - [ ] 是否按 Phase 1 → 2 → 3 → 4 → 5 → 6 的顺序实施。
-- [ ] 是否接受首版通过 GitHub Releases 分发签名/notarized DMG，不进入 Mac App Store。
-- [ ] 正式签名前是否已经冻结长期 bundle identifier，并用 signed bundle contract 校验产物。
+- [x] 首版通过 GitHub Releases 分发签名/notarized DMG，不进入 Mac App Store。
+- [x] 长期 macOS bundle identifier 已冻结为 `io.github.yanhanruan.mutsumi`，
+      signed bundle contract 必须校验精确值。
 
 ## 10. 建议的首个实施切片
 
