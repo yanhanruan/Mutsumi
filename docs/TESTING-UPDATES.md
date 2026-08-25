@@ -144,32 +144,48 @@ against a real binary, which no mock can.
 Run the **staging-release** workflow (GitHub → Actions → staging-release →
 *Run workflow*, choosing any branch). It:
 
-1. runs the unit tests;
-2. builds + signs with the **production** key (repo secrets);
-3. publishes to the rolling **`staging` tag as a prerelease** — prereleases
-   never resolve through `releases/latest/download/…`, so a staging build can
-   never leak to real clients;
-4. runs [`scripts/verify-release-assets.mjs`](../scripts/verify-release-assets.mjs),
-   which fails the workflow unless the release carries exactly one
-   `*-setup.exe`, its `.sig`, and a `latest.json` whose version matches the
-   committed version, whose platform URLs point at actually-uploaded assets,
-   and whose embedded signatures exactly match the uploaded `.sig` contents.
+1. runs a structural preflight for the updater and Apple release secrets before
+   creating or mutating a GitHub Release; certificate/password validity,
+   signing identity and notarization are still proven later on the macOS runner;
+2. runs the unit tests, then builds and updater-signs Windows with the
+   **production** key, creates the
+   rolling **`staging` prerelease**, and passes its release ID to the macOS job.
+   This prerelease never resolves through `releases/latest/download/…`, so it
+   cannot leak to production clients;
+3. builds one `universal-apple-darwin` app/DMG, signs it with Developer ID,
+   notarizes/staples it with App Store Connect credentials, runs the signed
+   bundle gate, uploads it to the same release, and merges macOS entries into
+   the existing `latest.json`;
+4. runs [`scripts/verify-release-assets.mjs`](../scripts/verify-release-assets.mjs)
+   with `--require-macos-universal`, which fails unless the release carries the
+   complete Windows NSIS and universal macOS DMG/updater asset set, with a
+   version-matched manifest whose URLs and embedded signatures exactly match
+   the uploaded assets. Before this gate, a normalizer binds every
+   returned release ID/tag/channel, then binds every `tauri-action@v1` API asset
+   ID to an asset on that same release and rewrites it to the stable public tag
+   download URL; wrong releases, foreign repositories, unknown IDs and
+   ambiguous IDs fail closed.
 
 Step 4 is the guard against the **partial-success** hazard: a release that
 exists (clients see an update) but whose installer/signature/manifest is
 missing or mismatched (every update attempt fails). The same script gates
-production drafts in `release.yml`. Its tested `--require-macos-universal`
-mode additionally requires one DMG and one signed `.app.tar.gz` shared by the
-`darwin-aarch64` and `darwin-x86_64` manifest entries; the flag stays disabled
-until the signed macOS release job is added.
+production drafts in `release.yml`. The staging prerelease is visible while its
+jobs are running, so test clients must not check for updates until the final
+verify job is green; this channel is isolated from production clients. Reset
+errors are no longer treated as “not found”, and the final job also requires the
+rolling `staging` tag to resolve to the workflow source SHA.
 
 The macOS package itself has a separate bundle contract. Unsigned desktop CI
 runs `scripts/verify-macos-bundle.mjs --mode unsigned` to check the universal
-architectures, minimum OS, bundle metadata and DMG integrity. Its dormant
-`--mode signed` adds Developer ID, hardened-runtime, timestamp, entitlement,
-Gatekeeper and stapled-notarization checks. The macOS-only identifier is now
+architectures, minimum OS, bundle metadata and DMG integrity. Signed staging and
+production jobs invoke `--mode signed`, adding Developer ID, hardened-runtime,
+timestamp, entitlement, Gatekeeper and stapled-notarization checks. The
+macOS-only identifier is now
 frozen as `io.github.yanhanruan.mutsumi`; signed mode must require that exact
 value while the Windows base identifier and data namespace remain unchanged.
+The wiring and pure contracts are automated, but the signed positive case stays
+pending until the Apple secrets are installed and a credentialed staging run
+passes; unsigned CI is not a substitute.
 
 The production post-publish healer ignores this prerelease. The rolling channel
 must remain attached to the literal `staging` tag rather than being rebound to
@@ -228,7 +244,8 @@ whenever the updater config changes) is the readiness bar.
 | 8 | Incomplete or signature-mismatched `latest.json` can't ship a broken update | pure contract tests + `verify-release-assets.mjs` |
 | 9 | A Windows smoke test has run | Layer 4, step 3–4 |
 | 10 | The unsigned macOS universal app/DMG satisfies its bundle contract | `desktop-ci.yml` + `verify-macos-bundle.mjs --mode unsigned` |
-| 11 | A signed macOS app/DMG passes Developer ID, Gatekeeper and stapling checks | Formal-signing gate: `verify-macos-bundle.mjs --mode signed` (not enabled yet) |
+| 11 | A signed macOS app/DMG passes Developer ID, Gatekeeper and stapling checks | Pending first credentialed staging run; workflow invokes `verify-macos-bundle.mjs --mode signed` |
+| 12 | One manifest safely contains Windows and both universal macOS updater entries | Workflow contract tests + final `--require-macos-universal` release gate; credentialed run pending |
 
 The production flow in [`RELEASING.md`](RELEASING.md) enforces the gate:
 releases are created as **drafts**, verified automatically, smoke-tested via

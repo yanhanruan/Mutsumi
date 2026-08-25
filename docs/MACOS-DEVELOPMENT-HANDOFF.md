@@ -97,8 +97,9 @@ reCAPTCHA；它同样不会随 Git 同步。如确有需要，应通过安全渠
   `MediaRemote` 等私有媒体 API。
 - Phase 5：About capability 展示、三语平台差异文案，以及设置/关于/更新窗口
   的 macOS 自绘标题栏。
-- Phase 6A–6C：Windows/macOS 桌面 CI、universal unsigned bundle contract、
-  updater/release asset contract，以及尚未接线的 signed bundle gate。
+- Phase 6A–6D：Windows/macOS 桌面 CI、universal unsigned/signed bundle contract、
+  updater/release asset contract，以及已接线但尚无真实凭据正例的
+  signed/notarized staging 与 production workflow。
 
 最近一次完整 app/DMG 本机基线（`4ed1d0d`）：
 
@@ -118,17 +119,23 @@ reCAPTCHA；它同样不会随 Git 同步。如确有需要，应通过安全渠
 contract，以上 Vue、纯契约、前端构建、Rust 和 universal app/DMG 结果保持通过。
 当前 identifier 切片又通过前端 387/387、Rust 348 passed / 36 ignored 与纯契约
 59/59，并用 app-only universal 构建确认新 identifier、macOS 13.0 和双架构；
-本轮本机没有重新生成 DMG，必须由该切片推送后的 Draft PR `desktop-ci` 重建
-app/DMG 后，才能把新 identifier 的完整 unsigned bundle 证据记为通过。
+随后 Draft PR `desktop-ci` 已在 clean runner 重建 app/DMG 并通过完整 unsigned
+bundle contract。
 
 Draft PR [#18](https://github.com/yanhanruan/Mutsumi/pull/18) 已创建；最终证据锚点
-`d54d0c5` 的
-[`desktop-ci` run 32815861642](https://github.com/yanhanruan/Mutsumi/actions/runs/32815861642)
-在 GitHub-hosted runner 上完整通过：Windows regression 2 分 41 秒，macOS
-unsigned universal bundle 7 分 28 秒。后者重新构建 app/DMG、通过 bundle
-contract 并上传七天保留的未签名 artifact。checkout/setup-node/upload-artifact
-已升级到官方 v7，首轮 run 的 Node.js 20 Action 弃用提示在最终 run 中消失。
-唯一剩余 annotation 是已知的 identifier 正式签名前门禁。
+`d0cec0a` 的
+[`desktop-ci` run 32822830132](https://github.com/yanhanruan/Mutsumi/actions/runs/32822830132)
+在 GitHub-hosted runner 上完整通过：Windows regression 2 分 39 秒，macOS
+unsigned universal bundle 10 分 45 秒。后者明确验证新 identifier、macOS 13.0、
+双架构和 DMG 完整性，上传七天 artifact `9554071608`；annotations 为 0。
+当前 signed workflow 切片已在本机通过 workflow YAML、三个 release shell 脚本
+语法、前端 387/387、production build 与纯契约 76/76；两个 workflow 会先做
+缺失/基础格式 secret preflight，再进入 Windows → macOS → final release jobs。
+final job 会先验证 release ID/tag/channel，再把 `tauri-action@v1` API asset ID
+绑定到同一 release 后重写为受控 tag 的公开下载 URL；staging reset 失败不再被吞掉，最终 tag 还必须指向 workflow
+source SHA，且两个平台在 signed workflow 内均运行 Rust tests。这些结果只证明
+接线和 fail-closed 结构，不代表证书密码、Developer ID 身份或真实 notarization
+服务通过。
 
 Rosetta 结果只证明 Intel slice 能在 Apple Silicon 转译环境中运行，不替代真实
 Intel Mac 验收。
@@ -201,9 +208,10 @@ Draft PR 与首次双平台远程 CI 已完成。后续优先级建议如下；�
    不让非阻塞人工项中断可自动完成的开发，但仍不得据此宣称发布门禁通过。
 2. 有真实 Intel Mac 时，下载同一 universal 构建验证启动、单实例与正常退出；
    没有真机就继续把它保留为待验收，不能用 Rosetta 冒充完成。
-3. macOS identifier 已冻结为 `io.github.yanhanruan.mutsumi`；下一步接入
-   Developer ID、notarization、stapling 和 macOS updater/release workflow，
-   但没有凭据时不得伪造 signed 正例。
+3. signed/notarized staging 与 production workflow 已接线；自动化工作完成后，
+   统一配置 Developer ID/App Store Connect/updater repo secrets，先运行 rolling
+   staging，再用刚签出的产物完成 Gatekeeper、安装和跨版本更新人工验收。没有
+   凭据时不得伪造 signed 正例，也不得触发 production tag。
 
 单纯 push `feat/macos-adaptation` 不会通过 workflow 的 `push` 入口触发
 `desktop-ci`，因为该入口只监听 `main`；当前 Draft PR #18 会让后续相关路径变更
@@ -227,12 +235,14 @@ Draft PR 与首次双平台远程 CI 已完成。后续优先级建议如下；�
 ## 7. 已知边界，不要误判为已完成
 
 - macOS 产物目前是未签名 CI baseline，不可对用户分发。
-- `release.yml` 和 `staging-release.yml` 目前仍是 Windows-only。
+- `release.yml` 和 `staging-release.yml` 已包含 secret preflight 以及
+  Windows → macOS → final gate，但尚未使用真实 Apple 凭据执行；preflight 和
+  静态契约通过都不等于签名/notarization 通过。
 - 长期 macOS identifier 已冻结为 `io.github.yanhanruan.mutsumi`，仅写在
   macOS overlay；根配置的 `com.mutsumi.app` 保留给 Windows，避免迁移现有
   app-data 与凭据命名空间。后续不得再把二者误当成同一个跨平台 identifier。
-- signed bundle contract 已写好，但没有真实 Developer ID/notarized 正例；启用
-  workflow 时必须用刚签出的 Mutsumi 产物跑完整 gate。
+- signed bundle contract 已接到两个 workflow，但没有真实 Developer ID/notarized
+  正例；首次 credentialed staging 必须用刚签出的 Mutsumi 产物跑完整 gate。
 - `macos-private-api` 例外只允许 Tauri/Wry 的透明 WKWebView，且只面向
   官网/GitHub 直分发；不得扩大到 `MediaRemote` 等私有系统能力。
 - 当前 singleton refocus 在回调后约 1 秒有界重试。原生与 Rosetta smoke 已通过；

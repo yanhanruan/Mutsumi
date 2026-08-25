@@ -133,6 +133,176 @@ function releaseAssetName(platform, url, tag, expectedRepository) {
   return parts[5]
 }
 
+/**
+ * Rewrite tauri-action v1 GitHub API asset URLs to stable public release URLs.
+ *
+ * v1 identifies an uploaded asset by its API ID. Resolve that ID only against
+ * the assets on the release being normalized, then construct the public URL
+ * from the workflow-controlled tag and the authoritative asset name. Do not
+ * trust browser_download_url here: draft releases can expose an untagged
+ * placeholder until publication.
+ */
+export function normalizeUpdaterAssetUrls({
+  manifest,
+  assets,
+  tag,
+  expectedRepository,
+}) {
+  if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) {
+    fail('latest.json must be an object')
+  }
+  const platforms = manifest.platforms
+  if (!platforms || typeof platforms !== 'object' || Array.isArray(platforms)) {
+    fail('latest.json.platforms must be an object')
+  }
+  if (!Array.isArray(assets)) fail('release assets must be an array')
+  if (typeof tag !== 'string' || !tag || tag.includes('/') || /[\x00-\x1f\x7f]/.test(tag)) {
+    fail(`release tag is not safe for a public download URL: "${tag}"`)
+  }
+
+  const repositoryParts = expectedRepository?.split('/') ?? []
+  if (repositoryParts.length !== 2 || repositoryParts.some((part) => !part)) {
+    fail(`expected repository must use owner/repo format, found "${expectedRepository}"`)
+  }
+  const [owner, repository] = repositoryParts
+
+  const assetsById = new Map()
+  for (const asset of assets) {
+    if (!Number.isSafeInteger(asset?.id) || asset.id <= 0) {
+      fail(`release asset has an invalid API id: ${asset?.id}`)
+    }
+    if (assetsById.has(asset.id)) fail(`release contains duplicate asset API id ${asset.id}`)
+    if (typeof asset.name !== 'string' || !asset.name || asset.name.includes('/')) {
+      fail(`release asset ${asset.id} has an invalid name`)
+    }
+    assetsById.set(asset.id, asset)
+  }
+
+  let rewrittenCount = 0
+  const normalizedPlatforms = {}
+  for (const [platform, entry] of Object.entries(platforms)) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      fail(`${platform} entry must be an object`)
+    }
+    if (typeof entry.url !== 'string' || !entry.url) fail(`${platform}.url is missing`)
+
+    let parsed
+    try {
+      parsed = new URL(entry.url)
+    } catch {
+      fail(`${platform}.url is not a valid URL: ${entry.url}`)
+    }
+
+    let url = entry.url
+    if (parsed.hostname === 'github.com') {
+      releaseAssetName(platform, url, tag, expectedRepository)
+    } else {
+      if (
+        parsed.protocol !== 'https:' ||
+        parsed.hostname !== 'api.github.com' ||
+        parsed.port ||
+        parsed.username ||
+        parsed.password ||
+        parsed.search ||
+        parsed.hash
+      ) {
+        fail(`${platform}.url is neither a canonical release URL nor a GitHub asset API URL: ${entry.url}`)
+      }
+
+      const encodedParts = parsed.pathname.split('/')
+      if (
+        encodedParts.length !== 7 ||
+        encodedParts[0] !== '' ||
+        encodedParts.slice(1).some((part) => part.length === 0)
+      ) {
+        fail(`${platform}.url is not a canonical GitHub asset API path: ${entry.url}`)
+      }
+
+      let parts
+      try {
+        parts = encodedParts.slice(1).map(decodeURIComponent)
+      } catch {
+        fail(`${platform}.url has an invalid encoded API path: ${entry.url}`)
+      }
+      if (
+        parts[0] !== 'repos' ||
+        parts[1].toLowerCase() !== owner.toLowerCase() ||
+        parts[2].toLowerCase() !== repository.toLowerCase() ||
+        parts[3] !== 'releases' ||
+        parts[4] !== 'assets' ||
+        !/^\d+$/.test(parts[5]) ||
+        parts.length !== 6
+      ) {
+        fail(`${platform}.url is not a ${expectedRepository} GitHub asset API URL: ${entry.url}`)
+      }
+
+      const assetId = Number(parts[5])
+      if (!Number.isSafeInteger(assetId) || assetId <= 0) {
+        fail(`${platform}.url contains an invalid release asset API id: ${parts[5]}`)
+      }
+      const asset = assetsById.get(assetId)
+      if (!asset) fail(`${platform}.url references unknown release asset API id ${assetId}`)
+      url = `https://github.com/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}` +
+        `/releases/download/${encodeURIComponent(tag)}/${encodeURIComponent(asset.name)}`
+      rewrittenCount += 1
+    }
+
+    normalizedPlatforms[platform] = { ...entry, url }
+  }
+
+  if (Object.keys(normalizedPlatforms).length === 0) {
+    fail('latest.json.platforms has no updater entries')
+  }
+
+  return {
+    manifest: { ...manifest, platforms: normalizedPlatforms },
+    rewrittenCount,
+  }
+}
+
+/** Guard destructive latest.json replacement against a stale/wrong release. */
+export function validateManifestNormalizationTarget({
+  release,
+  releaseId,
+  tag,
+  channel,
+}) {
+  if (!release || typeof release !== 'object' || Array.isArray(release)) {
+    fail('GitHub release response must be an object')
+  }
+  if (!Number.isSafeInteger(releaseId) || releaseId <= 0 || release.id !== releaseId) {
+    fail(`GitHub release id ${release.id} does not match requested release ${releaseId}`)
+  }
+
+  let expectedDraft
+  let expectedPrerelease
+  if (channel === 'production') {
+    if (!/^v\d+\.\d+\.\d+$/.test(tag)) {
+      fail(`production manifest normalization requires a vX.Y.Z tag, found "${tag}"`)
+    }
+    expectedDraft = true
+    expectedPrerelease = false
+  } else if (channel === 'staging') {
+    if (tag !== 'staging') {
+      fail(`staging manifest normalization requires the staging tag, found "${tag}"`)
+    }
+    expectedDraft = false
+    expectedPrerelease = true
+  } else {
+    fail(`manifest normalization channel must be production or staging, found "${channel}"`)
+  }
+
+  if (release.tag_name !== tag) {
+    fail(`release ${releaseId} belongs to tag "${release.tag_name}", not "${tag}"`)
+  }
+  if (release.draft !== expectedDraft || release.prerelease !== expectedPrerelease) {
+    fail(
+      `release ${releaseId} has unexpected channel state ` +
+      `(draft=${release.draft}, prerelease=${release.prerelease})`,
+    )
+  }
+}
+
 function signatureText(signatureTexts, name) {
   const value = signatureTexts instanceof Map
     ? signatureTexts.get(name)
@@ -146,10 +316,11 @@ function signatureText(signatureTexts, name) {
 /**
  * Validate one GitHub Release payload and its downloaded signature contents.
  *
- * The current production release remains Windows-only. Passing
- * requireMacosUniversal enables the future Phase 6 gate: one DMG for direct
- * installation plus one signed universal .app.tar.gz referenced by both
- * default macOS updater architecture keys.
+ * The default remains the legacy Windows contract for callers that explicitly
+ * validate old releases. Current staging and production workflows pass
+ * requireMacosUniversal to require one DMG for direct installation plus one
+ * signed universal .app.tar.gz referenced by both default macOS updater
+ * architecture keys.
  */
 export function validateReleaseContract({
   tag,

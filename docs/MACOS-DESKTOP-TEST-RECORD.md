@@ -2,11 +2,11 @@
 
 > 测试窗口：2026-08-23 至 2026-08-25
 >
-> 记录更新：2026-08-25（本机/远程自动化复验与产品 pending 决策）
+> 记录更新：2026-08-25（本机/远程自动化复验、identifier 证据与产品 pending 决策）
 >
 > 分支：`feat/macos-adaptation`
 >
-> 当前证据锚点：`d54d0c5 ci: upgrade official actions to Node 24`
+> 当前 unsigned 证据锚点：`d0cec0a fix(macOS): freeze release bundle identifier`
 >
 > 证据范围：未签名开发产物；不代表可分发、已签名或已 notarize
 
@@ -37,8 +37,8 @@
 | --- | --- | --- |
 | Vue/Vitest | 通过 | 25 个测试文件，387 项通过 |
 | 前端生产构建 | 通过 | `vue-tsc -b` 与 Vite production build 完成 |
-| Rust 测试 | 通过 | 347 项通过，36 项按设计 ignored |
-| 发布、bundle、生命周期纯契约 | 通过 | 57/57；包含本轮新增请求 slice 执行预检 |
+| Rust 测试 | 通过 | 348 项通过，36 项按设计 ignored |
+| 发布、bundle、生命周期纯契约 | 通过 | 59/59；包含 macOS-only identifier 兼容契约 |
 | universal app | 通过 | Mach-O 恰好包含 `arm64` 与 `x86_64` |
 | 最低系统版本 | 通过 | `LSMinimumSystemVersion=13.0` |
 | Dock 前台资格 | 通过 | `APPL`，非 `LSUIElement`，非 `LSBackgroundOnly` |
@@ -68,6 +68,15 @@ bundle 内容失败。Draft PR #18 的最终远程 `macos-latest` job 已独立�
 此前首轮远程运行暴露的 Node.js 20 Action 弃用提示不再出现。最终 run 唯一
 annotation 是已知的 `com.mutsumi.app` identifier 正式签名前门禁，不影响
 unsigned CI，也不代表该 identifier 已获准用于签名发布。
+
+identifier 冻结提交 `d0cec0a` 的
+[`desktop-ci` run 32822830132](https://github.com/yanhanruan/Mutsumi/actions/runs/32822830132)
+随后完整通过：Windows regression 2 分 39 秒，macOS unsigned universal job
+10 分 45 秒。后者在 clean GitHub-hosted runner 重新构建 app/DMG；bundle
+contract 明确输出 `io.github.yanhanruan.mutsumi`、`arm64` + `x86_64`、macOS
+13.0、Dock 前台资格及 DMG 完整性。job annotations 为 0；七天 artifact ID
+`9554071608` 上传成功。该证据关闭旧 identifier warning，但仍然只代表 unsigned
+CI，不代表 Developer ID 签名、Gatekeeper 或 notarization 已通过。
 
 ## 3. macOS 原生探针
 

@@ -2,8 +2,9 @@
 /**
  * Inspect a built universal macOS bundle with public Apple command-line tools.
  *
- * unsigned mode is used by desktop CI today. signed mode is intentionally
- * dormant until the bundle identifier and Developer ID credentials are ready.
+ * unsigned mode is used by desktop CI. signed mode is wired into the
+ * credentialed staging/production workflows and remains pending its first
+ * real Developer ID/notarization positive run.
  */
 
 import { constants, accessSync, lstatSync, readdirSync } from 'node:fs'

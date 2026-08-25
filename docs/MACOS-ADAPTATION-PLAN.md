@@ -89,8 +89,9 @@ Mutsumi 当前是以 Windows 为唯一发布平台设计的 Tauri 2 桌面应用
 - Phase 6A 已配置桌面双平台 CI 门禁：Windows 运行前后端回归，macOS
   同时安装 `aarch64-apple-darwin` / `x86_64-apple-darwin` 目标，生成未签名
   app/DMG，并校验 Mach-O 双架构、macOS 13.0 最低版本与 Dock 前台资格。
-  Draft PR #18 的 GitHub-hosted Windows/macOS job 已完整通过；Developer ID、
-  notarization、stapling 和 release/updater 资产聚合尚未接入。
+  Draft PR #18 的 GitHub-hosted Windows/macOS job 已完整通过；签名/notarization
+  staging 与 production workflow、updater 资产聚合和静态契约已经接入，但首个
+  Developer ID/App Store Connect 凭据运行与 signed 正例仍待完成。
 
 ## 5. 总体技术方案
 
@@ -334,9 +335,7 @@ Apple Silicon WKWebView 真机记录（2026-08-21）：
   upload-artifact 均升级到官方 v7，首轮 run 暴露的 Node.js 20 Action 弃用
   提示已消失。详细环境、命令、受控沙箱失败说明和仍待人工矩阵见
   [`MACOS-DESKTOP-TEST-RECORD.md`](MACOS-DESKTOP-TEST-RECORD.md)。Developer ID
-  签名、notarization/stapling、Gatekeeper 和真实 Intel 启动仍待完成。现有
-  staging/release workflow 继续保持 Windows-only，直到多平台 updater manifest
-  能作为一个整体通过资产门禁。
+  签名、notarization/stapling、Gatekeeper 和真实 Intel 启动仍待完成。
 - 本机原生 bundle 验证发现原 identifier `com.mutsumi.app` 以 `.app` 结尾，
   Tauri 明确提示可能与 macOS bundle 扩展冲突。产品已在正式签名前冻结
   `io.github.yanhanruan.mutsumi`，并仅通过 `tauri.macos.conf.json` 覆盖 macOS；
@@ -344,23 +343,37 @@ Apple Silicon WKWebView 真机记录（2026-08-21）：
   contract 会要求新 identifier 精确匹配，并继续拒绝以 `.app` 结尾的值。本机
   `--target universal-apple-darwin --bundles app --no-sign` 构建已确认 overlay
   生效，产物仍为 `arm64` + `x86_64`、最低 macOS 13.0；该切片的前端
-  387/387、Rust 348 passed / 36 ignored 与纯契约 59/59 均通过。本轮没有在本机
-  重建 DMG，必须等待推送后的 Draft PR `desktop-ci` 提供新 identifier 的完整
-  app/DMG 证据。
+  387/387、Rust 348 passed / 36 ignored 与纯契约 59/59 均通过。随后 Draft PR
+  run 32822830132 已重新构建 app/DMG，contract 明确输出新 identifier、双架构、
+  macOS 13.0 与 DMG 完整性，且 annotations 为 0。
 - Phase 6B 已把 release/updater 资产检查拆成可单测的纯契约：现有 Windows
   release 继续要求 NSIS，且 manifest 的每个 platform entry 都必须指向本
   release 中的非空资产，内嵌 signature 必须与上传的 `.sig` 原文完全一致。
   `--require-macos-universal` 门禁额外要求唯一 DMG，以及同时供
   `darwin-aarch64` / `darwin-x86_64` 使用的同一个签名 `.app.tar.gz`；该开关
-  会在签名 macOS workflow 接入时启用，当前 Windows-only release 不会被
+  已在 staging/production 最终 job 启用，任何单平台或部分上传都不能被
   伪装成双平台完成。post-publish gate 已改为验证所有唯一 updater URL，
   并明确跳过 draft/prerelease，避免把 rolling `staging` 错绑到生产版本 tag。
 - Phase 6C 已把 app/DMG 本体检查拆成可单测的纯契约与 macOS CLI。当前
-  `desktop-ci` 启用 unsigned 模式；future signed 模式已经定义 Developer ID
-  Application 签名、hardened runtime、安全时间戳、禁止
+  `desktop-ci` 启用 unsigned 模式；staging/production 已接入 signed 模式，定义
+  Developer ID Application 签名、hardened runtime、安全时间戳、禁止
   `get-task-allow`、app/DMG Gatekeeper 接受以及 DMG stapling 门禁，但在
-  identifier、证书与 notarization 凭据就绪前不会启用。macOS 配置显式固定
-  `hardenedRuntime: true`，当前无需特殊 entitlement。
+  Developer ID 与 App Store Connect secrets 配好、首个 credentialed staging
+  运行通过前不能标记正例。macOS 配置显式固定 `hardenedRuntime: true`，当前
+  无需特殊 entitlement。
+- Phase 6D 已将 production 与 rolling staging 拆成 secret preflight，再执行
+  Windows → macOS → final gate 三段顺序 release job。preflight 只在创建 release
+  前拒绝缺失或基础格式错误的凭据，证书身份与 notarization 仍由 macOS job 实证；
+  Windows 先创建 release 并生成 NSIS manifest；macOS 通过同一
+  release ID 上传签名/notarized universal 资产，`tauri-action@v1` 合并平台项并
+  保留 canonical notes；final job 将 v1 的 GitHub API asset ID 严格映射为同一
+  release ID/tag/channel、受控 tag 的公开下载 URL，再要求完整 Windows + universal macOS
+  contract。staging reset 不再吞掉删除失败，最终还会校验 rolling tag 指向本次
+  workflow SHA。Windows/macOS 两边均在 signed workflow 内运行 Rust tests。
+  证书和 `.p8` 只写入 `RUNNER_TEMP`，构建后以 `if: always()` best-effort 清理；
+  runner 被强制终止时不能宣称 cleanup step 必然执行。静态 workflow 契约可
+  自动验证结构，当前发布/bundle/生命周期/workflow 纯契约为 76/76；真实 Apple
+  凭据、签名身份和 notarization 服务结果不能伪造。
 
 验收：
 

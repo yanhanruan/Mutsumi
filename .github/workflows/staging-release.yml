@@ -1,15 +1,6 @@
-# Staging release: builds the branch you dispatch it from and publishes it to
-# the rolling `staging` tag as a PRERELEASE, then verifies the release assets
-# and updater-manifest contract (scripts/verify-release-assets.mjs).
-#
-# Safety: `releases/latest/download/…` (the production updater endpoint) never
-# resolves to prereleases, so a staging build can NOT leak to real clients.
-# Clients built with src-tauri/tauri.github-staging.conf.json point at the
-# stable staging URL instead:
-#   https://github.com/yanhanruan/Mutsumi/releases/download/staging/latest.json
-#
-# This is Layer 3 of the update test chain, and the update source for the
-# Layer-4 real-upgrade runbook — see docs/TESTING-UPDATES.md.
+# Rolling staging release: Windows creates the `staging` prerelease first,
+# macOS appends signed/notarized universal assets and merges its updater entries,
+# then a final job validates the complete cross-platform release contract.
 name: staging-release
 
 on:
@@ -18,9 +9,36 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: staging-release
+  cancel-in-progress: false
+
 jobs:
-  staging:
+  preflight:
+    name: Release secret preflight
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Verify required updater and Apple secrets
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+        run: bash scripts/verify-release-secrets.sh
+
+  windows:
+    name: Windows staging assets
+    needs: preflight
     runs-on: windows-latest
+    outputs:
+      release_id: ${{ steps.tauri.outputs.releaseId }}
+      version: ${{ steps.ver.outputs.version }}
     steps:
       - uses: actions/checkout@v7
 
@@ -43,6 +61,9 @@ jobs:
         with:
           workspaces: './src-tauri -> target'
 
+      - name: Rust tests (Windows staging gate)
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
       - name: Read committed version
         id: ver
         shell: bash
@@ -53,10 +74,51 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release delete staging --yes --cleanup-tag --repo "$GITHUB_REPOSITORY" || true
-          git push origin :refs/tags/staging || true
+          release_ids="$(
+            gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+              --jq '.[] | select(.tag_name == "staging") | .id'
+          )"
+          release_count="$(printf '%s\n' "$release_ids" | awk 'NF { count++ } END { print count + 0 }')"
+          if [ "$release_count" -gt 1 ]; then
+            echo "::error::Found more than one release bound to the staging tag"
+            exit 1
+          fi
+          if [ "$release_count" -eq 1 ]; then
+            if ! [[ "$release_ids" =~ ^[0-9]+$ ]]; then
+              echo "::error::GitHub returned an invalid staging release ID"
+              exit 1
+            fi
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$release_ids"
+          fi
 
-      - uses: tauri-apps/tauri-action@v0
+          remote_tag="$(git ls-remote --tags origin refs/tags/staging)"
+          if [ -n "$remote_tag" ]; then
+            git push origin :refs/tags/staging
+          fi
+
+          remaining_release=""
+          for attempt in 1 2 3 4 5 6; do
+            remaining_release="$(
+              gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+                --jq '.[] | select(.tag_name == "staging") | .id'
+            )"
+            if [ -z "$remaining_release" ]; then
+              break
+            fi
+            if [ "$attempt" -lt 6 ]; then
+              echo "Waiting for staging release deletion to become visible ($attempt/6)"
+              sleep 3
+            fi
+          done
+          remaining_tag="$(git ls-remote --tags origin refs/tags/staging)"
+          if [ -n "$remaining_release" ] || [ -n "$remaining_tag" ]; then
+            echo "::error::Rolling staging release/tag reset did not complete"
+            exit 1
+          fi
+
+      - name: Build signed Windows assets and create staging prerelease
+        id: tauri
+        uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -73,10 +135,120 @@ jobs:
             See docs/TESTING-UPDATES.md for the upgrade-test runbook.
           releaseDraft: false
           prerelease: true
-          includeUpdaterJson: true
+          uploadUpdaterJson: true
+          updaterJsonPreferNsis: true
 
-      - name: Verify release assets + updater manifest contract
+  macos:
+    name: Signed and notarized universal macOS staging assets
+    needs: windows
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Rust tests (native macOS staging gate)
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Import Developer ID and App Store Connect credentials
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+        run: bash scripts/setup-macos-signing.sh
+
+      - name: Build, sign, notarize and upload universal macOS assets
+        id: tauri
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+        with:
+          releaseId: ${{ needs.windows.outputs.release_id }}
+          tagName: staging
+          releaseBody: |
+            ⚠️ Rolling staging build for update testing. Not for end users.
+
+            Version: v${{ needs.windows.outputs.version }}
+            Source: `${{ github.ref_name }}` @ ${{ github.sha }}
+
+            See docs/TESTING-UPDATES.md for the upgrade-test runbook.
+          releaseDraft: false
+          prerelease: true
+          uploadUpdaterJson: true
+          args: --target universal-apple-darwin
+
+      - name: Verify signed, hardened and notarized macOS bundle
+        shell: bash
+        run: |
+          node scripts/verify-macos-bundle.mjs \
+            --bundle-dir src-tauri/target/universal-apple-darwin/release/bundle \
+            --mode signed \
+            --expected-identifier io.github.yanhanruan.mutsumi \
+            --expected-minimum-system-version 13.0
+
+      - name: Remove ephemeral macOS signing material
+        if: always()
+        shell: bash
+        run: bash scripts/cleanup-macos-signing.sh
+
+  verify:
+    name: Verify complete staging prerelease
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Verify the rolling tag points at this workflow source
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/staging" --jq '.object.sha')"
+          if [ "$tag_sha" != "$GITHUB_SHA" ]; then
+            echo "::error::staging tag points at $tag_sha instead of workflow source $GITHUB_SHA"
+            exit 1
+          fi
+
+      - name: Normalize updater URLs to public release downloads
         shell: bash
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: node scripts/verify-release-assets.mjs staging --expect-version "${{ steps.ver.outputs.version }}"
+        run: |
+          node scripts/normalize-release-manifest.mjs staging \
+            --release-id "${{ needs.windows.outputs.release_id }}" \
+            --channel staging
+
+      - name: Verify Windows + universal macOS staging assets
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/verify-release-assets.mjs staging \
+            --expect-version "${{ needs.windows.outputs.version }}" \
+            --require-macos-universal

@@ -3,9 +3,11 @@ import test from 'node:test'
 
 import {
   collectUpdaterDownloads,
+  normalizeUpdaterAssetUrls,
   postPublishSkipReason,
   productionTagForVersion,
   ReleaseContractError,
+  validateManifestNormalizationTarget,
   validateReleaseContract,
 } from './release-contract.mjs'
 
@@ -64,6 +66,133 @@ function releaseFixture({ tag = 'v1.5.3', macos = false } = {}) {
     manifest: { version: '1.5.3', platforms },
   }
 }
+
+function apiUrlFixture({ tag = 'v1.5.3' } = {}) {
+  const assets = [
+    { id: 101, name: 'mutsumi 1.5.3 x64-setup.exe', size: 12_000_000 },
+    { id: 102, name: 'mutsumi_1.5.3_universal.app.tar.gz', size: 14_000_000 },
+    { id: 103, name: 'latest.json', size: 800 },
+  ]
+  const manifest = {
+    version: '1.5.3',
+    platforms: {
+      'windows-x86_64': {
+        signature: WINDOWS_SIGNATURE,
+        url: 'https://api.github.com/repos/yanhanruan/Mutsumi/releases/assets/101',
+      },
+      'darwin-aarch64': {
+        signature: MACOS_SIGNATURE,
+        url: 'https://api.github.com/repos/yanhanruan/Mutsumi/releases/assets/102',
+      },
+      'darwin-x86_64': {
+        signature: MACOS_SIGNATURE,
+        url: 'https://api.github.com/repos/yanhanruan/Mutsumi/releases/assets/102',
+      },
+    },
+  }
+  return { assets, manifest, tag, expectedRepository: 'yanhanruan/Mutsumi' }
+}
+
+test('normalizes tauri-action v1 API asset IDs to encoded public release URLs', () => {
+  const fixture = apiUrlFixture()
+  const normalized = normalizeUpdaterAssetUrls(fixture)
+
+  assert.equal(normalized.rewrittenCount, 3)
+  assert.equal(
+    normalized.manifest.platforms['windows-x86_64'].url,
+    'https://github.com/yanhanruan/Mutsumi/releases/download/v1.5.3/mutsumi%201.5.3%20x64-setup.exe',
+  )
+  assert.equal(
+    normalized.manifest.platforms['darwin-aarch64'].url,
+    'https://github.com/yanhanruan/Mutsumi/releases/download/v1.5.3/mutsumi_1.5.3_universal.app.tar.gz',
+  )
+  assert.match(fixture.manifest.platforms['windows-x86_64'].url, /^https:\/\/api\.github\.com/)
+  assert.equal(
+    collectUpdaterDownloads(normalized.manifest, {
+      tag: fixture.tag,
+      expectedRepository: fixture.expectedRepository,
+    }).length,
+    2,
+  )
+})
+
+test('normalization is idempotent and preserves the rolling staging tag', () => {
+  const fixture = apiUrlFixture({ tag: 'staging' })
+  const first = normalizeUpdaterAssetUrls(fixture)
+  const second = normalizeUpdaterAssetUrls({ ...fixture, manifest: first.manifest })
+
+  assert.equal(first.rewrittenCount, 3)
+  assert.match(first.manifest.platforms['windows-x86_64'].url, /\/releases\/download\/staging\//)
+  assert.equal(second.rewrittenCount, 0)
+  assert.deepEqual(second.manifest, first.manifest)
+})
+
+test('normalization rejects a foreign API repository', () => {
+  const fixture = apiUrlFixture()
+  fixture.manifest.platforms['windows-x86_64'].url =
+    'https://api.github.com/repos/someone/Else/releases/assets/101'
+
+  assert.throws(() => normalizeUpdaterAssetUrls(fixture), /is not a yanhanruan\/Mutsumi GitHub asset API URL/)
+})
+
+test('normalization rejects an API asset ID outside the release', () => {
+  const fixture = apiUrlFixture()
+  fixture.manifest.platforms['windows-x86_64'].url =
+    'https://api.github.com/repos/yanhanruan/Mutsumi/releases/assets/999'
+
+  assert.throws(() => normalizeUpdaterAssetUrls(fixture), /unknown release asset API id 999/)
+})
+
+test('normalization rejects duplicate release asset API IDs', () => {
+  const fixture = apiUrlFixture()
+  fixture.assets.push({ id: 101, name: 'duplicate.exe', size: 100 })
+
+  assert.throws(() => normalizeUpdaterAssetUrls(fixture), /duplicate asset API id 101/)
+})
+
+test('normalization target guard accepts only the expected release channel', () => {
+  assert.doesNotThrow(() => validateManifestNormalizationTarget({
+    release: { id: 101, tag_name: 'v1.5.3', draft: true, prerelease: false },
+    releaseId: 101,
+    tag: 'v1.5.3',
+    channel: 'production',
+  }))
+  assert.doesNotThrow(() => validateManifestNormalizationTarget({
+    release: { id: 102, tag_name: 'staging', draft: false, prerelease: true },
+    releaseId: 102,
+    tag: 'staging',
+    channel: 'staging',
+  }))
+})
+
+test('normalization target guard rejects a wrong id, tag or release state', () => {
+  const production = {
+    release: { id: 101, tag_name: 'v1.5.3', draft: true, prerelease: false },
+    releaseId: 101,
+    tag: 'v1.5.3',
+    channel: 'production',
+  }
+
+  assert.throws(
+    () => validateManifestNormalizationTarget({ ...production, releaseId: 999 }),
+    /does not match requested release/,
+  )
+  assert.throws(
+    () => validateManifestNormalizationTarget({ ...production, tag: 'v1.5.4' }),
+    /belongs to tag "v1.5.3", not "v1.5.4"/,
+  )
+  assert.throws(
+    () => validateManifestNormalizationTarget({
+      ...production,
+      release: { ...production.release, draft: false },
+    }),
+    /unexpected channel state/,
+  )
+  assert.throws(
+    () => validateManifestNormalizationTarget({ ...production, channel: 'staging' }),
+    /requires the staging tag/,
+  )
+})
 
 test('accepts the existing signed Windows release contract', () => {
   const result = validateReleaseContract(releaseFixture())

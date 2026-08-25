@@ -1,21 +1,7 @@
-# Auto-release (gated): on a pushed `vX.Y.Z` tag, run the unit tests, build +
-# sign the Windows installer, and create a DRAFT GitHub Release with the NSIS
-# `.exe`, its `.sig`, and the updater manifest (`latest.json`) — then verify
-# asset completeness + the manifest contract (scripts/verify-release-assets.mjs).
-#
-# The draft is NOT visible to the in-app updater (which reads
-# `releases/latest/download/latest.json` — drafts and prereleases never resolve
-# there). Publishing is a deliberate manual step in the GitHub UI, taken after
-# the staging upgrade smoke test passes — see docs/RELEASING.md and
-# docs/TESTING-UPDATES.md.
-#
-# One-time setup required before the first signed release (see docs/RELEASING.md):
-#   - repo secrets TAURI_SIGNING_PRIVATE_KEY + TAURI_SIGNING_PRIVATE_KEY_PASSWORD
-#   - the matching public key in src-tauri/tauri.conf.json -> plugins.updater.pubkey
-#
-# Release ritual:  npm run release X.Y.Z  ->  commit  ->  git tag -a vX.Y.Z
-#   ->  git push --follow-tags  ->  CI drafts + verifies  ->  upgrade smoke test
-#   ->  click "Publish release" on GitHub
+# Auto-release (gated): a pushed `vX.Y.Z` tag builds signed Windows and
+# signed/notarized universal macOS assets into one DRAFT GitHub Release, merges
+# both platforms into one updater manifest, then verifies the complete asset
+# contract. Publishing remains a deliberate manual release-gate action.
 name: release
 
 on:
@@ -24,15 +10,42 @@ on:
       - 'v*'
 
 permissions:
-  contents: write   # create the GitHub Release with the built assets
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
-  release:
+  preflight:
+    name: Release secret preflight
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Verify required updater and Apple secrets
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+        run: bash scripts/verify-release-secrets.sh
+
+  windows:
+    name: Windows release assets
+    needs: preflight
     runs-on: windows-latest
+    outputs:
+      release_id: ${{ steps.tauri.outputs.releaseId }}
+      version: ${{ steps.tag.outputs.version }}
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0   # need full tags so the annotated tag message is available
+          fetch-depth: 0
 
       - uses: actions/setup-node@v7
         with:
@@ -53,17 +66,14 @@ jobs:
         with:
           workspaces: './src-tauri -> target'
 
+      - name: Rust tests (Windows release gate)
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
       - name: Read tag metadata
         id: tag
         shell: bash
         run: |
           echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-          # Release notes become the release body AND the in-app updater notes.
-          # Preferred source: the committed notes file for this tag — written and
-          # reviewed in the release PR, so long trilingual markdown never has to
-          # be squeezed into a `git tag -m`. Fallback: the annotated tag message.
-          # NOTE: latest.json freezes these notes at draft time — editing the
-          # release page later never reaches the in-app pop-up.
           notes_file="docs/release-notes/${GITHUB_REF_NAME}.md"
           {
             echo "notes<<__EOF__"
@@ -89,7 +99,9 @@ jobs:
             exit 1
           fi
 
-      - uses: tauri-apps/tauri-action@v0
+      - name: Build signed Windows assets and create draft release
+        id: tauri
+        uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -98,38 +110,154 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: 'Mutsumi-${{ github.ref_name }}'
           releaseBody: ${{ steps.tag.outputs.notes }}
-          # Draft-first release gate: invisible to the updater endpoint until a
-          # human clicks "Publish release" after the smoke test passes.
           releaseDraft: true
           prerelease: false
-          includeUpdaterJson: true
+          uploadUpdaterJson: true
+          updaterJsonPreferNsis: true
 
-      # Append GitHub's auto-generated changelog (the release UI's "Previous
-      # tag: auto" feature) to the DRAFT body: a "What's Changed" section and a
-      # "Full Changelog: vPREV...vNEW" compare link. Done AFTER tauri-action so
-      # latest.json (the in-app pop-up notes) keeps only the hand-written tag
-      # message, while the GitHub release page gets the full comparison.
-      - name: Append changelog vs previous tag to the release body
+  macos:
+    name: Signed and notarized universal macOS assets
+    needs: windows
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      # tauri-action v1 preserves existing platform entries in latest.json but
+      # regenerates its top-level notes on every platform upload. Re-read the
+      # canonical notes so the macOS merge cannot blank the Windows manifest.
+      - name: Read updater notes
+        id: notes
+        shell: bash
+        run: |
+          notes_file="docs/release-notes/${GITHUB_REF_NAME}.md"
+          {
+            echo "notes<<__EOF__"
+            if [ -s "$notes_file" ]; then
+              cat "$notes_file"
+            else
+              git tag -l --format='%(contents)' "$GITHUB_REF_NAME"
+            fi
+            echo "__EOF__"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Rust tests (native macOS release gate)
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Import Developer ID and App Store Connect credentials
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+        run: bash scripts/setup-macos-signing.sh
+
+      - name: Build, sign, notarize and upload universal macOS assets
+        id: tauri
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+        with:
+          releaseId: ${{ needs.windows.outputs.release_id }}
+          tagName: ${{ github.ref_name }}
+          releaseBody: ${{ steps.notes.outputs.notes }}
+          releaseDraft: true
+          prerelease: false
+          uploadUpdaterJson: true
+          args: --target universal-apple-darwin
+
+      - name: Verify signed, hardened and notarized macOS bundle
+        shell: bash
+        run: |
+          node scripts/verify-macos-bundle.mjs \
+            --bundle-dir src-tauri/target/universal-apple-darwin/release/bundle \
+            --mode signed \
+            --expected-identifier io.github.yanhanruan.mutsumi \
+            --expected-minimum-system-version 13.0
+
+      - name: Remove ephemeral macOS signing material
+        if: always()
+        shell: bash
+        run: bash scripts/cleanup-macos-signing.sh
+
+  verify:
+    name: Verify complete draft release
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Normalize updater URLs to public release downloads
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/normalize-release-manifest.mjs "${{ github.ref_name }}" \
+            --release-id "${{ needs.windows.outputs.release_id }}" \
+            --channel production
+
+      - name: Compose release body with changelog vs previous tag
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ needs.windows.outputs.release_id }}
         run: |
+          if ! [[ "$RELEASE_ID" =~ ^[0-9]+$ ]]; then
+            echo "::error::tauri-action returned an invalid release ID"
+            exit 1
+          fi
           prev=$(git describe --tags --exclude staging --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)
           echo "previous tag: ${prev:-<none - first release>}"
           gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
             -f tag_name="$GITHUB_REF_NAME" \
             ${prev:+-f previous_tag_name="$prev"} \
             --jq .body > generated-notes.md
-          release_id=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
-            --jq ".[] | select(.tag_name==\"$GITHUB_REF_NAME\") | .id")
-          gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" --jq .body > body.md
+          notes_file="docs/release-notes/${GITHUB_REF_NAME}.md"
+          if [ -s "$notes_file" ]; then
+            cat "$notes_file" > body.md
+          else
+            git tag -l --format='%(contents)' "$GITHUB_REF_NAME" > body.md
+          fi
           printf '\n\n' >> body.md
           cat generated-notes.md >> body.md
-          gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" -F body=@body.md
-          echo "changelog appended (previous tag: ${prev:-auto})"
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" -F body=@body.md
+          echo "release body composed deterministically (previous tag: ${prev:-auto})"
 
-      - name: Verify release assets + updater manifest contract
+      - name: Verify Windows + universal macOS release assets
         shell: bash
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: node scripts/verify-release-assets.mjs "${{ github.ref_name }}" --expect-version "${{ steps.tag.outputs.version }}"
+        run: |
+          node scripts/verify-release-assets.mjs "${{ github.ref_name }}" \
+            --expect-version "${{ needs.windows.outputs.version }}" \
+            --require-macos-universal
