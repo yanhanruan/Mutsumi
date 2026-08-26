@@ -66,7 +66,11 @@ test('runs a native Intel macOS build and lifecycle gate without release credent
 
   assert.match(intel, /runs-on: macos-15-intel/)
   assert.match(intel, /test "\$\(uname -m\)" = "x86_64"/)
-  assert.match(intel, /host: x86_64-apple-darwin/)
+  assert.match(
+    intel,
+    /rustc -vV > "\$RUNNER_TEMP\/rustc-version\.txt"\n\s+grep -Fx 'host: x86_64-apple-darwin' "\$RUNNER_TEMP\/rustc-version\.txt"/,
+  )
+  assert.doesNotMatch(intel, /rustc -vV\s*\|\s*grep\b/)
   assert.match(intel, /cargo test --manifest-path src-tauri\/Cargo\.toml/)
   assert.match(intel, /--target x86_64-apple-darwin --bundles app --ci --no-sign/)
   assert.match(intel, /test:macos-lifecycle-smoke/)

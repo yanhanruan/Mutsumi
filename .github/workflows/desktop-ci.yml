@@ -140,7 +140,8 @@ jobs:
         run: |
           test "$(uname -m)" = "x86_64"
           arch -x86_64 /usr/bin/true
-          rustc -vV | grep -q '^host: x86_64-apple-darwin$'
+          rustc -vV > "$RUNNER_TEMP/rustc-version.txt"
+          grep -Fx 'host: x86_64-apple-darwin' "$RUNNER_TEMP/rustc-version.txt"
 
       - name: Rust tests (native Intel macOS)
         run: cargo test --manifest-path src-tauri/Cargo.toml
