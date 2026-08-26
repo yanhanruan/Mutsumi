@@ -5,6 +5,7 @@ import test from 'node:test'
 const root = new URL('../', import.meta.url)
 const production = readFileSync(new URL('.github/workflows/release.yml', root), 'utf8')
 const staging = readFileSync(new URL('.github/workflows/staging-release.yml', root), 'utf8')
+const desktop = readFileSync(new URL('.github/workflows/desktop-ci.yml', root), 'utf8')
 const secretPreflight = readFileSync(new URL('scripts/verify-release-secrets.sh', root), 'utf8')
 const setupSigning = readFileSync(new URL('scripts/setup-macos-signing.sh', root), 'utf8')
 const cleanupSigning = readFileSync(new URL('scripts/cleanup-macos-signing.sh', root), 'utf8')
@@ -58,6 +59,19 @@ test('runs Rust tests on both platforms before a signed release can complete', (
     assert.match(windows, /cargo test --manifest-path src-tauri\/Cargo\.toml/)
     assert.match(macos, /cargo test --manifest-path src-tauri\/Cargo\.toml/)
   }
+})
+
+test('runs a native Intel macOS build and lifecycle gate without release credentials', () => {
+  const intel = job(desktop, 'intel-native')
+
+  assert.match(intel, /runs-on: macos-15-intel/)
+  assert.match(intel, /test "\$\(uname -m\)" = "x86_64"/)
+  assert.match(intel, /host: x86_64-apple-darwin/)
+  assert.match(intel, /cargo test --manifest-path src-tauri\/Cargo\.toml/)
+  assert.match(intel, /--target x86_64-apple-darwin --bundles app --ci --no-sign/)
+  assert.match(intel, /test:macos-lifecycle-smoke/)
+  assert.match(intel, /--arch x86_64/)
+  assert.doesNotMatch(intel, /secrets\.|APPLE_|TAURI_SIGNING_PRIVATE_KEY|upload-artifact/)
 })
 
 test('checks every required release secret before a workflow can mutate a release', () => {

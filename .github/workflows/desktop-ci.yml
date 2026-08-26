@@ -109,3 +109,47 @@ jobs:
             src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
           if-no-files-found: error
           retention-days: 7
+
+  intel-native:
+    name: native Intel macOS regression
+    runs-on: macos-15-intel
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+          shared-key: macos-intel-native
+
+      - name: Verify native Intel host
+        shell: bash
+        run: |
+          test "$(uname -m)" = "x86_64"
+          arch -x86_64 /usr/bin/true
+          rustc -vV | grep -q '^host: x86_64-apple-darwin$'
+
+      - name: Rust tests (native Intel macOS)
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Build unsigned Intel app
+        run: npx tauri build --target x86_64-apple-darwin --bundles app --ci --no-sign
+
+      - name: Verify native Intel lifecycle
+        run: >-
+          npm run test:macos-lifecycle-smoke --
+          --app src-tauri/target/x86_64-apple-darwin/release/bundle/macos/mutsumi.app
+          --arch x86_64
