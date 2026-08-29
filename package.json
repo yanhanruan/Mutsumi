@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "test": "vitest run",
-    "test:release-contract": "node --test scripts/release-contract.test.mjs scripts/macos-bundle-contract.test.mjs scripts/macos-lifecycle-contract.test.mjs scripts/release-workflow-contract.test.mjs",
+    "test:release-contract": "node --test scripts/release-contract.test.mjs scripts/macos-bundle-contract.test.mjs scripts/macos-lifecycle-contract.test.mjs scripts/release-workflow-contract.test.mjs scripts/updater-signature-contract.test.mjs",
     "test:macos-lifecycle-smoke": "node scripts/verify-macos-lifecycle.mjs",
     "test:watch": "vitest",
     "release": "node scripts/bump-version.mjs"

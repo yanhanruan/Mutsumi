@@ -180,6 +180,22 @@ Developer ID identity and notarization validity are proven later on the macOS
 runner. Never paste any of these values into workflow YAML, logs, issues or this
 documentation.
 
+After the seven required updater/Apple secrets (plus the optional updater-key
+password when applicable) have been configured, run the manual
+**release-credential-readiness** workflow from GitHub Actions before the first
+staging release. It is intentionally non-mutating and uses only
+`contents: read`: it signs and verifies a disposable updater probe against the
+public key committed in `tauri.conf.json`, signs a temporary executable with the
+imported Developer ID identity, and authenticates to the Apple notary service
+through a read-only history request. It does **not** create or delete a Release
+or tag, upload an artifact, submit a notarization request, or publish anything.
+Disposable probes are removed by guarded shell `EXIT` traps; the temporary
+keychain, certificate and API key use a separate `if: always()` best-effort
+cleanup step. A forcibly terminated job can skip process cleanup, so this check
+must remain on an ephemeral GitHub-hosted runner and never uploads those paths.
+A green result proves credential readiness, not a signed/notarized Mutsumi
+bundle; staging remains the first end-to-end release gate.
+
 Until updater steps 1–3 are done, the app still builds and runs but cannot verify
 updates, and the daily check fails quietly when there is no `latest.json` to
 fetch. Without Apple steps 4–6, signed staging/production macOS jobs fail closed

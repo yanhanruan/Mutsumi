@@ -5,10 +5,22 @@ import test from 'node:test'
 const root = new URL('../', import.meta.url)
 const production = readFileSync(new URL('.github/workflows/release.yml', root), 'utf8')
 const staging = readFileSync(new URL('.github/workflows/staging-release.yml', root), 'utf8')
+const readiness = readFileSync(
+  new URL('.github/workflows/release-credential-readiness.yml', root),
+  'utf8',
+)
 const desktop = readFileSync(new URL('.github/workflows/desktop-ci.yml', root), 'utf8')
 const secretPreflight = readFileSync(new URL('scripts/verify-release-secrets.sh', root), 'utf8')
 const setupSigning = readFileSync(new URL('scripts/setup-macos-signing.sh', root), 'utf8')
 const cleanupSigning = readFileSync(new URL('scripts/cleanup-macos-signing.sh', root), 'utf8')
+const updaterReadiness = readFileSync(
+  new URL('scripts/verify-updater-signing-key.sh', root),
+  'utf8',
+)
+const macosReadiness = readFileSync(
+  new URL('scripts/verify-macos-release-credentials.sh', root),
+  'utf8',
+)
 
 function occurrences(text, value) {
   return text.split(value).length - 1
@@ -59,6 +71,37 @@ test('runs Rust tests on both platforms before a signed release can complete', (
     assert.match(windows, /cargo test --manifest-path src-tauri\/Cargo\.toml/)
     assert.match(macos, /cargo test --manifest-path src-tauri\/Cargo\.toml/)
   }
+})
+
+test('keeps credential readiness manual, read-only and isolated from release mutation', () => {
+  assert.match(readiness, /\non:\n  workflow_dispatch:\n/)
+  assert.match(readiness, /permissions:\n  contents: read/)
+  assert.doesNotMatch(
+    readiness,
+    /contents: write|tauri-action|gh release|gh api|git push|notarytool submit|upload-artifact/,
+  )
+
+  const preflight = job(readiness, 'preflight', 'macos')
+  const macos = job(readiness, 'macos')
+  assert.match(preflight, /bash scripts\/verify-release-secrets\.sh/)
+  assert.match(macos, /needs: preflight/)
+  assert.match(macos, /bash scripts\/verify-updater-signing-key\.sh/)
+  assert.match(macos, /bash scripts\/setup-macos-signing\.sh/)
+  assert.match(macos, /bash scripts\/verify-macos-release-credentials\.sh/)
+  assert.match(macos, /if: always\(\)[\s\S]*bash scripts\/cleanup-macos-signing\.sh/)
+})
+
+test('proves updater, Developer ID and notary credentials using disposable probes', () => {
+  assert.match(updaterReadiness, /set -euo pipefail/)
+  assert.match(updaterReadiness, /npx --no-install tauri signer sign/)
+  assert.match(updaterReadiness, /node scripts\/verify-updater-signature\.mjs/)
+  assert.match(updaterReadiness, /trap cleanup EXIT/)
+  assert.doesNotMatch(updaterReadiness, /echo "\$TAURI_|set -x/)
+
+  assert.match(macosReadiness, /codesign[\s\S]*--options runtime[\s\S]*--timestamp/)
+  assert.match(macosReadiness, /notarytool history/)
+  assert.match(macosReadiness, /trap cleanup EXIT/)
+  assert.doesNotMatch(macosReadiness, /notarytool submit|echo "\$APPLE_|set -x/)
 })
 
 test('runs a native Intel macOS build and lifecycle gate without release credentials', () => {
