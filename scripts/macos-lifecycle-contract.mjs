@@ -91,7 +91,7 @@ export function lifecycleCleanupState({
   }
 }
 
-const CLI_VALUE_OPTIONS = new Set(['--app', '--arch', '--timeout-ms'])
+const CLI_VALUE_OPTIONS = new Set(['--app', '--arch', '--initial-launch', '--timeout-ms'])
 
 export function parseMacosLifecycleArgs(argv) {
   const values = new Map()
@@ -116,6 +116,11 @@ export function parseMacosLifecycleArgs(argv) {
     fail('--arch must be arm64 or x86_64')
   }
 
+  const initialLaunch = values.get('--initial-launch') ?? 'open'
+  if (initialLaunch !== 'open' && initialLaunch !== 'finder') {
+    fail('--initial-launch must be open or finder')
+  }
+
   const timeoutText = values.get('--timeout-ms') ?? '15000'
   if (!/^\d+$/.test(timeoutText)) fail('--timeout-ms must be an integer')
   const timeoutMs = Number(timeoutText)
@@ -123,7 +128,38 @@ export function parseMacosLifecycleArgs(argv) {
     fail('--timeout-ms must be between 1000 and 60000')
   }
 
-  return { appPath, architecture, timeoutMs }
+  return { appPath, architecture, initialLaunch, timeoutMs }
+}
+
+export function macosInitialLaunchCommand({ appPath, architecture, initialLaunch } = {}) {
+  if (!appPath) fail('initial launch app path is required')
+  if (architecture !== 'arm64' && architecture !== 'x86_64') {
+    fail('initial launch architecture must be arm64 or x86_64')
+  }
+  if (initialLaunch === 'open') {
+    return {
+      command: 'open',
+      args: [
+        '--arch', architecture,
+        '-na', appPath,
+        '--stdout', '/dev/null',
+        '--stderr', '/dev/null',
+      ],
+    }
+  }
+  if (initialLaunch === 'finder') {
+    return {
+      command: 'osascript',
+      args: [
+        '-e', 'on run argv',
+        '-e', 'set appFile to POSIX file (item 1 of argv)',
+        '-e', 'tell application "Finder" to open appFile',
+        '-e', 'end run',
+        appPath,
+      ],
+    }
+  }
+  fail(`unsupported initial launch source: "${initialLaunch}"`)
 }
 
 export function validateMacosLifecycleExecution({
@@ -148,12 +184,16 @@ export function validateMacosLifecycleSnapshot(snapshot, {
   expectedAppPath,
   expectedIdentifier,
   expectedArchitecture,
+  expectedInitialLaunch = 'open',
 } = {}) {
   if (!snapshot || typeof snapshot !== 'object') fail('lifecycle snapshot is required')
   if (!expectedAppPath) fail('expected app path is required')
   if (!expectedIdentifier) fail('expected bundle identifier is required')
   if (expectedArchitecture !== 'arm64' && expectedArchitecture !== 'x86_64') {
     fail('expected architecture must be arm64 or x86_64')
+  }
+  if (expectedInitialLaunch !== 'open' && expectedInitialLaunch !== 'finder') {
+    fail('expected initial launch must be open or finder')
   }
 
   const messages = []
@@ -184,7 +224,14 @@ export function validateMacosLifecycleSnapshot(snapshot, {
     fail(`LaunchServices architecture is "${snapshot.architecture}", expected "${expectedArchitecture}"`)
   }
   requireTrue(snapshot.initialFrontmost, 'initial launch did not make Mutsumi frontmost')
-  messages.push(`LaunchServices foreground/Dock contract passed for ${snapshot.architecture}`)
+  if (snapshot.initialLaunch !== expectedInitialLaunch) {
+    fail(
+      `initial launch source was "${snapshot.initialLaunch}", expected "${expectedInitialLaunch}"`,
+    )
+  }
+  messages.push(
+    `LaunchServices foreground/Dock contract passed for ${snapshot.architecture} via ${snapshot.initialLaunch}`,
+  )
 
   requireTrue(snapshot.socketCreated, 'single-instance socket was not created')
   if (snapshot.relaunchInstanceCount !== 1 || snapshot.relaunchProcessCount !== 1) {

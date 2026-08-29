@@ -100,6 +100,13 @@ jobs:
           --mode unsigned
           --expected-minimum-system-version 13.0
 
+      - name: Verify Apple Silicon Finder lifecycle
+        run: >-
+          npm run test:macos-lifecycle-smoke --
+          --app src-tauri/target/universal-apple-darwin/release/bundle/macos/mutsumi.app
+          --arch arm64
+          --initial-launch finder
+
       - name: Upload unsigned CI bundle
         uses: actions/upload-artifact@v7
         with:
@@ -154,3 +161,4 @@ jobs:
           npm run test:macos-lifecycle-smoke --
           --app src-tauri/target/x86_64-apple-darwin/release/bundle/macos/mutsumi.app
           --arch x86_64
+          --initial-launch finder

@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   discoverLifecycleOwnership,
   lifecycleCleanupState,
+  macosInitialLaunchCommand,
   MacosLifecycleContractError,
   normalizeLsappinfoAsn,
   parseLsappinfoAsns,
@@ -31,6 +32,7 @@ function snapshot(overrides = {}) {
     hidden: false,
     architecture: 'arm64',
     initialFrontmost: true,
+    initialLaunch: 'open',
     socketCreated: true,
     relaunchInstanceCount: 1,
     relaunchProcessCount: 1,
@@ -48,12 +50,13 @@ const OPTIONS = {
   expectedAppPath: APP_PATH,
   expectedIdentifier: IDENTIFIER,
   expectedArchitecture: 'arm64',
+  expectedInitialLaunch: 'open',
 }
 
 test('CLI requires an app and one supported architecture', () => {
   assert.deepEqual(
     parseMacosLifecycleArgs(['--app', APP_PATH, '--arch', 'x86_64']),
-    { appPath: APP_PATH, architecture: 'x86_64', timeoutMs: 15000 },
+    { appPath: APP_PATH, architecture: 'x86_64', initialLaunch: 'open', timeoutMs: 15000 },
   )
   assert.throws(
     () => parseMacosLifecycleArgs(['--arch', 'arm64']),
@@ -63,6 +66,42 @@ test('CLI requires an app and one supported architecture', () => {
     () => parseMacosLifecycleArgs(['--app', APP_PATH, '--arch', 'universal']),
     /must be arm64 or x86_64/,
   )
+})
+
+test('CLI accepts Finder initial launch and rejects unknown launch sources', () => {
+  assert.deepEqual(
+    parseMacosLifecycleArgs([
+      '--app', APP_PATH,
+      '--arch', 'arm64',
+      '--initial-launch', 'finder',
+    ]),
+    { appPath: APP_PATH, architecture: 'arm64', initialLaunch: 'finder', timeoutMs: 15000 },
+  )
+  assert.throws(
+    () => parseMacosLifecycleArgs([
+      '--app', APP_PATH,
+      '--arch', 'arm64',
+      '--initial-launch', 'dock',
+    ]),
+    /must be open or finder/,
+  )
+})
+
+test('builds a Finder Apple Event initial launch without shell interpolation', () => {
+  assert.deepEqual(macosInitialLaunchCommand({
+    appPath: APP_PATH,
+    architecture: 'arm64',
+    initialLaunch: 'finder',
+  }), {
+    command: 'osascript',
+    args: [
+      '-e', 'on run argv',
+      '-e', 'set appFile to POSIX file (item 1 of argv)',
+      '-e', 'tell application "Finder" to open appFile',
+      '-e', 'end run',
+      APP_PATH,
+    ],
+  })
 })
 
 test('CLI rejects malformed timeouts, typos, duplicates and positional arguments', () => {
@@ -218,6 +257,21 @@ test('cleanup never removes the socket while a PID or replacement ASN remains', 
 test('accepts a complete foreground launch, singleton relaunch and normal Quit', () => {
   const result = validateMacosLifecycleSnapshot(snapshot(), OPTIONS)
   assert.equal(result.messages.length, 3)
+})
+
+test('records Finder as the exact initial launch source', () => {
+  const result = validateMacosLifecycleSnapshot(
+    snapshot({ initialLaunch: 'finder' }),
+    { ...OPTIONS, expectedInitialLaunch: 'finder' },
+  )
+  assert.match(result.messages[0], /via finder/)
+  assert.throws(
+    () => validateMacosLifecycleSnapshot(snapshot(), {
+      ...OPTIONS,
+      expectedInitialLaunch: 'finder',
+    }),
+    /expected "finder"/,
+  )
 })
 
 test('rejects Agent/background bundles that cannot guarantee a Dock icon', () => {

@@ -118,7 +118,19 @@ test('runs a native Intel macOS build and lifecycle gate without release credent
   assert.match(intel, /--target x86_64-apple-darwin --bundles app --ci --no-sign/)
   assert.match(intel, /test:macos-lifecycle-smoke/)
   assert.match(intel, /--arch x86_64/)
+  assert.match(intel, /--initial-launch finder/)
   assert.doesNotMatch(intel, /secrets\.|APPLE_|TAURI_SIGNING_PRIVATE_KEY|upload-artifact/)
+})
+
+test('runs Finder-launched lifecycle smoke on both native macOS architectures', () => {
+  const universal = job(desktop, 'universal-bundle', 'intel-native')
+  const intel = job(desktop, 'intel-native')
+
+  assert.match(universal, /test:macos-lifecycle-smoke/)
+  assert.match(universal, /--arch arm64/)
+  assert.match(universal, /--initial-launch finder/)
+  assert.match(intel, /--arch x86_64/)
+  assert.match(intel, /--initial-launch finder/)
 })
 
 test('checks every required release secret before a workflow can mutate a release', () => {

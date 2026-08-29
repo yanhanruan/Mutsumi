@@ -14,6 +14,7 @@ import { spawnSync } from 'node:child_process'
 import {
   discoverLifecycleOwnership,
   lifecycleCleanupState,
+  macosInitialLaunchCommand,
   MacosLifecycleContractError,
   normalizeLsappinfoAsn,
   parseLsappinfoAsns,
@@ -140,6 +141,19 @@ function launch(appPath, architecture) {
       '--stderr', '/dev/null',
     ],
     `launching ${basename(appPath)} as ${architecture}`,
+  )
+}
+
+function initialLaunch(appPath, architecture, source) {
+  const command = macosInitialLaunchCommand({
+    appPath,
+    architecture,
+    initialLaunch: source,
+  })
+  required(
+    command.command,
+    command.args,
+    `launching ${basename(appPath)} through ${source} as ${architecture}`,
   )
 }
 
@@ -355,7 +369,7 @@ try {
   }
 
   launchAttempted = true
-  launch(appPath, parsedArgs.architecture)
+  initialLaunch(appPath, parsedArgs.architecture, parsedArgs.initialLaunch)
   const first = await waitFor('application LaunchServices readiness', parsedArgs.timeoutMs, () => {
     const { currentAsns } = rememberOwnership()
     if (currentAsns.length !== 1 || !ownedAsn) return null
@@ -412,6 +426,7 @@ try {
 
   const result = validateMacosLifecycleSnapshot({
     ...first.runtime,
+    initialLaunch: parsedArgs.initialLaunch,
     initialFrontmost,
     socketCreated,
     relaunchInstanceCount: relaunched.asns.length,
@@ -426,6 +441,7 @@ try {
     expectedAppPath: appPath,
     expectedIdentifier: identifier,
     expectedArchitecture: parsedArgs.architecture,
+    expectedInitialLaunch: parsedArgs.initialLaunch,
   })
 
   for (const message of result.messages) console.log(`✓ ${message}`)
