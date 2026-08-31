@@ -8,10 +8,16 @@ import { getVersion } from '@tauri-apps/api/app'
 import { invoke } from '@tauri-apps/api/core'
 import { detectLocale, setLocale, useI18n } from '../i18n'
 import { useAppConfig } from '../composables/useAppConfig'
+import { usePlatformCapabilities } from '../composables/usePlatformCapabilities'
+import { buildAboutFeatures } from '../config/aboutFeatures'
+import WindowTitlebar from './WindowTitlebar.vue'
 
 const { t, locale } = useI18n()
 const { config } = useAppConfig()
+const { capabilities } = usePlatformCapabilities()
 const win = getCurrentWindow()
+
+const aboutFeatures = computed(() => buildAboutFeatures(t.value, capabilities.value))
 
 const yohoUrl = 'https://github.com/yanhanruan'
 const mutsumiHeadUrl = 'https://github.com/qichengwang408-lab'
@@ -75,23 +81,11 @@ function closeWindow() { win.close() }
     <div class="orb orb-b" />
     <div class="orb orb-c" />
 
-    <header class="titlebar" data-tauri-drag-region>
-      <div class="title-identity" data-tauri-drag-region>
-        <span class="title-logo">🥒</span>
-        <span class="title-name">Mutsumi</span>
-        <span class="title-sep">·</span>
-        <span class="title-sub">{{ t.aboutTitle }}</span>
-      </div>
-
-      <div class="win-controls" @mousedown.stop>
-        <button class="wbtn wbtn-close" :title="t.close" @click="closeWindow">
-          <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
-            <line x1="1" y1="1" x2="9" y2="9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-            <line x1="9" y1="1" x2="1" y2="9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-          </svg>
-        </button>
-      </div>
-    </header>
+    <WindowTitlebar
+      :subtitle="t.aboutTitle"
+      :close-label="t.close"
+      @close="closeWindow"
+    />
 
     <main class="content">
       <section class="hero">
@@ -134,7 +128,7 @@ function closeWindow() { win.close() }
       <section class="card">
         <h2 class="card-title">{{ t.aboutMainFeatures }}</h2>
         <ul class="feature-list">
-          <li v-for="feature in t.aboutFeaturesList" :key="feature">{{ feature }}</li>
+          <li v-for="feature in aboutFeatures" :key="feature">{{ feature }}</li>
         </ul>
       </section>
 
@@ -219,85 +213,6 @@ function closeWindow() { win.close() }
   top: 44%;
   left: 48%;
   transform: translate(-50%, -50%);
-}
-
-.titlebar {
-  position: relative;
-  z-index: 10;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 40px;
-  padding: 0 10px 0 14px;
-  background: rgba(180, 220, 180, 0.28);
-  border-bottom: 1px solid rgba(119, 153, 119, 0.22);
-  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.18);
-  user-select: none;
-  -webkit-user-select: none;
-  cursor: default;
-}
-
-.title-identity {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex: 1;
-  min-width: 0;
-}
-
-.title-logo {
-  font-size: 16px;
-  line-height: 1;
-}
-
-.title-name {
-  font-size: 13px;
-  font-weight: 700;
-  color: #1a3a1a;
-}
-
-.title-sep {
-  font-size: 11px;
-  color: rgba(40, 80, 40, 0.35);
-}
-
-.title-sub {
-  font-size: 10px;
-  font-weight: 500;
-  color: rgba(40, 80, 40, 0.50);
-  text-transform: uppercase;
-  letter-spacing: 0.6px;
-}
-
-.win-controls {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-}
-
-.wbtn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 22px;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  background: rgba(0, 0, 0, 0.06);
-  color: rgba(40, 70, 40, 0.55);
-  transition: background 100ms ease, color 100ms ease, transform 80ms ease;
-}
-
-.wbtn:hover {
-  background: rgba(220, 60, 60, 0.82);
-  color: white;
-}
-
-.wbtn:active {
-  transform: scale(0.90);
 }
 
 .content {

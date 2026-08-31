@@ -16,10 +16,13 @@ export const zh: Translations = {
   save:              '保存',
   resetPet:          '重置若叶睦',
   close:             '关闭',
+  minimize:          '最小化',
   savedMsg:          '已保存。',
   resetMsg:          '已重置。',
   autostartOnMsg:    '已开启开机启动。',
   autostartOffMsg:   '已关闭开机启动。',
+  autostartUnavailable: '此系统暂时无法使用开机启动。',
+  autostartFailedMsg:   '无法修改开机启动设置。',
 
   // ── About window ─────────────────────────────────────────────────
   aboutTitle:             '关于',
@@ -27,10 +30,12 @@ export const zh: Translations = {
   aboutAppSummary:        '应用简介',
   aboutAppSummaryBody:    'Mutsumi 是一款轻量的桌面陪伴应用，让若叶睦常驻在桌面上，陪你专注、休息和获得一点温柔的日常反馈。',
   aboutMainFeatures:      '主要功能',
+  aboutCompanionFeature:  '👻 无感陪伴，透明区域穿透点击，可拖拽到屏幕任意位置',
+  aboutAudioActivityFeature: '🎧 全局音频感知，播放音乐时自动戴上耳机跟节奏晃动',
+  aboutAudioActivityDegradedFeature: '🎧 根据输出设备 I/O 估算音频活动',
+  aboutMediaControllerFeature: '🎵 迷你音乐控制器，基于 Windows SMTC 控制播放应用',
+  aboutMediaControllerDegradedFeature: '🎵 根据平台能力提供有限的媒体信息或控制',
   aboutFeaturesList:      [
-    '👻 无感陪伴，透明区域穿透点击，可拖拽到屏幕任意位置',
-    '🎧 全局音频感知，播放音乐时自动戴上耳机跟节奏晃动',
-    '🎵 迷你音乐控制器，基于 SMTC 控制任意播放应用',
     '🍅 番茄钟专注计时 & 实时天气显示',
     '🔮 每日塔罗占卜，78 张卡片带来每天的惊喜',
     '💬 AI 聊天：忠实还原睦头性格的角色扮演对话',
@@ -97,6 +102,8 @@ export const zh: Translations = {
 
   // ── Music controller visibility ───────────────────────────────────
   showMusic: '显示音乐控制器',
+  showAudioActivity: '显示音频活动徽章',
+  audioActivityDegradedHint: '音频活动根据输出设备 I/O 估算，静音但未关闭的音频流也可能显示为活动。',
 
   // ── Sleep "zzz" effect visibility ─────────────────────────────────
   showZzz: '显示睡眠 zzz 效果',
@@ -104,7 +111,8 @@ export const zh: Translations = {
   // ── Flying screensaver ────────────────────────────────────────────
   flyingScreensaver:     '飞行屏保',
   flyingWaitLabel:       '闲置多久后开始',
-  flyingScreensaverHint: '电脑闲置一段时间后，她会在屏幕上飘来飘去。随时按 Ctrl+Alt+F 切换飞行。',
+  flyingScreensaverHint: '电脑闲置一段时间后，她会在屏幕上飘来飘去。随时按 {keys} 切换飞行。',
+  flyingScreensaverUnavailable: '此平台暂不支持闲置后自动飞行，仍可手动切换飞行模式。',
   hotkeyUnavailable:     '{keys} 已被其他应用占用，本次运行中该快捷键不可用。关闭占用它的应用并重启 Mutsumi 即可恢复。',
 
   // ── Search engine ─────────────────────────────────────────────────
@@ -141,6 +149,9 @@ export const zh: Translations = {
   apiKeyClear:          '清除',
   apiKeySavedMsg:       'API Key 已保存。',
   apiKeyClearedMsg:     'API Key 已清除。',
+  apiKeySaveFailedMsg:  '无法将 API Key 保存到系统凭据存储。',
+  apiKeyClearFailedMsg: '无法从系统凭据存储中清除 API Key。',
+  apiKeyCredentialStoreUnavailable: '系统凭据存储当前不可用，已保存的 API Key 可能尚未加载。',
   apiKeyHelp:           '如何获取 API Key？',
 
   // ── Pomodoro badge ────────────────────────────────────────────────
@@ -302,6 +313,7 @@ export const zh: Translations = {
     network:     '网络',
     online:      '在线',
     offline:     '离线',
+    unavailable: '暂时无法检测',
     wifi:        'Wi-Fi',
     ethernet:    '有线网络',
     uptime:      '运行时间',

@@ -41,6 +41,7 @@ import {
   type UpdateFlowState,
   type UpdatePhase,
 } from '../config/updateFlow'
+import WindowTitlebar from './WindowTitlebar.vue'
 
 interface PendingUpdate {
   version: string
@@ -321,23 +322,11 @@ onUnmounted(() => {
     <div class="orb orb-a" />
     <div class="orb orb-b" />
 
-    <header class="titlebar" data-tauri-drag-region>
-      <div class="title-identity" data-tauri-drag-region>
-        <span class="title-logo">🥒</span>
-        <span class="title-name">Mutsumi</span>
-        <span class="title-sep">·</span>
-        <span class="title-sub">{{ t.updateWindowTitle }}</span>
-      </div>
-
-      <div class="win-controls" @mousedown.stop>
-        <button class="wbtn wbtn-close" :title="t.close" @click="closeWindow">
-          <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
-            <line x1="1" y1="1" x2="9" y2="9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-            <line x1="9" y1="1" x2="1" y2="9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-          </svg>
-        </button>
-      </div>
-    </header>
+    <WindowTitlebar
+      :subtitle="t.updateWindowTitle"
+      :close-label="t.close"
+      @close="closeWindow"
+    />
 
     <main class="content">
       <!-- Checking ------------------------------------------------------->
@@ -462,60 +451,6 @@ onUnmounted(() => {
   bottom: -50px;
   left: -45px;
 }
-
-.titlebar {
-  position: relative;
-  z-index: 10;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 40px;
-  padding: 0 10px 0 14px;
-  background: rgba(180, 220, 180, 0.28);
-  border-bottom: 1px solid rgba(119, 153, 119, 0.22);
-  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.18);
-  user-select: none;
-  -webkit-user-select: none;
-  cursor: default;
-}
-
-.title-identity {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex: 1;
-  min-width: 0;
-}
-
-.title-logo { font-size: 16px; line-height: 1; }
-.title-name { font-size: 13px; font-weight: 700; color: #1a3a1a; }
-.title-sep { font-size: 11px; color: rgba(40, 80, 40, 0.35); }
-.title-sub {
-  font-size: 10px;
-  font-weight: 500;
-  color: rgba(40, 80, 40, 0.50);
-  text-transform: uppercase;
-  letter-spacing: 0.6px;
-}
-
-.win-controls { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-
-.wbtn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 22px;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  background: rgba(0, 0, 0, 0.06);
-  color: rgba(40, 70, 40, 0.55);
-  transition: background 100ms ease, color 100ms ease, transform 80ms ease;
-}
-.wbtn:hover { background: rgba(220, 60, 60, 0.82); color: white; }
-.wbtn:active { transform: scale(0.90); }
 
 .content {
   position: relative;

@@ -9,10 +9,91 @@ import { describe, expect, it } from 'vitest'
 import {
   ALPHA_OPEN,
   ALPHA_CLOSE,
+  CursorIgnoreCoordinator,
   computeContainPlacement,
   isOverUiOverlay,
   shouldIgnore,
 } from './useHitTest'
+
+const deferred = () => {
+  let resolve!: () => void
+  const promise = new Promise<void>(ok => {
+    resolve = ok
+  })
+  return { promise, resolve }
+}
+
+const flush = async () => {
+  await Promise.resolve()
+  await Promise.resolve()
+}
+
+describe('CursorIgnoreCoordinator', () => {
+  it('serializes a rapid true → false transition', async () => {
+    const first = deferred()
+    const calls: boolean[] = []
+    const coordinator = new CursorIgnoreCoordinator(ignore => {
+      calls.push(ignore)
+      return calls.length === 1 ? first.promise : Promise.resolve()
+    })
+
+    coordinator.request(true)
+    coordinator.request(false)
+    expect(calls).toEqual([true])
+
+    first.resolve()
+    await flush()
+    expect(calls).toEqual([true, false])
+    expect(coordinator.isIgnoring()).toBe(false)
+  })
+
+  it('rolls back after a native failure so the next sample retries', async () => {
+    const errors: unknown[] = []
+    let attempts = 0
+    const coordinator = new CursorIgnoreCoordinator(
+      async () => {
+        attempts += 1
+        if (attempts === 1) throw new Error('native failure')
+      },
+      error => errors.push(error),
+    )
+
+    coordinator.request(true)
+    await flush()
+    expect(coordinator.isIgnoring()).toBe(false)
+    expect(errors).toHaveLength(1)
+
+    coordinator.request(true)
+    await flush()
+    expect(attempts).toBe(2)
+    expect(coordinator.isIgnoring()).toBe(true)
+  })
+
+  it('coalesces duplicate requests without redundant native calls', async () => {
+    const calls: boolean[] = []
+    const coordinator = new CursorIgnoreCoordinator(async ignore => {
+      calls.push(ignore)
+    })
+
+    coordinator.request(true)
+    coordinator.request(true)
+    await flush()
+    expect(calls).toEqual([true])
+  })
+
+  it('does not let an initial no-op request block a later transition', async () => {
+    const calls: boolean[] = []
+    const coordinator = new CursorIgnoreCoordinator(async ignore => {
+      calls.push(ignore)
+    })
+
+    coordinator.request(false)
+    coordinator.request(true)
+    await flush()
+    expect(calls).toEqual([true])
+    expect(coordinator.isIgnoring()).toBe(true)
+  })
+})
 
 // ── shouldIgnore (hysteresis) ──────────────────────────────────────
 

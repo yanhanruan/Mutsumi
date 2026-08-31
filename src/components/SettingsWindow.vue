@@ -4,11 +4,11 @@
  *
  * Frameless (decorations:false, transparent:true) — the entire UI is
  * painted by Vue. A custom titlebar at the top carries the drag region
- * and OS window-control buttons (minimize / maximize / close).
+ * and the controls supported by this fixed-size window (minimize / close).
  *
  * Primary theme: #779977 (sage green).
  */
-import { onMounted, onUnmounted, nextTick, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, nextTick, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { enable, disable, isEnabled } from '@tauri-apps/plugin-autostart'
@@ -20,6 +20,9 @@ import {
   type CharacterSize, type SearchEngineKey, type ChatModelKey,
 } from '../composables/useAppConfig'
 import { useWeatherAvailable } from '../composables/useWeatherAvailable'
+import { usePlatformCapabilities } from '../composables/usePlatformCapabilities'
+import { isMacOSDesktop } from '../config/desktopPlatform'
+import WindowTitlebar from './WindowTitlebar.vue'
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -71,6 +74,7 @@ const affection    = ref(50)
 const mood         = ref('content')
 const status       = ref('')
 const autostart    = ref(false)
+const autostartAvailable = ref(true)
 
 // ── Character size (Task 3) ────────────────────────────────────────
 const SIZE_OPTIONS: { key: CharacterSize; labelKey: 'charSizeSmall' | 'charSizeMedium' | 'charSizeLarge' }[] = [
@@ -91,6 +95,12 @@ async function setSize(s: CharacterSize) {
 
 // ── Weather visibility ────────────────────────────────────────────
 const { weatherAvailable } = useWeatherAvailable()
+const {
+  musicAvailable,
+  musicPanelAvailable,
+  audioActivityDegraded,
+  idleScreensaverAvailable,
+} = usePlatformCapabilities()
 const localShowWeather = ref<boolean>(config.value.showWeather)
 
 watch(() => config.value.showWeather, v => { localShowWeather.value = v })
@@ -101,6 +111,8 @@ async function toggleWeather() {
 
 // ── Music controller visibility ───────────────────────────────────
 const localShowMusic = ref<boolean>(config.value.showMusic)
+const musicToggleLabel = computed(() =>
+  musicPanelAvailable.value ? t.value.showMusic : t.value.showAudioActivity)
 
 watch(() => config.value.showMusic, v => { localShowMusic.value = v })
 
@@ -134,6 +146,7 @@ watch(() => config.value.flyingScreensaver, v => { localFlying.value = v })
 watch(() => config.value.flyingWaitMins,    v => { localFlyingWait.value = v })
 
 async function applyFlying() {
+  if (!idleScreensaverAvailable.value) return
   // Clamp the wait into the supported range (also enforced Rust-side).
   const mins = Math.min(FLYING_WAIT_MAX_MINS,
     Math.max(FLYING_WAIT_MIN_MINS, Math.round(localFlyingWait.value || FLYING_WAIT_MIN_MINS)))
@@ -152,6 +165,7 @@ interface HotkeyStatus {
   active:      boolean
 }
 const flightHotkey = ref<HotkeyStatus | null>(null)
+const fallbackFlightAccelerator = isMacOSDesktop() ? '⌃⌥F' : 'Ctrl+Alt+F'
 
 async function refreshHotkeys() {
   try {
@@ -261,11 +275,23 @@ async function clearMemory() {
 // persisted on-device (never broadcast to the other window).
 const apiKeyInput = ref('')
 const apiKeyConfigured = ref(false)
+const credentialStoreAvailable = ref(true)
 const savingKey = ref(false)
 
+interface QwenKeyStatus {
+  configured: boolean
+  credentialStoreAvailable: boolean
+}
+
 async function refreshApiKeyStatus() {
-  try { apiKeyConfigured.value = await invoke<boolean>('qwen_key_status') }
-  catch { apiKeyConfigured.value = false }
+  try {
+    const result = await invoke<QwenKeyStatus>('qwen_key_status')
+    apiKeyConfigured.value = result.configured
+    credentialStoreAvailable.value = result.credentialStoreAvailable
+  } catch {
+    apiKeyConfigured.value = false
+    credentialStoreAvailable.value = false
+  }
 }
 
 async function saveApiKey() {
@@ -274,10 +300,13 @@ async function saveApiKey() {
   savingKey.value = true
   try {
     apiKeyConfigured.value = await invoke<boolean>('qwen_set_api_key', { key })
+    credentialStoreAvailable.value = true
     apiKeyInput.value = ''
     showStatus(t.value.apiKeySavedMsg)
   } catch (e) {
     console.error('save api key failed', e)
+    credentialStoreAvailable.value = false
+    showStatus(t.value.apiKeySaveFailedMsg)
   } finally {
     savingKey.value = false
   }
@@ -294,10 +323,13 @@ async function clearApiKey() {
   savingKey.value = true
   try {
     apiKeyConfigured.value = await invoke<boolean>('qwen_set_api_key', { key: '' })
+    credentialStoreAvailable.value = true
     apiKeyInput.value = ''
     showStatus(t.value.apiKeyClearedMsg)
   } catch (e) {
     console.error('clear api key failed', e)
+    credentialStoreAvailable.value = false
+    showStatus(t.value.apiKeyClearFailedMsg)
   } finally {
     savingKey.value = false
   }
@@ -308,7 +340,6 @@ async function clearApiKey() {
 const win = getCurrentWindow()
 
 function minimize()    { win.minimize() }
-function maximize()    { win.toggleMaximize() }
 function closeWindow() { win.close() }
 
 // ── Data actions ───────────────────────────────────────────────────
@@ -323,8 +354,14 @@ async function refresh() {
 }
 
 async function refreshAutostart() {
-  try { autostart.value = await isEnabled() }
-  catch { autostart.value = false }
+  try {
+    autostart.value = await isEnabled()
+    autostartAvailable.value = true
+  } catch (e) {
+    console.error('autostart status failed', e)
+    autostart.value = false
+    autostartAvailable.value = false
+  }
 }
 
 function showStatus(msg: string) {
@@ -340,6 +377,7 @@ async function toggleAutostart() {
   } catch (e) {
     console.error('autostart toggle failed', e)
     autostart.value = !autostart.value
+    showStatus(t.value.autostartFailedMsg)
   }
 }
 
@@ -384,26 +422,14 @@ onMounted(async () => {
       data-tauri-drag-region: the whole bar is a drag surface.
       win-controls has @mousedown.stop so clicks don't bleed into drag.
     -->
-    <header class="titlebar" data-tauri-drag-region>
-      <div class="title-identity" data-tauri-drag-region>
-        <span class="title-logo">🥒</span>
-        <span class="title-name">Mutsumi</span>
-        <span class="title-sep">·</span>
-        <span class="title-sub">{{ t.settingsTitle }}</span>
-      </div>
-
-      <div class="win-controls" @mousedown.stop>
-        <button class="wbtn wbtn-min"   @click="minimize"    title="Minimize">
-          <svg width="10" height="2" viewBox="0 0 10 2"><rect width="10" height="1.5" rx="0.75" fill="currentColor"/></svg>
-        </button>
-        <button class="wbtn wbtn-max"   @click="maximize"    title="Maximize">
-          <svg width="10" height="10" viewBox="0 0 10 10"><rect x="0.75" y="0.75" width="8.5" height="8.5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
-        </button>
-        <button class="wbtn wbtn-close" @click="closeWindow" title="Close">
-          <svg width="10" height="10" viewBox="0 0 10 10"><line x1="1" y1="1" x2="9" y2="9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="9" y1="1" x2="1" y2="9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-        </button>
-      </div>
-    </header>
+    <WindowTitlebar
+      :subtitle="t.settingsTitle"
+      :close-label="t.close"
+      :minimize-label="t.minimize"
+      minimizable
+      @minimize="minimize"
+      @close="closeWindow"
+    />
 
     <!-- ── Scrollable content ──────────────────────────────── -->
     <div class="content">
@@ -499,7 +525,10 @@ onMounted(async () => {
         <h2 class="card-title">
           <span class="card-icon">🎈</span>{{ t.flyingScreensaver }}
         </h2>
-        <p class="card-hint">{{ t.flyingScreensaverHint }}</p>
+        <p class="card-hint">{{ t.flyingScreensaverHint.replace('{keys}', flightHotkey?.accelerator ?? fallbackFlightAccelerator) }}</p>
+        <p v-if="!idleScreensaverAvailable" class="hotkey-warn">
+          ⚠️ {{ t.flyingScreensaverUnavailable }}
+        </p>
         <p v-if="flightHotkey && !flightHotkey.active" class="hotkey-warn">
           ⚠️ {{ t.hotkeyUnavailable.replace('{keys}', flightHotkey.accelerator) }}
         </p>
@@ -510,12 +539,13 @@ onMounted(async () => {
               id="flying-toggle"
               type="checkbox"
               v-model="localFlying"
+              :disabled="!idleScreensaverAvailable"
               @change="applyFlying"
             />
             <span class="thumb" />
           </label>
         </div>
-        <div class="field-row" :style="localFlying ? '' : 'opacity: 0.45; pointer-events: none;'">
+        <div class="field-row" :style="localFlying && idleScreensaverAvailable ? '' : 'opacity: 0.45; pointer-events: none;'">
           <label>{{ t.flyingWaitLabel }}</label>
           <div class="num-input">
             <input
@@ -602,6 +632,9 @@ onMounted(async () => {
           <span class="card-icon">🔑</span>{{ t.apiKey }}
         </h2>
         <p class="card-hint">{{ t.apiKeyHint }}</p>
+        <p v-if="!credentialStoreAvailable" class="system-warning">
+          ⚠️ {{ t.apiKeyCredentialStoreUnavailable }}
+        </p>
         <button type="button" class="key-help" @click="openApiKeyHelp">{{ t.apiKeyHelp }} ↗</button>
         <div class="key-row">
           <input
@@ -655,17 +688,19 @@ onMounted(async () => {
         </h2>
 
         <div class="field-row">
-          <label for="autostart-toggle">{{ t.launchOnStartup }}</label>
-          <label class="toggle">
+          <label for="autostart-toggle" :class="{ 'field-disabled': !autostartAvailable }">{{ t.launchOnStartup }}</label>
+          <label class="toggle" :class="{ 'field-disabled': !autostartAvailable }">
             <input
               id="autostart-toggle"
               type="checkbox"
               v-model="autostart"
+              :disabled="!autostartAvailable"
               @change="toggleAutostart"
             />
             <span class="thumb" />
           </label>
         </div>
+        <p v-if="!autostartAvailable" class="system-warning">⚠️ {{ t.autostartUnavailable }}</p>
 
         <!-- Auto-update check -->
         <div class="field-row" style="margin-top: 6px;">
@@ -700,8 +735,8 @@ onMounted(async () => {
         </div>
 
         <!-- Music controller visibility -->
-        <div class="field-row" style="margin-top: 6px;">
-          <label for="music-toggle">{{ t.showMusic }}</label>
+        <div v-if="musicAvailable" class="field-row" style="margin-top: 6px;">
+          <label for="music-toggle">{{ musicToggleLabel }}</label>
           <label class="toggle">
             <input
               id="music-toggle"
@@ -712,6 +747,9 @@ onMounted(async () => {
             <span class="thumb" />
           </label>
         </div>
+        <p v-if="musicAvailable && audioActivityDegraded" class="system-warning">
+          ⚠️ {{ t.audioActivityDegradedHint }}
+        </p>
 
         <!-- Sleep "zzz" effect visibility -->
         <div class="field-row" style="margin-top: 6px;">
@@ -800,103 +838,6 @@ onMounted(async () => {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   Custom titlebar
-══════════════════════════════════════════════════════════════ */
-.titlebar {
-  position: relative;
-  z-index: 10;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 40px;
-  padding: 0 10px 0 14px;
-
-  background: rgba(180, 220, 180, 0.28);
-  border-bottom: 1px solid rgba(119, 153, 119, 0.22);
-
-  /* macOS-style inset highlight */
-  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.18);
-
-  user-select: none;
-  -webkit-user-select: none;
-  cursor: default;
-}
-
-.title-identity {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex: 1;
-  min-width: 0;
-}
-
-.title-logo { font-size: 16px; line-height: 1; }
-
-.title-name {
-  font-size: 13px;
-  font-weight: 700;
-  color: #1a3a1a;
-  letter-spacing: -0.2px;
-}
-
-.title-sep {
-  font-size: 11px;
-  color: rgba(40, 80, 40, 0.35);
-}
-
-.title-sub {
-  font-size: 10px;
-  font-weight: 500;
-  color: rgba(40, 80, 40, 0.50);
-  text-transform: uppercase;
-  letter-spacing: 0.6px;
-}
-
-/* ── Window control buttons ──────────────────────────────── */
-.win-controls {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-}
-
-.wbtn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 22px;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  background: rgba(0, 0, 0, 0.06);
-  color: rgba(40, 70, 40, 0.55);
-  transition: background 100ms ease, color 100ms ease, transform 80ms ease;
-}
-
-.wbtn:hover  { background: rgba(0, 0, 0, 0.12); color: rgba(20, 50, 20, 0.85); }
-.wbtn:active { transform: scale(0.90); }
-
-/* Close — red on hover */
-.wbtn-close:hover {
-  background: rgba(220, 60, 60, 0.82);
-  color: white;
-}
-
-/* Minimize — amber on hover */
-.wbtn-min:hover {
-  background: rgba(200, 145, 30, 0.82);
-  color: white;
-}
-
-/* Maximize — green on hover */
-.wbtn-max:hover {
-  background: rgba(60, 170, 60, 0.82);
-  color: white;
-}
-
-/* ═══════════════════════════════════════════════════════════════
    Scrollable main content
 ══════════════════════════════════════════════════════════════ */
 .content {
@@ -916,6 +857,18 @@ onMounted(async () => {
 .content::-webkit-scrollbar       { width: 4px; }
 .content::-webkit-scrollbar-track { background: transparent; }
 .content::-webkit-scrollbar-thumb { background: rgba(119, 153, 119, 0.30); border-radius: 2px; }
+
+.field-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.system-warning {
+  margin: 4px 0 0;
+  color: rgba(130, 82, 16, 0.88);
+  font-size: 11px;
+  line-height: 1.4;
+}
 
 /* ── Glass card ──────────────────────────────────────────── */
 .card {
