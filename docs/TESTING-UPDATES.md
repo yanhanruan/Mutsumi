@@ -141,6 +141,15 @@ against a real binary, which no mock can.
 
 ## Layer 3 — GitHub staging release + asset verification
 
+Before the first staging run, configure the seven required updater/Apple
+secrets described in [`RELEASING.md`](RELEASING.md), then run the manual
+**release-credential-readiness** workflow. That check has only `contents: read`:
+it proves the updater private key matches the committed public key, exercises a
+disposable Developer ID signature, and authenticates through a read-only
+`notarytool history` request. It does not create a release/tag/artifact or submit
+anything for notarization. A green readiness run proves credentials, not the
+signed Mutsumi bundle; continue with staging for the end-to-end gate.
+
 Run the **staging-release** workflow (GitHub → Actions → staging-release →
 *Run workflow*, choosing any branch). It:
 

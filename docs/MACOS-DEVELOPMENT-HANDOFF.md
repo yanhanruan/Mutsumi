@@ -1,12 +1,12 @@
 # Mutsumi macOS 开发交接与续作指南
 
-> 更新时间：2026-08-25
+> 更新时间：2026-08-31
 >
 > 工作分支：`feat/macos-adaptation`
 >
 > 主分支基线：`main` / `d3b52a9`
 >
-> 当前实现锚点：`b027006 build(macOS): add signed universal release workflows`
+> 当前实现锚点：`6adc5ed test(updater): cover localized available window`
 
 这份文档用于在另一台 Mac 上恢复开发上下文。产品与技术决策仍以
 [`MACOS-ADAPTATION-PLAN.md`](MACOS-ADAPTATION-PLAN.md) 为准，发布边界以
@@ -86,20 +86,21 @@ reCAPTCHA；它同样不会随 Git 同步。如确有需要，应通过安全渠
 
 ## 3. 当前已经完成的范围
 
-当前已完成范围（实现锚点 `b027006`）：
+当前已完成范围（实现锚点 `6adc5ed`）：
 
 - Phase 1：macOS 编译/启动基线、capability 模型和不可用能力的显式降级。
 - Phase 2：透明桌宠窗口、全局光标、点击穿透、原子窗口几何、Dock 常驻契约，
-  以及 LaunchServices 单实例激活/退出 smoke。
+  以及 Finder 首启、LaunchServices 单实例激活/退出 smoke。
 - Phase 3：Finder 显示、macOS 快捷键、自启动和 Keychain 后端、公开 API
   空闲检测、GPU/磁盘详情与默认网络类型。
 - Phase 4：CoreAudio 音频活动降级方案和 WKWebView 正文深挖；不引入
   `MediaRemote` 等私有媒体 API。
 - Phase 5：About capability 展示、三语平台差异文案，以及设置/关于/更新窗口
   的 macOS 自绘标题栏。
-- Phase 6A–6D：Windows/macOS 桌面 CI、universal unsigned/signed bundle contract、
-  updater/release asset contract，以及已接线但尚无真实凭据正例的
-  signed/notarized staging 与 production workflow。
+- Phase 6A–6D：Windows、Apple Silicon 与原生 Intel 桌面 CI、universal
+  unsigned/signed bundle contract、updater/release asset contract、无远端变更的
+  credential readiness，以及已接线但尚无真实凭据正例的 signed/notarized
+  staging 与 production workflow。
 
 最近一次完整 app/DMG 本机基线（`4ed1d0d`）：
 
@@ -122,14 +123,24 @@ contract，以上 Vue、纯契约、前端构建、Rust 和 universal app/DMG �
 随后 Draft PR `desktop-ci` 已在 clean runner 重建 app/DMG 并通过完整 unsigned
 bundle contract。
 
-Draft PR [#18](https://github.com/yanhanruan/Mutsumi/pull/18) 已创建；当前证据锚点
-`b027006` 的
+Draft PR [#18](https://github.com/yanhanruan/Mutsumi/pull/18) 已创建。signed
+workflow 接线基线 `b027006` 的
 [`desktop-ci` run 32828050890](https://github.com/yanhanruan/Mutsumi/actions/runs/32828050890)
 在 GitHub-hosted runner 上完整通过：Windows regression 2 分 28 秒，macOS
 unsigned universal bundle 8 分 32 秒。后者明确验证新 identifier、macOS 13.0、
 双架构和 DMG 完整性，上传七天 artifact `9555918530`；两个 job annotations 均为空。
-当前 signed workflow 切片已在本机通过 workflow YAML、三个 release shell 脚本
-语法、前端 387/387、production build 与纯契约 76/76；两个 workflow 会先做
+
+当前功能锚点 `6adc5ed` 的
+[`desktop-ci` run 33239271856](https://github.com/yanhanruan/Mutsumi/actions/runs/33239271856)
+随后以三个 job 全部通过：Windows regression 4 分 25 秒、Apple Silicon
+unsigned universal bundle 10 分 07 秒、原生 Intel 14 分 03 秒。两个 macOS job
+分别在原生 arm64 与 x86_64 host 上完成 Rust/build，并实际通过 Finder Apple
+Event 首启、精确 bundle/架构、singleton、前台激活和 Quit 清理；Apple Silicon
+job 还在上传七天 unsigned artifact 前通过 app/DMG contract。该自动化验证 Finder
+“打开应用”的系统语义，不宣称执行了人的鼠标双击或完成全部肉眼 UI 矩阵。
+
+当前分支已在本机通过 workflow YAML、release/readiness shell 语法、前端
+390/390、production build 与纯契约 88/88；两个 signed workflow 会先做
 缺失/基础格式 secret preflight，再进入 Windows → macOS → final release jobs。
 final job 会先验证 release ID/tag/channel，再把 `tauri-action@v1` API asset ID
 绑定到同一 release 后重写为受控 tag 的公开下载 URL；staging reset 失败不再
@@ -137,9 +148,14 @@ final job 会先验证 release ID/tag/channel，再把 `tauri-action@v1` API ass
 内均运行 Rust tests。远程 `desktop-ci` 只执行这些静态契约和 unsigned 构建，
 没有读取 Apple/release secrets 或触发 signed workflow。这些结果只证明接线和
 fail-closed 结构，不代表证书密码、Developer ID 身份或真实 notarization 服务通过。
+`release-credential-readiness` 只读工作流会在 secrets 配齐后自动证明 updater
+私钥匹配、Developer ID 临时签名和 notary 认证；当前仓库仍只有
+`TAURI_SIGNING_PRIVATE_KEY` 这一项名称可见（2026-08-31 只读复核），因此没有
+触发它，也没有伪造正例。
 
-Rosetta 结果只证明 Intel slice 能在 Apple Silicon 转译环境中运行，不替代真实
-Intel Mac 验收。
+Rosetta 结果仍只代表转译；独立 `macos-15-intel` job 已补上原生 x86_64 host、
+Rust、app build 与生命周期证据。外部 Intel 设备上的肉眼 UI 观察可作为发布前
+补充，但不再是证明核心 x86_64 代码能够构建和启动的唯一门禁。
 
 ## 4. 日常验证命令
 
@@ -178,7 +194,8 @@ executable 的已有实例时会拒绝继续：
 ```bash
 npm run test:macos-lifecycle-smoke -- \
   --app src-tauri/target/universal-apple-darwin/release/bundle/macos/mutsumi.app \
-  --arch arm64
+  --arch arm64 \
+  --initial-launch finder
 
 # 仅限已安装 Rosetta 的 Apple Silicon，或对应 Intel 环境；脚本会在启动前
 # 直接探测并拒绝当前系统不能执行的目标 slice：
@@ -202,28 +219,27 @@ cargo test --manifest-path src-tauri/Cargo.toml \
 
 ## 5. 接下来最值得继续的工作
 
-Draft PR 与首次双平台远程 CI 已完成。后续优先级建议如下；人工/硬件项统一保留到
+Draft PR 与三宿主远程 CI 已完成。后续优先级建议如下；人工/硬件项统一保留到
 自动化开发结束后执行，pending 不代表发布通过：
 
 1. 继续记录可用设备上的真实桌面矩阵；缺少显示器、权限状态或外设时保留 pending，
    不让非阻塞人工项中断可自动完成的开发，但仍不得据此宣称发布门禁通过。
-2. 有真实 Intel Mac 时，下载同一 universal 构建验证启动、单实例与正常退出；
-   没有真机就继续把它保留为待验收，不能用 Rosetta 冒充完成。
-3. signed/notarized staging 与 production workflow 已接线；2026-08-25 的仓库
-   secret 名称审计只看到 `TAURI_SIGNING_PRIVATE_KEY`。首次签名前应由持有密钥的人
-   核实它与已提交 updater 公钥匹配，再配置缺失的 Developer ID/App Store Connect
-   secrets，先运行 rolling staging，再用刚签出的产物完成 Gatekeeper、安装和跨版本
-   更新人工验收。没有凭据时不得伪造 signed 正例，也不得触发 production tag。
+2. signed/notarized staging 与 production workflow 已接线；2026-08-31 的仓库
+   secret 名称审计只看到 `TAURI_SIGNING_PRIVATE_KEY`。配置缺失的 Developer ID /
+   App Store Connect secrets 后，先运行只读 `release-credential-readiness`；它会
+   自动核实 updater 私钥匹配、Developer ID 和 notary 认证。就绪检查绿色后再运行
+   rolling staging，并用刚签出的产物完成 Gatekeeper、安装和跨版本更新人工验收。
+   没有凭据时不得伪造 signed 正例，也不得触发 production tag。
 
 单纯 push `feat/macos-adaptation` 不会通过 workflow 的 `push` 入口触发
 `desktop-ci`，因为该入口只监听 `main`；当前 Draft PR #18 会让后续相关路径变更
-通过 `pull_request` 事件继续运行 Windows 和 macOS 两个 job。
+通过 `pull_request` 事件继续运行 Windows、Apple Silicon macOS 和 Intel macOS
+三个 job。
 
 ## 6. 尚未完成的真机矩阵
 
-- [ ] 从 Finder 直接启动/激活应用；Dock、菜单栏入口和隐藏后点击 Dock 恢复已通过，
-      不重复列为 pending。
-- [ ] 使用真实可用更新载荷验证更新窗口最高恢复优先级；设置/关于恢复优先级已通过。
+- [ ] 使用真实可用更新载荷观察更新窗口是否成为 macOS key window；最高优先级
+      决策、三语言载荷渲染、版本/说明和不重复联网已由自动化覆盖。
 - [ ] 正式发布前启动第二实例，在约 1 秒重试窗口内用物理鼠标或键盘切到其他应用，
       确认 Mutsumi 不会抢回焦点并记录结果。
 - [ ] 单屏、双屏、负坐标、不同缩放比例及主副屏切换。
@@ -232,7 +248,6 @@ Draft PR 与首次双平台远程 CI 已完成。后续优先级建议如下；�
 - [ ] 实际登录启动，而不只是 LaunchAgent plist 往返测试。
 - [ ] Keychain 首次允许、拒绝、锁定以及重新授权时的可见错误状态。
 - [ ] CoreAudio 在扬声器、耳机、蓝牙设备切换和暂时无输出设备时的行为。
-- [ ] 真实 Intel Mac 启动与生命周期 smoke。
 - [ ] staging DMG 安装及真实跨版本自动更新；必须等签名发布链就绪。
 
 ## 7. 已知边界，不要误判为已完成
@@ -241,6 +256,8 @@ Draft PR 与首次双平台远程 CI 已完成。后续优先级建议如下；�
 - `release.yml` 和 `staging-release.yml` 已包含 secret preflight 以及
   Windows → macOS → final gate，但尚未使用真实 Apple 凭据执行；preflight 和
   静态契约通过都不等于签名/notarization 通过。
+- `release-credential-readiness` 不修改 Release/tag/notarization 状态，但仍未用
+  真实凭据运行；即使将来绿色，也只证明凭据可用，不代替 staging 产物门禁。
 - 长期 macOS identifier 已冻结为 `io.github.yanhanruan.mutsumi`，仅写在
   macOS overlay；根配置的 `com.mutsumi.app` 保留给 Windows，避免迁移现有
   app-data 与凭据命名空间。后续不得再把二者误当成同一个跨平台 identifier。

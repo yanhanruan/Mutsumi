@@ -3,7 +3,7 @@
 > 状态：实施中；已锁定 Dock 与透明窗口 API 边界
 > 工作分支：`feat/macos-adaptation`
 > 基线：`main` / `d3b52a9`
-> 更新时间：2026-08-25
+> 更新时间：2026-08-31
 > 跨设备续作：见 [`MACOS-DEVELOPMENT-HANDOFF.md`](MACOS-DEVELOPMENT-HANDOFF.md)
 > 最新真机证据：见 [`MACOS-DESKTOP-TEST-RECORD.md`](MACOS-DESKTOP-TEST-RECORD.md)
 
@@ -64,10 +64,10 @@ Mutsumi 当前是以 Windows 为唯一发布平台设计的 Tauri 2 桌面应用
 
 当前开发机为 Apple Silicon macOS，Rust stable 与 Tauri 构建工具链已安装；`cargo check`、`cargo test`、前端测试、前端构建和 `tauri dev` 已形成可复现基线。
 
-当前实施进度（2026-08-25）：
+当前实施进度（2026-08-31）：
 
 - Phase 1 编译/启动基线已完成，未实现能力通过 capability 显式降级。
-- Phase 2 已完成 Dock 生命周期、透明窗口启动契约、全局光标、点击穿透协调和原子窗口几何；universal app 的 Dock/LaunchServices 前台资格已形成可重放 smoke，Dock 常驻、菜单栏入口、隐藏恢复及设置/关于恢复优先级已通过人工验收。单实例延迟重聚焦现会在公开 CoreGraphics 检测到用户焦点相关输入时取消，并以包含系统睡眠的公开 Mach 连续时钟丢弃超过两秒的陈旧任务；产品决定将修复后的物理切走端到端确认保留为正式发布前 pending，不阻塞当前适配。更新窗口优先级、多显示器、缩放和负坐标仍待真机矩阵验收。
+- Phase 2 已完成 Dock 生命周期、透明窗口启动契约、全局光标、点击穿透协调和原子窗口几何；universal app 的 Dock/LaunchServices 前台资格已形成可重放 smoke，Dock 常驻、菜单栏入口、隐藏恢复及设置/关于恢复优先级已通过人工验收。首实例现可由 Finder Apple Event 启动，并在 Apple Silicon 本机完整通过前台、单实例和 Quit 清理 smoke；同一 Finder 首启已接入原生 arm64 与原生 Intel CI。单实例延迟重聚焦会在公开 CoreGraphics 检测到用户焦点相关输入时取消，并以包含系统睡眠的公开 Mach 连续时钟丢弃超过两秒的陈旧任务；产品决定将修复后的物理切走端到端确认保留为正式发布前 pending。更新窗口已有最高优先级纯决策测试和中/日/英预取载荷组件测试，真实 macOS key-window 焦点、多显示器、缩放和负坐标仍待人工矩阵。
 - Phase 3 已完成 Finder 显示、macOS 快捷键符号、公开 API 空闲检测、GPU/物理磁盘硬件详情，以及默认网络的 Wi‑Fi/Ethernet/其他/离线分类。空闲检测同时读取 CoreGraphics 全局输入时间与 IOKit `PreventUserIdleDisplaySleep` 聚合断言；采样失败时自动飞行保持关闭。硬件详情使用结构化 `system_profiler` JSON 与 `diskutil` plist；网络类型使用公开 SystemConfiguration 动态存储和接口 API，均已通过本机只读冒烟。自启动与系统凭据存储的失败状态已对用户可见；LaunchAgent 配置文件的启用状态往返、Keychain 的读写删除、单实例前台激活及标准 Quit 后 socket 清理均已通过真机测试。实际登录启动和休眠/锁屏/切换用户/显示器热插拔仍待真机矩阵验收。
 - Phase 4A 音频/媒体公开 API spike 已完成，详细决策与兼容性证据见
   [`MACOS-MEDIA-SPIKE.md`](MACOS-MEDIA-SPIKE.md)。macOS 首版使用公开
@@ -86,10 +86,12 @@ Mutsumi 当前是以 Windows 为唯一发布平台设计的 Tauri 2 桌面应用
   可用操作使用左侧交通灯（设置为红/黄，关于与更新仅红色关闭），
   其他平台保留右侧控件；固定尺寸窗口不再展示无效的最大化操作，
   图标按钮具有 en/zh/ja 标题和无障碍标签。
-- Phase 6A 已配置桌面双平台 CI 门禁：Windows 运行前后端回归，macOS
-  同时安装 `aarch64-apple-darwin` / `x86_64-apple-darwin` 目标，生成未签名
-  app/DMG，并校验 Mach-O 双架构、macOS 13.0 最低版本与 Dock 前台资格。
-  Draft PR #18 的 GitHub-hosted Windows/macOS job 已完整通过；签名/notarization
+- Phase 6A 已配置桌面三宿主 CI 门禁：Windows 运行前后端回归，Apple Silicon
+  macOS 生成未签名 universal app/DMG 并校验双架构、macOS 13.0 与 Dock 前台资格；
+  `macos-15-intel` 另外执行原生 x86_64 Rust 测试、app build 和生命周期 smoke。
+  两个 macOS job 都以 Finder Apple Event 启动首实例，再验证精确 bundle/架构、
+  singleton 与正常退出。Draft PR #18 的最终功能锚点 run `33239271856` 已在
+  Windows、Apple Silicon 与原生 Intel 三个 job 形成远程正例；签名/notarization
   staging 与 production workflow、updater 资产聚合和静态契约已经接入，但首个
   Developer ID/App Store Connect 凭据运行与 signed 正例仍待完成。
 
@@ -319,7 +321,7 @@ Apple Silicon WKWebView 真机记录（2026-08-21）：
 5. 更新发布资产校验脚本，使 updater manifest 同时校验 Windows 和 macOS。
 6. 完成从旧 macOS 版本到 staging 版本的真实升级测试。
 
-当前记录（2026-08-25）：
+当前记录（2026-08-31）：
 
 - 新增 `desktop-ci` workflow，在每个 PR 与相关 main 推送时保留 Windows
   前后端回归，同时构建未签名 universal app/DMG。可复用的 bundle contract
@@ -334,8 +336,15 @@ Apple Silicon WKWebView 真机记录（2026-08-21）：
   `windows-latest` / `macos-latest` 完整通过；checkout、setup-node 与
   upload-artifact 均升级到官方 v7，首轮 run 暴露的 Node.js 20 Action 弃用
   提示已消失。详细环境、命令、受控沙箱失败说明和仍待人工矩阵见
-  [`MACOS-DESKTOP-TEST-RECORD.md`](MACOS-DESKTOP-TEST-RECORD.md)。Developer ID
-  签名、notarization/stapling、Gatekeeper 和真实 Intel 启动仍待完成。
+  [`MACOS-DESKTOP-TEST-RECORD.md`](MACOS-DESKTOP-TEST-RECORD.md)。随后
+  `macos-15-intel` 已在原生 `x86_64-apple-darwin` host 上完成 Rust 测试、
+  unsigned app build 与 LaunchServices 生命周期；它关闭了“只有 Rosetta 证据”的
+  核心架构缺口。当前功能锚点 `6adc5ed` 的 Draft PR run 33239271856 又在 Windows
+  4 分 25 秒、Apple Silicon 10 分 07 秒、原生 Intel 14 分 03 秒内全部通过；两个
+  macOS job 都实际完成 Finder Apple Event 首启、对应原生架构、singleton 与 Quit
+  清理。它是 Finder 打开语义的自动化正例，不冒充人的鼠标双击或外部设备 UI 观察。
+  Developer ID 签名、notarization/stapling、Gatekeeper 和外部设备上的可见 UI
+  观察仍待完成。
 - 本机原生 bundle 验证发现原 identifier `com.mutsumi.app` 以 `.app` 结尾，
   Tauri 明确提示可能与 macOS bundle 扩展冲突。产品已在正式签名前冻结
   `io.github.yanhanruan.mutsumi`，并仅通过 `tauri.macos.conf.json` 覆盖 macOS；
@@ -371,12 +380,18 @@ Apple Silicon WKWebView 真机记录（2026-08-21）：
   contract。staging reset 不再吞掉删除失败，最终还会校验 rolling tag 指向本次
   workflow SHA。Windows/macOS 两边均在 signed workflow 内运行 Rust tests。
   证书和 `.p8` 只写入 `RUNNER_TEMP`，构建后以 `if: always()` best-effort 清理；
-  runner 被强制终止时不能宣称 cleanup step 必然执行。静态 workflow 契约可
-  自动验证结构，当前发布/bundle/生命周期/workflow 纯契约为 76/76；真实 Apple
+  runner 被强制终止时不能宣称 cleanup step 必然执行。另有手动触发、仅
+  `contents: read` 的 `release-credential-readiness`：它用临时文件实签并验证
+  updater 私钥与已提交公钥匹配，临时 codesign 验证 Developer ID 私钥，再用
+  `notarytool history` 做只读 Apple 认证；不会创建 Release/tag/artifact 或提交
+  notarization。静态 workflow 契约可自动验证结构，当前
+  发布/bundle/生命周期/workflow 纯契约为 88/88；真实 Apple
   凭据、签名身份和 notarization 服务结果不能伪造。接线提交 `b027006` 的 Draft
   PR run 32828050890 已在 Windows/macOS 分别用时 2 分 28 秒与 8 分 32 秒通过，
   annotations 均为空；该 run 只执行双平台回归、静态契约与 unsigned universal
-  bundle，不读取 release secrets，也不构成 signed/notarized 正例。
+  bundle，不读取 release secrets，也不构成 signed/notarized 正例。2026-08-31
+  只读 secret 名称审计仍只看到 `TAURI_SIGNING_PRIVATE_KEY`；其余 Apple secrets
+  未配置，因此没有触发 readiness 或 signed workflow。
 
 验收：
 
