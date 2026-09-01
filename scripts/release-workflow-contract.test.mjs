@@ -194,6 +194,37 @@ test('builds one universal signed and notarized macOS bundle behind the exact bu
   }
 })
 
+function assertDmgFinalizationOrder(macos) {
+  const build = macos.indexOf('uses: tauri-apps/tauri-action@v1')
+  const notarize = macos.indexOf('node scripts/finalize-macos-dmg.mjs notarize')
+  const verify = macos.indexOf('node scripts/verify-macos-bundle.mjs')
+  const upload = macos.indexOf('node scripts/finalize-macos-dmg.mjs upload')
+  assert.ok(build !== -1 && notarize > build && verify > notarize && upload > verify,
+    'must build, notarize/staple DMG, verify signed bundle, then upload final DMG')
+  assert.doesNotMatch(macos, /continue-on-error: true/)
+}
+
+test('both signed workflows finalize and verify the outer DMG before replacing its upload', () => {
+  for (const workflow of [production, staging]) {
+    const macos = job(workflow, 'macos', 'verify')
+    assertDmgFinalizationOrder(macos)
+    assert.match(macos, /RELEASE_ID: \$\{\{ needs\.windows\.outputs\.release_id \}\}/)
+    assert.match(macos, /--release-id "\$RELEASE_ID"/)
+  }
+  assert.match(job(production, 'macos', 'verify'), /--tag "\$GITHUB_REF_NAME" --channel production/)
+  assert.match(job(staging, 'macos', 'verify'), /--tag staging --channel staging/)
+})
+
+test('regression guard rejects missing DMG notarization or upload before signed validation', () => {
+  const macos = job(production, 'macos', 'verify')
+  assert.throws(() => assertDmgFinalizationOrder(macos.replace(
+    'node scripts/finalize-macos-dmg.mjs notarize', 'node scripts/missing-step.mjs',
+  )))
+  assert.throws(() => assertDmgFinalizationOrder(macos.replace(
+    'node scripts/verify-macos-bundle.mjs', 'node scripts/finalize-macos-dmg.mjs upload',
+  )))
+})
+
 test('keeps Apple credentials out of Windows jobs and preserves channel safety', () => {
   const productionWindows = job(production, 'windows', 'macos')
   const productionMacos = job(production, 'macos', 'verify')

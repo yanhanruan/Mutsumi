@@ -172,7 +172,7 @@ jobs:
           APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
         run: bash scripts/setup-macos-signing.sh
 
-      - name: Build, sign, notarize and upload universal macOS assets
+      - name: Build, sign, notarize app and upload initial macOS assets
         id: tauri
         uses: tauri-apps/tauri-action@v1
         env:
@@ -190,6 +190,15 @@ jobs:
           uploadUpdaterJson: true
           args: --target universal-apple-darwin
 
+      - name: Notarize and staple the outer DMG
+        shell: bash
+        env:
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+        run: >-
+          node scripts/finalize-macos-dmg.mjs notarize
+          --bundle-dir src-tauri/target/universal-apple-darwin/release/bundle
+
       - name: Verify signed, hardened and notarized macOS bundle
         shell: bash
         run: |
@@ -198,6 +207,16 @@ jobs:
             --mode signed \
             --expected-identifier io.github.yanhanruan.mutsumi \
             --expected-minimum-system-version 13.0
+
+      - name: Replace the release DMG with the verified stapled file
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ needs.windows.outputs.release_id }}
+        run: |
+          node scripts/finalize-macos-dmg.mjs upload \
+            --bundle-dir src-tauri/target/universal-apple-darwin/release/bundle \
+            --release-id "$RELEASE_ID" --tag "$GITHUB_REF_NAME" --channel production
 
       - name: Remove ephemeral macOS signing material
         if: always()

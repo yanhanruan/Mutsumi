@@ -162,9 +162,13 @@ Run the **staging-release** workflow (GitHub → Actions → staging-release →
    This prerelease never resolves through `releases/latest/download/…`, so it
    cannot leak to production clients;
 3. builds one `universal-apple-darwin` app/DMG, signs it with Developer ID,
-   notarizes/staples it with App Store Connect credentials, runs the signed
-   bundle gate, uploads it to the same release, and merges macOS entries into
-   the existing `latest.json`;
+   notarizes/staples the app and uploads initial assets through Tauri. An
+   explicit outer-DMG submission then waits for `Accepted`, staples and
+   validates the DMG ticket, and runs the full signed bundle gate. Only after
+   that gate passes does the workflow replace the initial DMG in the same
+   ID/tag/channel-validated release. The action merges macOS updater entries
+   into the existing `latest.json`; replacing the DMG does not alter the
+   updater archive or its signature;
 4. runs [`scripts/verify-release-assets.mjs`](../scripts/verify-release-assets.mjs)
    with `--require-macos-universal`, which fails unless the release carries the
    complete Windows NSIS and universal macOS DMG/updater asset set, with a

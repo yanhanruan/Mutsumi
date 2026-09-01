@@ -55,6 +55,17 @@ stable public `/releases/download/<tag>/<asset>` form before applying the
 existing release contract. This avoids anonymous GitHub API limits without
 weakening release, repository, tag or asset-name validation.
 
+Tauri CLI 2.11.2 automatically notarizes/staples the `.app`, but only signs the
+outer DMG. Both signed workflows therefore run `finalize-macos-dmg.mjs notarize`
+after the action: submit the DMG with `notarytool --wait`, require an `Accepted`
+result, then staple and validate its ticket. After the full signed bundle gate
+passes, `finalize-macos-dmg.mjs upload` validates the release ID/tag/channel and
+replaces only that release's same-named DMG with the finalized local bytes.
+It rechecks the ticket before any GitHub mutation. The `.app.tar.gz`, its updater
+signature, and Windows assets are unchanged by DMG replacement. Any failure
+stops the workflow; test clients must still wait for the final staging gate,
+including if replacement fails after the original DMG has been deleted.
+
 On a logged-in Mac, the opt-in lifecycle smoke launches a built app through
 LaunchServices, verifies the requested Mach-O slice is a ready foreground/Dock
 application, launches it a second time to exercise singleton activation, then

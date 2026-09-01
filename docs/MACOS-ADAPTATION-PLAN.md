@@ -3,7 +3,7 @@
 > 状态：实施中；已锁定 Dock 与透明窗口 API 边界
 > 工作分支：`feat/macos-adaptation`
 > 基线：`main` / `d3b52a9`
-> 更新时间：2026-08-31
+> 更新时间：2026-10-13
 > 跨设备续作：见 [`MACOS-DEVELOPMENT-HANDOFF.md`](MACOS-DEVELOPMENT-HANDOFF.md)
 > 最新真机证据：见 [`MACOS-DESKTOP-TEST-RECORD.md`](MACOS-DESKTOP-TEST-RECORD.md)
 
@@ -392,6 +392,17 @@ Apple Silicon WKWebView 真机记录（2026-08-21）：
   bundle，不读取 release secrets，也不构成 signed/notarized 正例。2026-08-31
   只读 secret 名称审计仍只看到 `TAURI_SIGNING_PRIVATE_KEY`；其余 Apple secrets
   未配置，因此没有触发 readiness 或 signed workflow。
+
+2026-10-13 发布接线复核与修复：
+
+- 锁定的 Tauri CLI 2.11.2 自动公证/附加票据的是 `.app`，外层 DMG 只被签名。
+  production/staging 现显式提交外层 DMG，等待 `Accepted` 后执行 staple 和票据
+  验证，再运行完整 signed bundle gate。通过后才按受控 Release ID/tag/channel
+  替换同名 DMG，确保远程下载的是附有票据的最终字节；updater archive/signature
+  与 Windows 资产不参与替换。
+- 发布契约新增公证拒绝/未完成、票据失败、错误 Release 与上传失败的负例，以及
+  workflow 缺少 DMG 公证或过早上传时的回归门禁。纯契约 99/99 通过；这仍是本机
+  自动化验证，真实 Apple 凭据、公证服务和 signed staging 正例继续保持 pending。
 
 验收：
 
