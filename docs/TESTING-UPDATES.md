@@ -56,6 +56,68 @@ This layer runs a **real staging build** of the app against a local HTTP
 server that speaks the updater protocol — including the negative cases that
 matter most.
 
+The server supports Windows and both macOS architectures. `--platform` defaults
+to `windows-x86_64`; use `darwin-aarch64` or `darwin-x86_64` for the actual Mac
+client being tested. `missing-platform` removes only that entry, and
+`bad-signature` corrupts only that entry's cryptographic signature line. The
+legacy `missing-windows` scenario remains available and removes Windows only.
+The server listens on loopback (`localhost`), not the LAN.
+
+### macOS local protocol runbook (manual results still pending)
+
+Use a disposable test checkout and a writable test app location. Quit any other
+Mutsumi instance first: test builds retain the macOS bundle identifier and can
+share app data/Keychain with your regular build. Back up the app data before
+testing; do not overwrite your daily installation. These local artifacts are
+not Developer ID/notarized distribution evidence.
+
+1. Run `node scripts/gen-test-keys.mjs` and put its printed test public key into
+   the local `src-tauri/tauri.staging.conf.json`. The checked-in sample key does
+   **not** automatically match a newly generated private key. Keep this local
+   configuration change and the test keys out of commits.
+2. In a shell without Apple release credentials, build an old and new test
+   version with the same test key. The macOS overlay is loaded automatically;
+   the extra version configuration avoids editing committed version files:
+
+   ```bash
+   export TAURI_SIGNING_PRIVATE_KEY="$PWD/scripts/test-keys/mutsumi-test.key"
+   export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=''
+   npx tauri build --target universal-apple-darwin --bundles app --ci \
+     --config src-tauri/tauri.staging.conf.json --config '{"version":"9.9.8"}'
+   ```
+
+   Copy the generated `.app` from
+   `src-tauri/target/universal-apple-darwin/release/bundle/macos/` to your writable
+   test location **before** the next build. Launch that copy and confirm About
+   says `9.9.8`, then quit it. Build again with `{"version":"9.9.9"}`; keep the
+   new `.app.tar.gz` and adjacent `.sig`. Do not substitute the DMG, or launch
+   the new client before testing the old one.
+3. Create a universal manifest (replace the archive path with the actual output):
+
+   ```bash
+   node scripts/make-latest-json.mjs \
+     --installer src-tauri/target/universal-apple-darwin/release/bundle/macos/mutsumi.app.tar.gz \
+     --version 9.9.9 --platform darwin-universal
+   node scripts/fake-update-server.mjs --platform darwin-aarch64 --scenario lower-version
+   ```
+
+   Both Darwin entries point to the same archive/signature. On native Intel use
+   `--platform darwin-x86_64`; use the architecture of the running client, not
+   just the physical host. Repeat the server command for `missing-platform`,
+   `malformed-json`, `installer-404`, `bad-signature`, `interrupt`, then `ok` last.
+4. For each scenario use the **old copied app**, About → Check for updates.
+   The existing scenario table defines the expected UI. In all download-failure
+   cases confirm About still reports `9.9.8`; for `ok`, confirm the relaunched
+   app reports `9.9.9`. Record architecture, OS, both versions, scenario, actual
+   result and evidence. A Gatekeeper/launch failure is a blocked local test,
+   not a protocol pass; do not disable Gatekeeper to claim success.
+
+`npm run test:local-updater` exercises real loopback HTTP responses and fixture
+generation for Windows and both Darwin targets. Its synthetic signatures and
+archive bytes test the **harness**, not Tauri signature verification or macOS
+installation. Those require the manual procedure above and signed staging for
+the final release gate. No real macOS upgrade is recorded as passed yet.
+
 ### One-time setup
 
 ```powershell
@@ -127,6 +189,7 @@ node scripts/fake-update-server.mjs --scenario lower-version
 | --- | --- | --- |
 | `ok` | valid manifest + installer + signature | offer 1.5.0 → download → install → relaunch as 1.5.0 |
 | `lower-version` | manifest advertises 0.0.1 | show "latest version", no offer |
+| `missing-platform` | removes the requested `--platform` entry | failed view because no matching client platform exists; no download or install |
 | `missing-windows` | no windows platform in manifest | failed view — the plugin errors ("none of the fallback platforms… found"). Correct for a Windows-only app: such a manifest is broken, not "no update"; `verify-release-assets.mjs` blocks it from ever shipping |
 | `installer-404` | download URL returns 404 | failed view with reason; Retry works |
 | `bad-signature` | signature tampered | **reject the install** — failed view, never 🎉 |

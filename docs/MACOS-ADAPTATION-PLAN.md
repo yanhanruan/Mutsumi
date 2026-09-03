@@ -97,6 +97,20 @@ Mutsumi 当前是以 Windows 为唯一发布平台设计的 Tauri 2 桌面应用
 
 ## 5. 总体技术方案
 
+### 2026-10-13 进度核对与本地 updater 切片（人工 review 已通过）
+
+- Phase 1、4 的实现与已记录测试已完成；Phase 2、3、5 的实现已完成，但完整
+  桌面、外设、权限和三语视觉矩阵仍 pending，不能按“实现完成”认定验收完成。
+- Phase 6 的 CI、签名接线与外层 DMG 公证修复已完成；真实凭据 readiness、
+  signed staging、Gatekeeper、安装和跨版本更新仍 pending。此前三宿主 CI 证据
+  属于文中记录的历史提交，不代表 `fcaac03` 已完成新的远程 CI。
+- Phase 7 正在补齐可执行验收工具。本切片扩展本地 updater 工具到 Windows、
+  Apple Silicon 和 Intel：universal manifest、按平台注入签名错误/缺失条目、
+  真正截断下载，以及 macOS 双版本人工 runbook。7 项本地工具 HTTP 测试通过；
+  不冒充真实客户端升级结果；用户已完成人工 review 并批准提交。
+- 下一验收动作：用隔离测试 app 执行本地协议负例；正式
+  发布前仍需完整 signed staging 和第 7 阶段真机矩阵。
+
 ### 5.1 平台模块边界
 
 保持前端调用的命令名和事件名稳定，把平台差异收敛到 Rust 内部：

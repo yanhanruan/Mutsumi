@@ -18,6 +18,7 @@
  *   missing-windows manifest has no windows platform      → failed view (plugin
  *                  errors: no matching platform — such a manifest is broken,
  *                  and verify-release-assets.mjs keeps it from ever shipping)
+ *   missing-platform removes only --platform's entry (defaults to windows-x86_64)
  *   installer-404  download URL returns 404               → failed view, retry allowed
  *   bad-signature  signature corrupted                    → verification failure, NEVER installs
  *   malformed-json latest.json is not valid JSON          → failed view, no crash
@@ -28,7 +29,7 @@ import { readFileSync, existsSync, statSync, createReadStream } from 'node:fs'
 import { join, resolve, basename } from 'node:path'
 
 const SCENARIOS = [
-  'ok', 'lower-version', 'missing-windows', 'installer-404',
+  'ok', 'lower-version', 'missing-windows', 'missing-platform', 'installer-404',
   'bad-signature', 'malformed-json', 'interrupt',
 ]
 
@@ -40,6 +41,11 @@ function arg(name, fallback = null) {
 const dir = resolve(arg('dir', join('scripts', 'fake-update-dist')))
 const scenario = arg('scenario', 'ok')
 const port = Number(arg('port', '9414'))
+const platform = arg('platform', 'windows-x86_64')
+if (!['windows-x86_64', 'darwin-aarch64', 'darwin-x86_64'].includes(platform)) {
+  console.error(`error: unsupported platform ${platform}`)
+  process.exit(1)
+}
 
 if (!SCENARIOS.includes(scenario)) {
   console.error(`error: unknown scenario "${scenario}"\nvalid: ${SCENARIOS.join(', ')}`)
@@ -57,21 +63,33 @@ function manifestBody() {
   if (scenario === 'malformed-json') return '{ "version": "9.9.9", this is not json'
   const m = JSON.parse(raw)
   if (scenario === 'lower-version') m.version = '0.0.1'
-  if (scenario === 'missing-windows') m.platforms = {}
+  if (scenario === 'missing-windows') delete m.platforms['windows-x86_64']
+  if (scenario === 'missing-platform') delete m.platforms[platform]
   if (scenario === 'bad-signature') {
-    const win = m.platforms['windows-x86_64']
+    const entry = m.platforms[platform]
     // The manifest signature is base64 of the WHOLE minisign .sig file, whose
     // first line is an "untrusted comment" that verification ignores by
     // design. Tampering must therefore hit line 2 — the actual ed25519
     // signature. (v1 of this script corrupted bytes 30–36, i.e. the comment,
     // and the update sailed through: a false PASS of the whole scenario.)
-    const lines = Buffer.from(win.signature, 'base64').toString('utf8').split('\n')
+    const lines = Buffer.from(entry.signature, 'base64').toString('utf8').split('\n')
+    if (!lines[1]?.length) throw new Error('signature must contain a minisign signature line')
     const mid = Math.floor(lines[1].length / 2)
     const flipped = lines[1][mid] === 'A' ? 'B' : 'A'
     lines[1] = lines[1].slice(0, mid) + flipped + lines[1].slice(mid + 1)
-    win.signature = Buffer.from(lines.join('\n'), 'utf8').toString('base64')
+    entry.signature = Buffer.from(lines.join('\n'), 'utf8').toString('base64')
   }
   return JSON.stringify(m, null, 2)
+}
+
+// Reject unusable fixtures before accepting client requests.
+try {
+  const pristine = JSON.parse(readFileSync(manifestPath, 'utf8'))
+  if (!pristine.platforms?.[platform]) throw new Error(`manifest has no ${platform} entry`)
+  manifestBody()
+} catch (error) {
+  console.error(`error: invalid fixture: ${error.message}`)
+  process.exit(1)
 }
 
 const server = createServer((req, res) => {
@@ -100,7 +118,7 @@ const server = createServer((req, res) => {
     if (scenario === 'interrupt') {
       // Stream roughly half the installer, then destroy the socket so the
       // client sees a mid-download connection failure.
-      const stream = createReadStream(file)
+      const stream = createReadStream(file, { end: Math.max(0, Math.floor(size / 2) - 1) })
       let sent = 0
       stream.on('data', chunk => {
         sent += chunk.length
@@ -111,6 +129,7 @@ const server = createServer((req, res) => {
           res.destroy()
         }
       })
+      stream.on('end', () => res.destroy())
       return
     }
 
@@ -122,8 +141,8 @@ const server = createServer((req, res) => {
   res.end('not found')
 })
 
-server.listen(port, () => {
-  console.log(`fake update server on http://localhost:${port}`)
+server.listen(port, 'localhost', () => {
+  console.log(`fake update server on http://localhost:${server.address().port}`)
   console.log(`  dir       ${dir}`)
   console.log(`  scenario  ${scenario}`)
   console.log('')
