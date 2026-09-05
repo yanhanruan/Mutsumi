@@ -61,9 +61,10 @@ to `windows-x86_64`; use `darwin-aarch64` or `darwin-x86_64` for the actual Mac
 client being tested. `missing-platform` removes only that entry, and
 `bad-signature` corrupts only that entry's cryptographic signature line. The
 legacy `missing-windows` scenario remains available and removes Windows only.
-The server listens on loopback (`localhost`), not the LAN.
+The server listens on loopback (`localhost`), not the LAN; on macOS that
+resolved to IPv6 `[::1]` only, which the client reached.
 
-### macOS local protocol runbook (manual results still pending)
+### macOS local protocol runbook
 
 Use a disposable test checkout and a writable test app location. Quit any other
 Mutsumi instance first: test builds retain the macOS bundle identifier and can
@@ -116,7 +117,49 @@ not Developer ID/notarized distribution evidence.
 generation for Windows and both Darwin targets. Its synthetic signatures and
 archive bytes test the **harness**, not Tauri signature verification or macOS
 installation. Those require the manual procedure above and signed staging for
-the final release gate. No real macOS upgrade is recorded as passed yet.
+the final release gate. The manual procedure has passed once (below); signed
+staging and the Layer 4 real upgrade are still pending.
+
+#### macOS local results — 2026-09-05
+
+Host: Apple M5 (`Mac17,4`), macOS 26.5.1 (`25F80`). Builds from `ebf12c0`:
+`universal-apple-darwin`, `--bundles app`, staging overlay with a locally
+generated test key, ad-hoc signed — **not** Developer ID/notarized evidence.
+Old 9.9.8 → new 9.9.9 (`mutsumi.app.tar.gz`). One copied old app was launched
+natively (`open --arch arm64`) and under Rosetta (`open --arch x86_64`, confirmed
+by the Rosetta runtime mapped into the process). Evidence for every row: the
+server request log, the SHA-256 of `Contents/MacOS/Mutsumi` compared with both
+builds, the process ID, and the pop-up as seen by the tester.
+
+| Client | `--platform` | Scenario | Pop-up | Requests | Installed afterwards |
+| --- | --- | --- | --- | --- | --- |
+| arm64 | `darwin-aarch64` | `missing-platform` | failed: none of `darwin-aarch64-app`, `darwin-aarch64` found | manifest only | 9.9.8, unchanged |
+| arm64 | `darwin-aarch64` | `bad-signature` | offered 9.9.9 → failed after download | manifest + archive | 9.9.8, unchanged |
+| arm64 | `darwin-aarch64` | `interrupt` | failed mid-download | manifest + archive | 9.9.8, unchanged |
+| x86_64 | `darwin-x86_64` | `missing-platform` | failed: none of `darwin-x86_64-app`, `darwin-x86_64` found | manifest only | 9.9.8, unchanged |
+| x86_64 | `darwin-x86_64` | `bad-signature` | failed after download | manifest + archive | 9.9.8, unchanged |
+| x86_64 | `darwin-x86_64` | `interrupt` | failed: `error decoding response body` | manifest + archive | 9.9.8, unchanged |
+| x86_64 | `darwin-aarch64` | `missing-platform` (cross-check) | offered 9.9.9; closed without installing | manifest only | 9.9.8, unchanged |
+| arm64 | `darwin-x86_64` | `missing-platform` (cross-check) | offered 9.9.9; closed without installing | manifest only | 9.9.8, unchanged |
+| arm64 | `darwin-aarch64` | `lower-version` | up to date | manifest only | 9.9.8, unchanged |
+| arm64 | `darwin-aarch64` | `malformed-json` | failed, no crash | manifest only | 9.9.8, unchanged |
+| arm64 | `darwin-aarch64` | `installer-404` | failed; Retry failed again | manifest + archive 404 ×2 | 9.9.8, unchanged |
+| arm64 | `darwin-aarch64` | `ok` (last) | downloaded, installed, relaunched; About shows 9.9.9 | manifest + archive | 9.9.9 = new build, new process |
+
+After `ok`, nothing was left next to the app or in the app's temp directory, and
+the updated bundle carried no quarantine attribute. Two observations from the
+run:
+
+- About 5 s after the `lower-version` "up to date" view, with no user input,
+  9.9.8 crashed once (SIGSEGV on the main thread in WebKit,
+  `ScrollingTree::takePendingScrollUpdates` from the display-link refresh). The
+  installed bundle was unaffected; the app was relaunched and the run
+  continued. This is an app stability issue, not an updater result, and is
+  tracked separately.
+- The archive was an odd number of bytes, so `interrupt` dropped the
+  connection correctly but never printed its `interrupting after` line: the
+  server compares against `size / 2` while the stream stops at the whole-byte
+  half. A logging gap only; the scenario itself was valid.
 
 ### One-time setup
 
