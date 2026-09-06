@@ -8,11 +8,11 @@ import { once } from 'node:events'
 
 const signature = Buffer.from('untrusted comment: test\n' + 'A'.repeat(100) + '\ntrusted comment: test\nAAAA\n').toString('base64')
 
-function fixture(t, platform = 'darwin-universal', omitPlatform = false) {
+function fixture(t, platform = 'darwin-universal', omitPlatform = false, size = 1024 * 128) {
   const dir = mkdtempSync(join(tmpdir(), 'mutsumi-updater-'))
   t.after(() => rmSync(dir, { recursive: true, force: true }))
   const installer = join(dir, platform.startsWith('darwin') ? 'test app.app.tar.gz' : 'setup.exe')
-  writeFileSync(installer, Buffer.alloc(1024 * 128, 42))
+  writeFileSync(installer, Buffer.alloc(size, 42))
   writeFileSync(`${installer}.sig`, signature)
   const out = join(dir, 'serve', 'latest.json')
   const result = spawnSync(process.execPath, ['scripts/make-latest-json.mjs', '--installer', installer,
@@ -21,7 +21,7 @@ function fixture(t, platform = 'darwin-universal', omitPlatform = false) {
   return { dir: join(dir, 'serve'), manifest: JSON.parse(readFileSync(out, 'utf8')), installer, output: result.stdout }
 }
 
-async function server(t, dir, scenario, platform) {
+async function server(t, dir, scenario, platform, logs = []) {
   const child = spawn(process.execPath, ['scripts/fake-update-server.mjs', '--dir', dir,
     '--scenario', scenario, ...(platform ? ['--platform', platform] : []), '--port', '0'], { stdio: ['ignore', 'pipe', 'pipe'] })
   t.after(async () => {
@@ -40,10 +40,19 @@ async function server(t, dir, scenario, platform) {
     child.once('exit', () => { clearTimeout(timer); reject(new Error(errors || 'server exited')) })
     child.stdout.on('data', data => {
       output += data
+      logs.push(String(data))
       const match = output.match(/fake update server on (http:\/\/localhost:\d+)/)
       if (match) { clearTimeout(timer); resolve(match[1]) }
     })
   })
+}
+
+async function waitFor(condition, message, timeoutMs = 2000) {
+  const deadline = Date.now() + timeoutMs
+  while (!condition()) {
+    if (Date.now() > deadline) throw new Error(`timed out: ${message}`)
+    await new Promise(resolve => setTimeout(resolve, 20))
+  }
 }
 
 test('universal fixture maps both macOS architectures to one archive and signature', t => {
@@ -101,6 +110,42 @@ test('HTTP fixture serves bytes, 404, malformed JSON, lower version, and interru
       assert.equal(response.status, scenario === 'ok' ? 200 : 404)
       if (scenario === 'ok') assert.equal((await response.arrayBuffer()).byteLength, 128 * 1024)
     }
+  }
+})
+
+test('interrupt logs the cut-off point for odd-sized archives', async t => {
+  const { dir, manifest } = fixture(t, 'darwin-universal', false, 1024 * 128 + 1)
+  const logs = []
+  const base = await server(t, dir, 'interrupt', 'darwin-aarch64', logs)
+  const download = new URL(manifest.platforms['darwin-aarch64'].url).pathname
+  await assert.rejects(async () => (await fetch(`${base}${download}`)).arrayBuffer())
+  await waitFor(() => logs.join('').includes('interrupting after 65536/131073 bytes'), 'interrupt log line')
+})
+
+test('missing-windows is refused for a macOS client instead of acting like ok', async t => {
+  const { dir } = fixture(t)
+  await assert.rejects(server(t, dir, 'missing-windows', 'darwin-aarch64'),
+    /missing-windows only applies to windows-x86_64/)
+})
+
+test('platform faults also hit installer-specific keys the client resolves first', async t => {
+  const { dir, manifest } = fixture(t)
+  const withInstallerKeys = structuredClone(manifest)
+  withInstallerKeys.platforms['darwin-aarch64-app'] = manifest.platforms['darwin-aarch64']
+  withInstallerKeys.platforms['darwin-x86_64-app'] = manifest.platforms['darwin-x86_64']
+  writeFileSync(join(dir, 'latest.json'), JSON.stringify(withInstallerKeys))
+
+  const missing = await server(t, dir, 'missing-platform', 'darwin-aarch64')
+  const served = await (await fetch(`${missing}/latest.json`)).json()
+  assert.deepEqual(Object.keys(served.platforms).sort(), ['darwin-x86_64', 'darwin-x86_64-app'])
+
+  const bad = await server(t, dir, 'bad-signature', 'darwin-aarch64')
+  const corrupted = await (await fetch(`${bad}/latest.json`)).json()
+  for (const key of ['darwin-aarch64', 'darwin-aarch64-app']) {
+    assert.notEqual(corrupted.platforms[key].signature, signature, key)
+  }
+  for (const key of ['darwin-x86_64', 'darwin-x86_64-app']) {
+    assert.equal(corrupted.platforms[key].signature, signature, key)
   }
 })
 

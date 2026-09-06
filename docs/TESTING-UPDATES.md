@@ -58,11 +58,14 @@ matter most.
 
 The server supports Windows and both macOS architectures. `--platform` defaults
 to `windows-x86_64`; use `darwin-aarch64` or `darwin-x86_64` for the actual Mac
-client being tested. `missing-platform` removes only that entry, and
-`bad-signature` corrupts only that entry's cryptographic signature line. The
-legacy `missing-windows` scenario remains available and removes Windows only.
-The server listens on loopback (`localhost`), not the LAN; on macOS that
-resolved to IPv6 `[::1]` only, which the client reached.
+client being tested. `missing-platform` removes only that target's entries, and
+`bad-signature` corrupts only their cryptographic signature line. "Entries"
+includes installer-specific keys such as `darwin-aarch64-app`, which the client
+looks up before the bare `darwin-aarch64` key. The legacy `missing-windows`
+scenario remains available for Windows only; with a macOS `--platform` the
+server refuses to start, because it would leave the Mac client a valid update
+and silently act like `ok`. The server listens on loopback (`localhost`), not
+the LAN; on macOS that resolved to IPv6 `[::1]` only, which the client reached.
 
 ### macOS local protocol runbook
 
@@ -157,9 +160,8 @@ run:
   continued. This is an app stability issue, not an updater result, and is
   tracked separately.
 - The archive was an odd number of bytes, so `interrupt` dropped the
-  connection correctly but never printed its `interrupting after` line: the
-  server compares against `size / 2` while the stream stops at the whole-byte
-  half. A logging gap only; the scenario itself was valid.
+  connection correctly but never printed its `interrupting after` line. The
+  server has since been fixed; `npm run test:local-updater` covers it.
 
 ### One-time setup
 
@@ -232,8 +234,8 @@ node scripts/fake-update-server.mjs --scenario lower-version
 | --- | --- | --- |
 | `ok` | valid manifest + installer + signature | offer 1.5.0 → download → install → relaunch as 1.5.0 |
 | `lower-version` | manifest advertises 0.0.1 | show "latest version", no offer |
-| `missing-platform` | removes the requested `--platform` entry | failed view because no matching client platform exists; no download or install |
-| `missing-windows` | no windows platform in manifest | failed view — the plugin errors ("none of the fallback platforms… found"). Correct for a Windows-only app: such a manifest is broken, not "no update"; `verify-release-assets.mjs` blocks it from ever shipping |
+| `missing-platform` | removes the requested `--platform` entries, including installer-specific keys | failed view because no matching client platform exists; no download or install |
+| `missing-windows` | no windows platform in manifest (Windows `--platform` only) | failed view — the plugin errors ("none of the fallback platforms… found"). Correct for a Windows-only app: such a manifest is broken, not "no update"; `verify-release-assets.mjs` blocks it from ever shipping |
 | `installer-404` | download URL returns 404 | failed view with reason; Retry works |
 | `bad-signature` | signature tampered | **reject the install** — failed view, never 🎉 |
 | `malformed-json` | manifest is not JSON | failed view, no crash |

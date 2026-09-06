@@ -17,8 +17,13 @@
  *   lower-version  manifest advertises 0.0.1              → "up to date", no prompt
  *   missing-windows manifest has no windows platform      → failed view (plugin
  *                  errors: no matching platform — such a manifest is broken,
- *                  and verify-release-assets.mjs keeps it from ever shipping)
- *   missing-platform removes only --platform's entry (defaults to windows-x86_64)
+ *                  and verify-release-assets.mjs keeps it from ever shipping).
+ *                  Windows only: refused with a macOS --platform
+ *   missing-platform removes only --platform's entries (defaults to windows-x86_64)
+ *
+ * missing-windows, missing-platform and bad-signature hit every entry the
+ * client may resolve for the target: the bare key AND installer-specific keys
+ * such as darwin-aarch64-app.
  *   installer-404  download URL returns 404               → failed view, retry allowed
  *   bad-signature  signature corrupted                    → verification failure, NEVER installs
  *   malformed-json latest.json is not valid JSON          → failed view, no crash
@@ -51,10 +56,26 @@ if (!SCENARIOS.includes(scenario)) {
   console.error(`error: unknown scenario "${scenario}"\nvalid: ${SCENARIOS.join(', ')}`)
   process.exit(1)
 }
+// For a macOS client this scenario would leave a valid entry and silently act
+// like `ok`, upgrading the test app before the remaining negative cases ran.
+if (scenario === 'missing-windows' && platform !== 'windows-x86_64') {
+  console.error(`error: missing-windows only applies to windows-x86_64; use --scenario missing-platform --platform ${platform}`)
+  process.exit(1)
+}
 const manifestPath = join(dir, 'latest.json')
 if (!existsSync(manifestPath)) {
   console.error(`error: ${manifestPath} not found — run scripts/make-latest-json.mjs first`)
   process.exit(1)
+}
+
+/**
+ * Manifest keys the client may resolve for a target. tauri-plugin-updater
+ * looks up `{target}-{installer}` (e.g. darwin-aarch64-app) before `{target}`,
+ * so a fault applied to the bare key alone would let it fall back to an
+ * untouched entry and the scenario would inject nothing.
+ */
+function entriesFor(platforms, target) {
+  return Object.keys(platforms).filter(key => key === target || key.startsWith(`${target}-`))
 }
 
 /** Apply the scenario's corruption to the pristine manifest. */
@@ -63,21 +84,24 @@ function manifestBody() {
   if (scenario === 'malformed-json') return '{ "version": "9.9.9", this is not json'
   const m = JSON.parse(raw)
   if (scenario === 'lower-version') m.version = '0.0.1'
-  if (scenario === 'missing-windows') delete m.platforms['windows-x86_64']
-  if (scenario === 'missing-platform') delete m.platforms[platform]
+  if (scenario === 'missing-windows' || scenario === 'missing-platform') {
+    for (const key of entriesFor(m.platforms, platform)) delete m.platforms[key]
+  }
   if (scenario === 'bad-signature') {
-    const entry = m.platforms[platform]
-    // The manifest signature is base64 of the WHOLE minisign .sig file, whose
-    // first line is an "untrusted comment" that verification ignores by
-    // design. Tampering must therefore hit line 2 — the actual ed25519
-    // signature. (v1 of this script corrupted bytes 30–36, i.e. the comment,
-    // and the update sailed through: a false PASS of the whole scenario.)
-    const lines = Buffer.from(entry.signature, 'base64').toString('utf8').split('\n')
-    if (!lines[1]?.length) throw new Error('signature must contain a minisign signature line')
-    const mid = Math.floor(lines[1].length / 2)
-    const flipped = lines[1][mid] === 'A' ? 'B' : 'A'
-    lines[1] = lines[1].slice(0, mid) + flipped + lines[1].slice(mid + 1)
-    entry.signature = Buffer.from(lines.join('\n'), 'utf8').toString('base64')
+    for (const key of entriesFor(m.platforms, platform)) {
+      const entry = m.platforms[key]
+      // The manifest signature is base64 of the WHOLE minisign .sig file, whose
+      // first line is an "untrusted comment" that verification ignores by
+      // design. Tampering must therefore hit line 2 — the actual ed25519
+      // signature. (v1 of this script corrupted bytes 30–36, i.e. the comment,
+      // and the update sailed through: a false PASS of the whole scenario.)
+      const lines = Buffer.from(entry.signature, 'base64').toString('utf8').split('\n')
+      if (!lines[1]?.length) throw new Error('signature must contain a minisign signature line')
+      const mid = Math.floor(lines[1].length / 2)
+      const flipped = lines[1][mid] === 'A' ? 'B' : 'A'
+      lines[1] = lines[1].slice(0, mid) + flipped + lines[1].slice(mid + 1)
+      entry.signature = Buffer.from(lines.join('\n'), 'utf8').toString('base64')
+    }
   }
   return JSON.stringify(m, null, 2)
 }
@@ -85,7 +109,7 @@ function manifestBody() {
 // Reject unusable fixtures before accepting client requests.
 try {
   const pristine = JSON.parse(readFileSync(manifestPath, 'utf8'))
-  if (!pristine.platforms?.[platform]) throw new Error(`manifest has no ${platform} entry`)
+  if (!entriesFor(pristine.platforms ?? {}, platform).length) throw new Error(`manifest has no ${platform} entry`)
   manifestBody()
 } catch (error) {
   console.error(`error: invalid fixture: ${error.message}`)
@@ -118,12 +142,15 @@ const server = createServer((req, res) => {
     if (scenario === 'interrupt') {
       // Stream roughly half the installer, then destroy the socket so the
       // client sees a mid-download connection failure.
-      const stream = createReadStream(file, { end: Math.max(0, Math.floor(size / 2) - 1) })
+      // Compare against the same whole-byte half the stream stops at: with an
+      // odd size, `sent` never reaches size / 2 and the log line was lost.
+      const half = Math.floor(size / 2)
+      const stream = createReadStream(file, { end: Math.max(0, half - 1) })
       let sent = 0
       stream.on('data', chunk => {
         sent += chunk.length
         res.write(chunk)
-        if (sent >= size / 2) {
+        if (sent >= half) {
           console.log(`[fake-update-server] interrupting after ${sent}/${size} bytes`)
           stream.destroy()
           res.destroy()
