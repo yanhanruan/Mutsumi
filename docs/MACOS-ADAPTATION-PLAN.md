@@ -3,7 +3,7 @@
 > 状态：实施中；已锁定 Dock 与透明窗口 API 边界
 > 工作分支：`feat/macos-adaptation`
 > 基线：`main` / `d3b52a9`
-> 更新时间：2026-10-13
+> 更新时间：2026-09-07
 > 跨设备续作：见 [`MACOS-DEVELOPMENT-HANDOFF.md`](MACOS-DEVELOPMENT-HANDOFF.md)
 > 最新真机证据：见 [`MACOS-DESKTOP-TEST-RECORD.md`](MACOS-DESKTOP-TEST-RECORD.md)
 
@@ -97,7 +97,19 @@ Mutsumi 当前是以 Windows 为唯一发布平台设计的 Tauri 2 桌面应用
 
 ## 5. 总体技术方案
 
-### 2026-10-13 进度核对与本地 updater 切片（人工 review 已通过）
+### 2026-09-05～09-07 本地 updater 人工协议测试与工具修复
+
+- 按 `TESTING-UPDATES.md` 的 macOS local runbook，在 Apple M5 / macOS 26.5.1 上用
+  `ebf12c0` 的 universal 测试版完成 9.9.8 → 9.9.9：arm64 原生与 x86_64（Rosetta）
+  的缺失平台、签名错误、下载中断均报错且旧版不变；按平台注入的错误不影响另一架构；
+  `ok` 最后执行，重启后 About 显示 9.9.9。结果与证据见 `TESTING-UPDATES.md`。
+- 这是 ad-hoc 签名的本地证据，不代表 Developer ID、公证或 Layer 4 真实升级。
+- 顺带修复本地工具三处问题：奇数字节安装包下中断日志缺失、Mac 上误用
+  `missing-windows` 等于正常更新、缺失/签名错误场景未覆盖 `darwin-aarch64-app`
+  这类安装器键。本地 HTTP 测试 10/10，发布契约 99/99。
+- 测试中 9.9.8 在 WebKit 内崩溃一次，与更新无关，另行排查。
+
+### 2026-09-03 进度核对与本地 updater 切片（人工 review 已通过）
 
 - Phase 1、4 的实现与已记录测试已完成；Phase 2、3、5 的实现已完成，但完整
   桌面、外设、权限和三语视觉矩阵仍 pending，不能按“实现完成”认定验收完成。
@@ -407,7 +419,7 @@ Apple Silicon WKWebView 真机记录（2026-08-21）：
   只读 secret 名称审计仍只看到 `TAURI_SIGNING_PRIVATE_KEY`；其余 Apple secrets
   未配置，因此没有触发 readiness 或 signed workflow。
 
-2026-10-13 发布接线复核与修复：
+2026-09-01 发布接线复核与修复：
 
 - 锁定的 Tauri CLI 2.11.2 自动公证/附加票据的是 `.app`，外层 DMG 只被签名。
   production/staging 现显式提交外层 DMG，等待 `Accepted` 后执行 staple 和票据

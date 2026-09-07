@@ -1,6 +1,6 @@
 # Mutsumi macOS 开发交接与续作指南
 
-> 更新时间：2026-10-13
+> 更新时间：2026-09-07
 >
 > 工作分支：`feat/macos-adaptation`
 >
@@ -8,10 +8,15 @@
 >
 > 当前已推送实现锚点：`fcaac03 fix(macOS): notarize and staple outer release DMGs`
 
-2026-10-13：外层 DMG 公证修复已 push；发布纯契约 99/99 本机通过。下方
+2026-09-03：外层 DMG 公证修复已 push；发布纯契约 99/99 本机通过。下方
 `6adc5ed`、88 项契约及远程 CI 记录保留为历史证据。当前新增的跨平台本地 updater
 工具切片已通过用户人工 review 并获准提交；操作说明见 `TESTING-UPDATES.md` 的
 macOS local protocol runbook。本地 HTTP 测试 7/7 通过，真实客户端升级仍待验收。
+
+2026-09-07：上述 runbook 已在本机人工执行通过（arm64 原生 + x86_64 Rosetta，
+9.9.8 → 9.9.9，失败场景旧版不变，`ok` 后 About 显示 9.9.9），结果见
+`TESTING-UPDATES.md` 的 macOS local results。本地工具三处问题已修复，本地 HTTP
+测试 10/10。仍是 ad-hoc 本地证据；signed staging 与 Layer 4 真实升级仍待验收。
 
 这份文档用于在另一台 Mac 上恢复开发上下文。产品与技术决策仍以
 [`MACOS-ADAPTATION-PLAN.md`](MACOS-ADAPTATION-PLAN.md) 为准，发布边界以
