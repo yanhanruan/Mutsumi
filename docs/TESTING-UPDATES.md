@@ -157,8 +157,10 @@ run:
   9.9.8 crashed once (SIGSEGV on the main thread in WebKit,
   `ScrollingTree::takePendingScrollUpdates` from the display-link refresh). The
   installed bundle was unaffected; the app was relaunched and the run
-  continued. This is an app stability issue, not an updater result, and is
-  tracked separately.
+  continued. The cause remains undetermined: an unchanged installed bundle
+  does not rule out the update window as a trigger. Further investigation is
+  required; this observation does not establish that the crash is unrelated
+  to the updater.
 - The archive was an odd number of bytes, so `interrupt` dropped the
   connection correctly but never printed its `interrupting after` line. The
   server has since been fixed; `npm run test:local-updater` covers it.
