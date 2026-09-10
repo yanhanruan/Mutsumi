@@ -13,10 +13,12 @@
 工具切片已通过用户人工 review 并获准提交；操作说明见 `TESTING-UPDATES.md` 的
 macOS local protocol runbook。本地 HTTP 测试 7/7 通过，真实客户端升级仍待验收。
 
-2026-09-07：上述 runbook 已在本机人工执行通过（arm64 原生 + x86_64 Rosetta，
-9.9.8 → 9.9.9，失败场景旧版不变，`ok` 后 About 显示 9.9.9），结果见
-`TESTING-UPDATES.md` 的 macOS local results。本地工具三处问题已修复，本地 HTTP
-测试 10/10。仍是 ad-hoc 本地证据；signed staging 与 Layer 4 真实升级仍待验收。
+2026-09-07：上述 runbook 已完成部分本机人工验收：arm64 原生与 x86_64 Rosetta
+均验证了缺失平台、签名错误、下载中断时旧版不变，以及跨平台缺失条目检查。
+成功升级的 `ok` 场景仅有 arm64 记录：9.9.8 → 9.9.9，重启后 About 显示 9.9.9；
+x86_64 Rosetta 的成功升级尚未记录为通过。结果见 `TESTING-UPDATES.md` 的 macOS
+local results。本地工具三处问题已修复，本地 HTTP 测试 10/10。仍是 ad-hoc 本地
+证据；signed staging 与 Layer 4 真实升级仍待验收。
 
 这份文档用于在另一台 Mac 上恢复开发上下文。产品与技术决策仍以
 [`MACOS-ADAPTATION-PLAN.md`](MACOS-ADAPTATION-PLAN.md) 为准，发布边界以

@@ -120,8 +120,10 @@ not Developer ID/notarized distribution evidence.
 generation for Windows and both Darwin targets. Its synthetic signatures and
 archive bytes test the **harness**, not Tauri signature verification or macOS
 installation. Those require the manual procedure above and signed staging for
-the final release gate. The manual procedure has passed once (below); signed
-staging and the Layer 4 real upgrade are still pending.
+the final release gate. The recorded successful local upgrade is arm64 only;
+Rosetta coverage is limited to the failure and cross-platform checks below.
+A successful Rosetta upgrade, signed staging and the Layer 4 real upgrade
+are still pending.
 
 #### macOS local results — 2026-09-05
 

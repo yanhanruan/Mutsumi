@@ -100,9 +100,11 @@ Mutsumi 当前是以 Windows 为唯一发布平台设计的 Tauri 2 桌面应用
 ### 2026-09-05～09-07 本地 updater 人工协议测试与工具修复
 
 - 按 `TESTING-UPDATES.md` 的 macOS local runbook，在 Apple M5 / macOS 26.5.1 上用
-  `ebf12c0` 的 universal 测试版完成 9.9.8 → 9.9.9：arm64 原生与 x86_64（Rosetta）
-  的缺失平台、签名错误、下载中断均报错且旧版不变；按平台注入的错误不影响另一架构；
-  `ok` 最后执行，重启后 About 显示 9.9.9。结果与证据见 `TESTING-UPDATES.md`。
+  `ebf12c0` 的 universal 测试版验证：arm64 原生与 x86_64（Rosetta）的缺失平台、
+  签名错误、下载中断均报错且旧版不变；跨平台缺失条目检查仍能向另一架构提供更新。
+  成功升级的 `ok` 场景仅有 arm64 记录：最后执行 9.9.8 → 9.9.9，重启后 About
+  显示 9.9.9。x86_64（Rosetta）成功升级仍待验收，不能由 arm64 结果推定通过。
+  结果与证据见 `TESTING-UPDATES.md`。
 - 这是 ad-hoc 签名的本地证据，不代表 Developer ID、公证或 Layer 4 真实升级。
 - 顺带修复本地工具三处问题：奇数字节安装包下中断日志缺失、Mac 上误用
   `missing-windows` 等于正常更新、缺失/签名错误场景未覆盖 `darwin-aarch64-app`
