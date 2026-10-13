@@ -37,6 +37,13 @@
  * Args: --release-id <id> | --version <X.Y.Z>
  */
 
+import {
+  collectUpdaterDownloads,
+  postPublishSkipReason,
+  productionTagForVersion,
+  ReleaseContractError,
+} from './release-contract.mjs'
+
 const repo = process.env.GITHUB_REPOSITORY ?? 'yanhanruan/Mutsumi'
 const token = process.env.GITHUB_TOKEN
 if (!token) {
@@ -80,11 +87,13 @@ async function resolveRelease() {
   const res = await ghFetch(`/releases?per_page=100`)
   if (!res.ok) fail(`could not list releases: ${res.status} ${await res.text()}`)
   const releases = await res.json()
-  const match = releases.find((r) =>
-    r.tag_name === `v${versionArg}` ||
-    (typeof r.name === 'string' && r.name.includes(versionArg)) ||
-    (r.assets ?? []).some((a) => a.name.includes(`_${versionArg}_`)),
-  )
+  const match = releases.find((r) => (
+    !r.prerelease && (
+      r.tag_name === `v${versionArg}` ||
+      (typeof r.name === 'string' && r.name.includes(versionArg)) ||
+      (r.assets ?? []).some((a) => a.name.includes(`_${versionArg}_`))
+    )
+  ))
   if (!match) fail(`no release found for version ${versionArg}`)
   return match
 }
@@ -125,9 +134,11 @@ async function urlResolves(url) {
 let release = await resolveRelease()
 ok(`release: "${release.name}" (id=${release.id}, draft=${release.draft}, tag=${JSON.stringify(release.tag_name)})`)
 
-if (release.draft) {
-  // Nothing is public yet — the pre-publish gate owns drafts.
-  console.log('~ release is still a draft; the post-publish gate has nothing to verify yet. Skipping.')
+const skipReason = postPublishSkipReason(release)
+if (skipReason) {
+  // Drafts belong to the pre-publish gate. Rolling staging is intentionally
+  // bound to `staging`; rebinding it would break the staging updater endpoint.
+  console.log(`~ ${skipReason}; the production post-publish gate will not rebind it. Skipping.`)
   process.exit(0)
 }
 
@@ -144,11 +155,22 @@ try {
   fail(`latest.json is not valid JSON: ${e.message}`)
 }
 const version = manifest.version
-const win = manifest.platforms?.['windows-x86_64']
-if (!win?.url) fail('latest.json has no platforms."windows-x86_64".url')
-ok(`manifest version ${version}; installer URL: ${win.url}`)
-
-const expectedTag = `v${version}`
+if (!manifest.platforms?.['windows-x86_64']) {
+  fail('latest.json has no platforms."windows-x86_64" entry')
+}
+let updaterDownloads
+let expectedTag
+try {
+  expectedTag = productionTagForVersion(version)
+  updaterDownloads = collectUpdaterDownloads(manifest, {
+    tag: expectedTag,
+    expectedRepository: repo,
+  })
+} catch (error) {
+  if (error instanceof ReleaseContractError) fail(error.message)
+  throw error
+}
+ok(`manifest version ${version}; ${updaterDownloads.length} unique updater download(s) across ${Object.keys(manifest.platforms).length} platform entries`)
 
 // Invariant: a published updater release must be bound to its version tag, so
 // latest.json's baked /releases/download/vX.Y.Z/... URL resolves for clients.
@@ -165,22 +187,35 @@ if (release.tag_name !== expectedTag) {
   ok(`release already bound to ${expectedTag}`)
 }
 
-// Final contract: the exact URL clients will hit must resolve. Asset re-hosting
-// can lag a beat after a rebind, so retry a few times before giving up.
+// Final contract: every exact URL clients may hit must resolve. Multiple
+// platform keys can intentionally share one universal updater URL, so probe
+// each unique URL once. Asset re-hosting can lag after a rebind; retry before
+// giving up.
+let unresolved = updaterDownloads
 for (let attempt = 0; attempt <= 5; attempt++) {
-  if (await urlResolves(win.url)) {
-    ok(`updater download resolves: ${win.url}`)
+  const checks = await Promise.all(
+    unresolved.map(async (download) => ({
+      ...download,
+      resolves: await urlResolves(download.url),
+    })),
+  )
+  unresolved = checks.filter((download) => !download.resolves)
+  for (const download of checks.filter((entry) => entry.resolves)) {
+    ok(`updater download resolves (${download.platformKeys.join(', ')}): ${download.url}`)
+  }
+  if (unresolved.length === 0) {
     console.log('\npost-publish gate passed.')
     process.exit(0)
   }
   if (attempt < 5) {
-    console.log(`~ not resolving yet (attempt ${attempt + 1}/6); retrying in 3s…`)
+    console.log(`~ ${unresolved.length} updater download(s) not resolving yet (attempt ${attempt + 1}/6); retrying in 3s…`)
     await new Promise((r) => setTimeout(r, 3000))
   }
 }
 
 fail(
-  `updater download URL still does not resolve: ${win.url}\n` +
+  `updater download URL(s) still do not resolve:\n` +
+    unresolved.map((download) => `  - ${download.platformKeys.join(', ')}: ${download.url}`).join('\n') + '\n' +
     `  The release is bound to tag "${release.tag_name}". Clients on the previous\n` +
     `  version will get a 404 when updating. Inspect the release + tag binding.`,
 )

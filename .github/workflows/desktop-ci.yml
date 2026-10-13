@@ -1,0 +1,164 @@
+# Cross-platform pull-request/main gate. The macOS job intentionally produces
+# an unsigned, short-lived CI artifact: Developer ID signing, notarization and
+# release aggregation are separate Phase 6 gates and must never be implied.
+name: desktop-ci
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/desktop-ci.yml'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'scripts/**'
+      - 'src/**'
+      - 'src-tauri/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-regression:
+    name: Windows regression
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Frontend tests and build
+        run: |
+          npm test
+          npm run test:release-contract
+          npm run build
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+          shared-key: windows-regression
+
+      - name: Rust tests (Windows)
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+  universal-bundle:
+    name: unsigned universal bundle
+    runs-on: macos-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Frontend tests
+        run: |
+          npm test
+          npm run test:release-contract
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+          shared-key: macos-universal
+
+      - name: Rust tests (native macOS)
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Build unsigned universal app and DMG
+        run: npx tauri build --target universal-apple-darwin --bundles app,dmg --ci --no-sign
+
+      - name: Verify universal bundle contract
+        run: >-
+          node scripts/verify-macos-bundle.mjs
+          --bundle-dir src-tauri/target/universal-apple-darwin/release/bundle
+          --mode unsigned
+          --expected-minimum-system-version 13.0
+
+      - name: Verify Apple Silicon Finder lifecycle
+        run: >-
+          npm run test:macos-lifecycle-smoke --
+          --app src-tauri/target/universal-apple-darwin/release/bundle/macos/mutsumi.app
+          --arch arm64
+          --initial-launch finder
+
+      - name: Upload unsigned CI bundle
+        uses: actions/upload-artifact@v7
+        with:
+          name: unsigned-macos-universal-${{ github.sha }}
+          path: |
+            src-tauri/target/universal-apple-darwin/release/bundle/macos/mutsumi.app
+            src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+          retention-days: 7
+
+  intel-native:
+    name: native Intel macOS regression
+    runs-on: macos-15-intel
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+          shared-key: macos-intel-native
+
+      - name: Verify native Intel host
+        shell: bash
+        run: |
+          test "$(uname -m)" = "x86_64"
+          arch -x86_64 /usr/bin/true
+          rustc -vV > "$RUNNER_TEMP/rustc-version.txt"
+          grep -Fx 'host: x86_64-apple-darwin' "$RUNNER_TEMP/rustc-version.txt"
+
+      - name: Rust tests (native Intel macOS)
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Build unsigned Intel app
+        run: npx tauri build --target x86_64-apple-darwin --bundles app --ci --no-sign
+
+      - name: Verify native Intel lifecycle
+        run: >-
+          npm run test:macos-lifecycle-smoke --
+          --app src-tauri/target/x86_64-apple-darwin/release/bundle/macos/mutsumi.app
+          --arch x86_64
+          --initial-launch finder

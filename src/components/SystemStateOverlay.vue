@@ -23,7 +23,7 @@ export type BatteryStatus =
   | { type: 'Discharging'; percent: number; time_to_empty: number | null }
   | { type: 'PluggedIn'; percent: number }
 
-export type NetworkKind = 'ethernet' | 'wifi' | 'other' | 'offline'
+export type NetworkKind = 'ethernet' | 'wifi' | 'other' | 'offline' | 'unavailable'
 
 export interface SystemState {
   cpu_usage: number
@@ -81,6 +81,7 @@ const formatTime = (seconds: number) => {
 const networkIcon = (kind: NetworkKind) => {
   if (kind === 'wifi' || kind === 'ethernet') return '🌐'
   if (kind === 'offline') return '🚫'
+  if (kind === 'unavailable') return '⚠️'
   return '🌐'
 }
 
@@ -88,8 +89,12 @@ const networkLabel = (kind: NetworkKind) => {
   if (kind === 'wifi') return t.value.sys.wifi
   if (kind === 'ethernet') return t.value.sys.ethernet
   if (kind === 'offline') return t.value.sys.offline
+  if (kind === 'unavailable') return t.value.sys.unavailable
   return t.value.sys.online
 }
+
+const networkStatusClass = (kind: NetworkKind) =>
+  kind === 'offline' ? 'offline' : kind === 'unavailable' ? 'unavailable' : 'online'
 
 /** Humanize a byte count to the largest sensible unit (B…TB). */
 const formatBytes = (bytes: number) => {
@@ -249,7 +254,7 @@ defineExpose({ open, dismiss })
             <!-- Network -->
             <span class="icon">{{ networkIcon(state.network) }}</span>
             <span class="label">{{ t.sys.network }}</span>
-            <span class="value" :class="state.network === 'offline' ? 'offline' : 'online'">
+            <span class="value" :class="networkStatusClass(state.network)">
               {{ networkLabel(state.network) }}
             </span>
 
@@ -616,6 +621,7 @@ defineExpose({ open, dismiss })
 
 .value.online { color: #5a9960; }
 .value.offline { color: #a86a6a; }
+.value.unavailable { color: #a27a42; }
 
 /* ── Battery Section ─────────────────────────────────────────────── */
 .battery-section {

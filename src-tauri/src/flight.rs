@@ -159,7 +159,7 @@ fn refresh(app: &AppHandle) {
 
 /// Idle-monitor input (idle.rs): whether the system has been idle past the
 /// screensaver wait threshold.
-#[cfg_attr(not(windows), allow(dead_code))]
+#[cfg_attr(not(any(windows, target_os = "macos")), allow(dead_code))]
 pub fn set_idle_active(app: &AppHandle, idle: bool) {
     mode_slot().lock().unwrap().idle = idle;
     refresh(app);
@@ -182,6 +182,7 @@ pub fn screensaver_enabled() -> bool {
 }
 
 /// Current screensaver wait threshold in seconds (read by idle.rs each poll).
+#[cfg(any(windows, target_os = "macos"))]
 pub fn screensaver_wait_secs() -> u64 {
     SCREENSAVER_WAIT_SECS.load(Ordering::Relaxed)
 }

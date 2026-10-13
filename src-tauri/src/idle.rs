@@ -5,7 +5,8 @@
 //!   - OS-wide input idle time ≥ the configurable screensaver wait
 //!     (flight::screensaver_wait_secs, set from Settings; default 10 min)
 //!   - No active display-sleep-prevention power assertions
-//!     (i.e. no app is calling SetThreadExecutionState(ES_DISPLAY_REQUIRED))
+//!     (Windows: `ES_DISPLAY_REQUIRED`; macOS:
+//!     `PreventUserIdleDisplaySleep` IOKit assertions)
 //!
 //! # Thread design
 //! A background thread sleeps for POLL_INTERVAL_MS per iteration, then samples
@@ -21,15 +22,21 @@
 //! engages while the display is off.
 //!
 //! # Platform support
-//! Full implementation on Windows only. `spawn()` is a no-op on other OSes.
+//! Full implementation is available on Windows and macOS. Other platforms
+//! remain a no-op until both input-idle and display-sleep assertion checks are
+//! implemented, so an incomplete adapter cannot trigger flight unexpectedly.
 //!
 //! # Testable pure helper
 //! `should_fly(idle_secs, wait_secs, display_prevented)` is exported so unit
 //! tests can cover the decision logic without any OS calls.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
+#[cfg(any(windows, target_os = "macos"))]
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
+#[cfg(any(windows, target_os = "macos"))]
 use std::thread;
+#[cfg(any(windows, target_os = "macos"))]
 use std::time::{Duration, Instant};
 
 use tauri::AppHandle;
@@ -37,10 +44,12 @@ use tauri::AppHandle;
 // ── Configuration ──────────────────────────────────────────────────
 
 /// Background-thread sleep between polls. Kept at 1 s for near-zero CPU cost.
+#[cfg(any(windows, target_os = "macos"))]
 const POLL_INTERVAL_MS: u64 = 1_000;
 
 /// If the thread wakes this many times later than expected the system
 /// was probably suspended. Report not-idle and skip the poll.
+#[cfg(any(windows, target_os = "macos"))]
 const SUSPEND_OVERSHOOT_MULT: u64 = 5;
 
 // ── Pure decision helper (unit-testable) ───────────────────────────
@@ -49,9 +58,11 @@ const SUSPEND_OVERSHOOT_MULT: u64 = 5;
 ///
 /// `idle_secs`          – seconds since last OS-wide mouse/keyboard event.
 /// `wait_secs`          – configured screensaver wait (from Settings).
-/// `display_prevented`  – true if any process holds ES_DISPLAY_REQUIRED.
+/// `display_prevented`  – true if any process holds the platform's display
+///                        sleep-prevention assertion.
 ///
 /// Pure function: no OS calls, safe to unit-test.
+#[cfg(any(windows, target_os = "macos", test))]
 pub fn should_fly(idle_secs: u64, wait_secs: u64, display_prevented: bool) -> bool {
     idle_secs >= wait_secs && !display_prevented
 }
@@ -60,21 +71,22 @@ pub fn should_fly(idle_secs: u64, wait_secs: u64, display_prevented: bool) -> bo
 
 /// Spawns the idle-monitor thread. The thread exits when `stop_flag` is set.
 pub fn spawn(app: AppHandle, stop_flag: Arc<AtomicBool>) {
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         let _ = (app, stop_flag);
         return;
     }
 
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     thread::spawn(move || run_loop(app, stop_flag));
 }
 
-// ── Main poll loop (Windows) ───────────────────────────────────────
+// ── Main poll loop ─────────────────────────────────────────────────
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 fn run_loop(app: AppHandle, stop_flag: Arc<AtomicBool>) {
     let mut last_active = false;
+    let mut sample_error_reported = false;
     let poll_target = Duration::from_millis(POLL_INTERVAL_MS);
     let overshoot_threshold = poll_target * SUSPEND_OVERSHOOT_MULT as u32;
 
@@ -97,8 +109,28 @@ fn run_loop(app: AppHandle, stop_flag: Arc<AtomicBool>) {
         }
 
         // ── Idle check ──────────────────────────────────────────────
-        let idle_secs = get_input_secs();
-        let display_prevented = is_display_sleep_prevented();
+        let (idle_secs, display_prevented) = match sample_idle_conditions() {
+            Ok(sample) => {
+                if sample_error_reported {
+                    log::info!("system idle sampling recovered");
+                    sample_error_reported = false;
+                }
+                sample
+            }
+            Err(error) => {
+                if !sample_error_reported {
+                    log::warn!(
+                        "system idle sampling unavailable; automatic flight paused: {error}"
+                    );
+                    sample_error_reported = true;
+                }
+                if last_active {
+                    last_active = false;
+                    crate::flight::set_idle_active(&app, false);
+                }
+                continue;
+            }
+        };
         let want_active = should_fly(
             idle_secs,
             crate::flight::screensaver_wait_secs(),
@@ -113,6 +145,28 @@ fn run_loop(app: AppHandle, stop_flag: Arc<AtomicBool>) {
             crate::flight::set_idle_active(&app, want_active);
         }
     }
+}
+
+#[cfg(windows)]
+fn sample_idle_conditions() -> Result<(u64, bool), String> {
+    Ok((get_input_secs(), is_display_sleep_prevented()))
+}
+
+#[cfg(target_os = "macos")]
+fn sample_idle_conditions() -> Result<(u64, bool), String> {
+    Ok((
+        macos::get_input_secs()?,
+        macos::is_display_sleep_prevented()?,
+    ))
+}
+
+/// Returns the sub-second idle time for macOS keyboard, mouse-button and
+/// scrolling events that can express an intentional focus change. This public
+/// CoreGraphics query does not install an event tap or require Accessibility
+/// permission, and deliberately ignores passive pointer movement.
+#[cfg(target_os = "macos")]
+pub(crate) fn macos_focus_input_idle_seconds() -> Result<f64, String> {
+    macos::get_focus_input_seconds()
 }
 
 // ── OS query helpers (Windows) ─────────────────────────────────────
@@ -173,6 +227,172 @@ pub fn is_display_sleep_prevented() -> bool {
     };
 
     result.is_ok() && (state & ES_DISPLAY_REQUIRED) != 0
+}
+
+// ── OS query helpers (macOS) ───────────────────────────────────────
+
+#[cfg(target_os = "macos")]
+mod macos {
+    use core::ffi::{c_char, c_void};
+    use std::ptr;
+
+    type CfTypeRef = *const c_void;
+    type CfDictionaryRef = *const c_void;
+    type CfStringRef = *const c_void;
+
+    const CG_EVENT_SOURCE_COMBINED_SESSION_STATE: i32 = 0;
+    const CG_ANY_INPUT_EVENT_TYPE: u32 = u32::MAX;
+    const CG_EVENT_LEFT_MOUSE_DOWN: u32 = 1;
+    const CG_EVENT_RIGHT_MOUSE_DOWN: u32 = 3;
+    const CG_EVENT_KEY_DOWN: u32 = 10;
+    const CG_EVENT_SCROLL_WHEEL: u32 = 22;
+    const CG_EVENT_OTHER_MOUSE_DOWN: u32 = 25;
+    const CG_FOCUS_INPUT_EVENT_TYPES: [u32; 5] = [
+        CG_EVENT_LEFT_MOUSE_DOWN,
+        CG_EVENT_RIGHT_MOUSE_DOWN,
+        CG_EVENT_KEY_DOWN,
+        CG_EVENT_SCROLL_WHEEL,
+        CG_EVENT_OTHER_MOUSE_DOWN,
+    ];
+    const CF_STRING_ENCODING_UTF8: u32 = 0x0800_0100;
+    const CF_NUMBER_INT_TYPE: isize = 9;
+    const IOKIT_SUCCESS: i32 = 0;
+
+    #[link(name = "CoreGraphics", kind = "framework")]
+    unsafe extern "C" {
+        fn CGEventSourceSecondsSinceLastEventType(state_id: i32, event_type: u32) -> f64;
+    }
+
+    #[link(name = "IOKit", kind = "framework")]
+    unsafe extern "C" {
+        fn IOPMCopyAssertionsStatus(assertions_status: *mut CfDictionaryRef) -> i32;
+    }
+
+    #[link(name = "CoreFoundation", kind = "framework")]
+    unsafe extern "C" {
+        fn CFStringCreateWithCString(
+            allocator: CfTypeRef,
+            c_str: *const c_char,
+            encoding: u32,
+        ) -> CfStringRef;
+        fn CFDictionaryGetValue(dictionary: CfDictionaryRef, key: CfTypeRef) -> CfTypeRef;
+        fn CFNumberGetValue(number: CfTypeRef, number_type: isize, value: *mut c_void) -> u8;
+        fn CFRelease(value: CfTypeRef);
+    }
+
+    /// Owns a Core Foundation object returned under the Create/Copy rule.
+    struct OwnedCf(CfTypeRef);
+
+    impl OwnedCf {
+        fn new(value: CfTypeRef, context: &str) -> Result<Self, String> {
+            if value.is_null() {
+                Err(format!("{context} returned null"))
+            } else {
+                Ok(Self(value))
+            }
+        }
+    }
+
+    impl Drop for OwnedCf {
+        fn drop(&mut self) {
+            // SAFETY: `OwnedCf` is only constructed for non-null objects
+            // returned under a Core Foundation Create/Copy ownership rule.
+            unsafe { CFRelease(self.0) }
+        }
+    }
+
+    /// Returns seconds since the last keyboard, mouse, or tablet event in the
+    /// current login session with the sub-second precision supplied by
+    /// CoreGraphics. This public query does not install an event tap and
+    /// therefore needs no Accessibility permission.
+    fn seconds_since_event(event_type: u32) -> Result<f64, String> {
+        // SAFETY: The state and event values come directly from CGEventTypes.h,
+        // and the function has no pointer arguments or caller-owned output.
+        let seconds = unsafe {
+            CGEventSourceSecondsSinceLastEventType(
+                CG_EVENT_SOURCE_COMBINED_SESSION_STATE,
+                event_type,
+            )
+        };
+
+        if !seconds.is_finite() || seconds < 0.0 {
+            return Err(format!("CoreGraphics returned invalid idle time {seconds}"));
+        }
+
+        Ok(seconds)
+    }
+
+    pub(super) fn get_input_seconds() -> Result<f64, String> {
+        seconds_since_event(CG_ANY_INPUT_EVENT_TYPE)
+    }
+
+    pub(super) fn get_focus_input_seconds() -> Result<f64, String> {
+        CG_FOCUS_INPUT_EVENT_TYPES
+            .into_iter()
+            .map(seconds_since_event)
+            .try_fold(f64::INFINITY, |minimum, seconds| {
+                seconds.map(|value| minimum.min(value))
+            })
+    }
+
+    pub(super) fn get_input_secs() -> Result<u64, String> {
+        Ok(get_input_seconds()?.floor().min(u64::MAX as f64) as u64)
+    }
+
+    /// Returns whether any process currently holds the public IOKit
+    /// `PreventUserIdleDisplaySleep` assertion used by video players,
+    /// presentation tools, and `caffeinate -d`.
+    pub(super) fn is_display_sleep_prevented() -> Result<bool, String> {
+        let mut dictionary: CfDictionaryRef = ptr::null();
+        // SAFETY: IOPM writes one retained CFDictionary reference to the valid
+        // out pointer on success; it is released by `OwnedCf` below.
+        let status = unsafe { IOPMCopyAssertionsStatus(&mut dictionary) };
+        if status != IOKIT_SUCCESS {
+            return Err(format!(
+                "IOPMCopyAssertionsStatus failed with IOReturn {status:#x}"
+            ));
+        }
+        let dictionary = OwnedCf::new(dictionary, "IOPMCopyAssertionsStatus")?;
+
+        // kIOPMAssertPreventUserIdleDisplaySleep is a CFSTR macro, not an
+        // exported symbol, so construct the equivalent key with the public
+        // Core Foundation API and release it after the lookup.
+        let key = unsafe {
+            CFStringCreateWithCString(
+                ptr::null(),
+                c"PreventUserIdleDisplaySleep".as_ptr(),
+                CF_STRING_ENCODING_UTF8,
+            )
+        };
+        let key = OwnedCf::new(key, "CFStringCreateWithCString")?;
+
+        // SAFETY: Both CF objects are live for the duration of the lookup. The
+        // returned CFNumber is borrowed from `dictionary` and is not released.
+        let number = unsafe { CFDictionaryGetValue(dictionary.0, key.0) };
+        if number.is_null() {
+            return Err("IOKit assertion dictionary omitted PreventUserIdleDisplaySleep".into());
+        }
+
+        let mut level: i32 = 0;
+        // SAFETY: `number` is the CFNumber documented by
+        // IOPMCopyAssertionsStatus; `level` is valid writable storage for
+        // kCFNumberIntType.
+        let converted = unsafe {
+            CFNumberGetValue(
+                number,
+                CF_NUMBER_INT_TYPE,
+                &mut level as *mut i32 as *mut c_void,
+            )
+        };
+        if converted == 0 {
+            return Err("IOKit display assertion level was not a CFNumber".into());
+        }
+
+        // IOPMCopyAssertionsStatus reports the system-wide aggregate as a
+        // normalized non-zero value (observed as 1 for `caffeinate -d`), not
+        // necessarily the 255 value accepted when creating an assertion.
+        Ok(level != 0)
+    }
 }
 
 // ── Unit tests ─────────────────────────────────────────────────────
@@ -236,5 +456,20 @@ mod tests {
         assert!(!should_fly(359, 360, false));
         assert!(should_fly(1800, 1800, false));
         assert!(!should_fly(1799, 1800, false));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_public_idle_queries_return_valid_samples() {
+        assert!(macos::get_input_secs().is_ok());
+        assert!(macos::get_focus_input_seconds().is_ok());
+        assert!(macos::is_display_sleep_prevented().is_ok());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "requires an active PreventUserIdleDisplaySleep assertion, e.g. caffeinate -d"]
+    fn macos_detects_active_display_sleep_assertion() {
+        assert_eq!(macos::is_display_sleep_prevented(), Ok(true));
     }
 }

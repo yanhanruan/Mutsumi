@@ -21,7 +21,9 @@ tauri-build = { version = "2.6.2", features = [] }
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
-tauri = { version = "2.11.2", features = ["protocol-asset", "tray-icon", "image-png"] }
+# `with_webview` exposes platform-native handles whose shape may change across
+# Tauri minor releases; keep this adapter within the audited 2.11 line.
+tauri = { version = "~2.11.2", features = ["protocol-asset", "tray-icon", "image-png", "macos-private-api"] }
 tauri-plugin-log = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-single-instance = "2"
@@ -50,6 +52,9 @@ battery = "0.7.8"    # battery level + charge-rate time estimate
 # Test-only async runtime for the (ignored) live API smoke tests.
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+# Exercise the same LaunchAgent backend used transitively by
+# tauri-plugin-autostart without requiring a Tauri window in the live smoke.
+auto-launch = "0.5"
 
 # ── Release size optimizations ─────────────────────────────────────
 [profile.release]
@@ -88,3 +93,16 @@ windows = { version = "0.61", features = [
     "Media_Control",
     "Foundation",
 ] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Pull rendered result-page HTML from WKWebView through Apple's public
+# evaluateJavaScript completion callback. These versions match Tauri/Wry's
+# audited native-webview dependency line.
+block2 = "0.6"
+objc2 = "0.6.4"
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSData", "NSError", "NSJSONSerialization", "NSString"] }
+objc2-web-kit = { version = "0.3.2", default-features = false, features = ["std", "block2", "WKWebView"] }
+# Public AppKit NSWindow::setFrame:display: for atomic pet-window geometry.
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSWindow"] }
+# Parse the structured XML property lists emitted by macOS diskutil.
+plist = "1.10"

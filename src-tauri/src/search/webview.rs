@@ -1,12 +1,13 @@
 //! WebView-driven SERP fetch — the **only** search network path.
 //!
-//! The app already ships a real browser engine (WebView2/Chromium on Windows).
-//! Instead of imitating one with a static HTTP client (which can't run JS and
-//! gets fingerprint-/challenge-blocked), we navigate a **hidden, reused** window
-//! to the search URL. The document origin *is* the engine (so no CORS), Chromium
-//! renders + clears any anti-bot/JS challenge with its genuine TLS/JA3
-//! fingerprint and cookie jar, and we read the rendered `outerHTML` back. The
-//! existing [`super::parsers`] / [`super::engines`] then run on it, unchanged.
+//! The app already ships a real browser engine (WebView2/Chromium on Windows,
+//! WKWebView/WebKit on macOS). Instead of imitating one with a static HTTP
+//! client (which can't run JS and gets fingerprint-/challenge-blocked), we
+//! navigate a **hidden, reused** window to the search URL. The document origin
+//! *is* the engine (so no CORS), the platform browser renders + clears any
+//! anti-bot/JS challenge with its genuine network fingerprint and cookie jar,
+//! and we read the rendered `outerHTML` back. The existing [`super::parsers`] /
+//! [`super::engines`] then run on it, unchanged.
 //!
 //! ## Why a singleton, reused window
 //! One long-lived hidden window keeps the cookie jar + any Cloudflare clearance
@@ -208,10 +209,10 @@ const PAGE_TEXT_MIN: usize = 80;
 
 /// Probe script for a **result page** fetch (the "go deeper" step): returns the
 /// rendered `outerHTML` once the document looks settled, else an empty string so
-/// the Rust side keeps polling. Unlike the SERP path this runs via
-/// `ICoreWebView2::ExecuteScript` — *pulled* from Rust, not emitted by the page —
-/// so an arbitrary result page needs (and gets) **no** Tauri IPC surface; the
-/// capability file stays scoped to the engines' own domains.
+/// the Rust side keeps polling. Unlike the SERP path this runs via a native
+/// WebView2/WKWebView completion callback — *pulled* from Rust, not emitted by
+/// the page — so an arbitrary result page needs (and gets) **no** Tauri IPC
+/// surface; the capability file stays scoped to the engines' own domains.
 ///
 /// `window.__mutsumi_pre` is the previous-document marker: it is set on the SERP
 /// document *before* navigating away, and a navigation wipes JS globals — so if
@@ -472,12 +473,17 @@ mod real {
     const MANUAL_TIMEOUT: Duration = Duration::from_secs(150);
     /// Overall budget for one result-page fetch (navigate → settle → grab).
     const PAGE_TIMEOUT: Duration = Duration::from_secs(6);
+    /// Keep the tail of the page budget for one best-effort `outerHTML` grab
+    /// after settle probes stop. The native callback is normally near-instant;
+    /// a wedged renderer is still bounded by the shared page deadline.
+    const PAGE_FINAL_GRAB_RESERVE: Duration = Duration::from_millis(800);
     /// First probe delay after the navigation is scheduled (lets it commit).
     const PAGE_INITIAL_WAIT: Duration = Duration::from_millis(800);
     /// Interval between settle probes.
     const PAGE_POLL: Duration = Duration::from_millis(400);
-    /// Cap on one ExecuteScript round-trip (the COM callback is normally fast;
-    /// this only guards a wedged renderer).
+    /// Cap on one native JavaScript round-trip (the WebView2/WKWebView callback
+    /// is normally fast; this only guards a wedged renderer).
+    #[cfg(any(windows, target_os = "macos"))]
     const EXEC_TIMEOUT: Duration = Duration::from_secs(4);
 
     #[derive(serde::Deserialize)]
@@ -711,13 +717,12 @@ mod real {
         result
     }
 
-    /// Run JS in the fetch window's document and return its (JSON-encoded)
-    /// result — via `ICoreWebView2::ExecuteScript`, i.e. **pulled from the Rust
-    /// side**. This is how result-page fetches read HTML back: unlike the SERP
-    /// init-script's `plugin:event|emit`, it needs no Tauri IPC in the page, so
-    /// arbitrary result pages get zero app surface and the capability file stays
-    /// scoped to the search engines' domains. Windows-only (WebView2), like the
-    /// rest of this app's platform integrations.
+    /// Run JS in the Windows fetch window's document and return its
+    /// JSON-encoded result through `ICoreWebView2::ExecuteScript`. This is
+    /// pulled from Rust: unlike the SERP init-script's `plugin:event|emit`, it
+    /// needs no Tauri IPC in the page, so arbitrary result pages get zero app
+    /// surface and the capability file stays scoped to search-engine domains.
+    #[cfg(windows)]
     async fn exec_script(app: &AppHandle, js: &str) -> Result<String, String> {
         use webview2_com::ExecuteScriptCompletedHandler;
         use windows::core::HSTRING;
@@ -756,6 +761,91 @@ mod real {
         }
     }
 
+    /// Run JS in the macOS fetch window and return the same JSON-encoded result
+    /// contract as WebView2. The callback is owned by Rust/WKWebView; arbitrary
+    /// result pages still receive no Tauri capability and cannot invoke app
+    /// commands or emit the SERP event.
+    #[cfg(target_os = "macos")]
+    async fn exec_script(app: &AppHandle, js: &str) -> Result<String, String> {
+        use block2::RcBlock;
+        use objc2::{runtime::AnyObject, AnyThread};
+        use objc2_foundation::{
+            NSError, NSJSONSerialization, NSJSONWritingOptions, NSString, NSUTF8StringEncoding,
+        };
+        use objc2_web_kit::WKWebView;
+
+        /// # Safety
+        ///
+        /// `value` and `error` must be the nullable Objective-C objects supplied
+        /// by WKWebView for the duration of its completion callback.
+        unsafe fn serialize_result(
+            value: *mut AnyObject,
+            error: *mut NSError,
+        ) -> Result<String, String> {
+            if !error.is_null() {
+                let description = unsafe { (&*error).localizedDescription().to_string() };
+                return Err(format!("WKWebView evaluateJavaScript: {description}"));
+            }
+            if value.is_null() {
+                return Ok(String::new());
+            }
+
+            let data = unsafe {
+                NSJSONSerialization::dataWithJSONObject_options_error(
+                    &*value,
+                    NSJSONWritingOptions::FragmentsAllowed,
+                )
+            }
+            .map_err(|error| {
+                format!(
+                    "WKWebView result serialization: {}",
+                    error.localizedDescription()
+                )
+            })?;
+            let string = NSString::initWithData_encoding(
+                NSString::alloc(),
+                &data,
+                NSUTF8StringEncoding,
+            )
+            .ok_or_else(|| "WKWebView result was not valid UTF-8".to_string())?;
+            Ok(string.to_string())
+        }
+
+        let window = app
+            .get_webview_window(SERP_WINDOW)
+            .ok_or_else(|| "no fetch window".to_string())?;
+        let (tx, rx) = oneshot::channel::<Result<String, String>>();
+        let js = js.to_string();
+        window
+            .with_webview(move |webview| {
+                let tx = std::sync::Mutex::new(Some(tx));
+                let handler = RcBlock::new(move |value: *mut AnyObject, error: *mut NSError| {
+                    // SAFETY: WebKit owns both nullable Objective-C arguments
+                    // for the duration of this completion-handler invocation.
+                    let result = unsafe { serialize_result(value, error) };
+                    if let Ok(mut slot) = tx.lock() {
+                        if let Some(tx) = slot.take() {
+                            let _ = tx.send(result);
+                        }
+                    }
+                });
+                let script = NSString::from_str(&js);
+                // SAFETY: Tauri documents PlatformWebview::inner() as the live
+                // WKWebView handle on macOS, and with_webview runs this closure
+                // on the UI thread while the native view remains valid.
+                let view = unsafe { &*webview.inner().cast::<WKWebView>() };
+                unsafe {
+                    view.evaluateJavaScript_completionHandler(&script, Some(&handler));
+                }
+            })
+            .map_err(|e| format!("with_webview: {e}"))?;
+        match tokio::time::timeout(EXEC_TIMEOUT, rx).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(_)) => Err("exec channel dropped".into()),
+            Err(_) => Err("script execution timed out".into()),
+        }
+    }
+
     /// Fetch a **result page**'s rendered HTML through the same hidden window —
     /// the "go deeper" step when a SERP snippet doesn't carry the answer.
     ///
@@ -770,44 +860,77 @@ mod real {
 
         // Same serialization as SERP fetches (shared window, warm jar).
         let _guard = state.nav.lock().await;
+        // Queue time on `nav` belongs to the preceding fetch. Once this fetch
+        // owns the shared window, every asynchronous stage below shares one
+        // absolute deadline so setup/probe/fallback time cannot accumulate.
+        let deadline = tokio::time::Instant::now() + PAGE_TIMEOUT;
 
         // Mark the current (SERP) document so the probe can tell it from the
         // page we're about to load. Best-effort: if there is no window yet
         // there is no stale document to confuse the probe either.
-        let _ = exec_script(app, "window.__mutsumi_pre = 1; ''").await;
+        let _ = tokio::time::timeout_at(deadline, exec_script(app, "window.__mutsumi_pre = 1; ''"))
+            .await;
 
         let app2 = app.clone();
         let (setup_tx, setup_rx) = oneshot::channel::<Result<(), String>>();
         app.run_on_main_thread(move || {
+            // The UI queue may resume only after the caller's page budget has
+            // expired. Do not let that stale closure navigate the singleton
+            // window after `nav` has been released to a newer request.
+            if tokio::time::Instant::now() >= deadline {
+                let _ = setup_tx.send(Err(
+                    "page fetch timed out before navigation setup".to_string(),
+                ));
+                return;
+            }
             let _ = setup_tx.send(build_or_navigate(&app2, parsed));
         })
         .map_err(|e| format!("run_on_main_thread: {e}"))?;
-        match setup_rx.await {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => return Err(e),
-            Err(_) => return Err("setup channel dropped".into()),
+        match tokio::time::timeout_at(deadline, setup_rx).await {
+            Ok(Ok(Ok(()))) => {}
+            Ok(Ok(Err(e))) => return Err(e),
+            Ok(Err(_)) => return Err("setup channel dropped".into()),
+            Err(_) => return Err("page fetch timed out during navigation setup".into()),
         }
 
-        tokio::time::sleep(PAGE_INITIAL_WAIT).await;
-        let deadline = tokio::time::Instant::now() + PAGE_TIMEOUT;
+        // Probes may use the budget up to this point; the final segment remains
+        // available for a best-effort raw HTML grab.
+        let probe_deadline = deadline - PAGE_FINAL_GRAB_RESERVE;
         let probe = page_probe_js();
-        loop {
-            match exec_script(app, &probe).await {
-                Ok(json) => {
-                    let html = decode_exec_result(&json);
-                    if !html.is_empty() {
-                        return Ok(html);
+        if tokio::time::timeout_at(probe_deadline, tokio::time::sleep(PAGE_INITIAL_WAIT))
+            .await
+            .is_ok()
+        {
+            loop {
+                match tokio::time::timeout_at(probe_deadline, exec_script(app, &probe)).await {
+                    Ok(Ok(json)) => {
+                        let html = decode_exec_result(&json);
+                        if !html.is_empty() {
+                            return Ok(html);
+                        }
                     }
+                    Ok(Err(e)) => log::info!("search: page probe failed ({e})"),
+                    Err(_) => break,
                 }
-                Err(e) => log::info!("search: page probe failed ({e})"),
+                if tokio::time::Instant::now() >= probe_deadline {
+                    break;
+                }
+                tokio::time::sleep_until(std::cmp::min(
+                    tokio::time::Instant::now() + PAGE_POLL,
+                    probe_deadline,
+                ))
+                .await;
             }
-            if tokio::time::Instant::now() >= deadline {
-                break;
-            }
-            tokio::time::sleep(PAGE_POLL).await;
         }
-        // Deadline: take what rendered — slow pages often still carry the fact.
-        let json = exec_script(app, "document.documentElement.outerHTML").await?;
+        // Probe budget exhausted: take what rendered — slow pages often still
+        // carry the fact. This shares the original deadline rather than adding
+        // another independent EXEC_TIMEOUT.
+        let json = tokio::time::timeout_at(
+            deadline,
+            exec_script(app, "document.documentElement.outerHTML"),
+        )
+        .await
+        .map_err(|_| "page fetch timed out during final HTML grab".to_string())??;
         let html = decode_exec_result(&json);
         if html.is_empty() {
             Err("page produced no HTML".into())
@@ -968,9 +1091,34 @@ mod tests {
         assert!(js.contains("readyState"), "load-state check missing");
         assert!(js.contains(&format!(">= {PAGE_TEXT_MIN}")), "text threshold missing");
         assert!(js.contains("document.documentElement.outerHTML"), "no HTML grab");
-        // Pulled via ExecuteScript — the page needs no Tauri IPC surface.
+        // Pulled through the native WebView callback — the page needs no Tauri
+        // IPC surface on either desktop platform.
         assert!(!js.contains("__TAURI"), "probe must not touch Tauri IPC");
         assert!(!js.contains("invoke"), "probe must not emit");
+    }
+
+    #[test]
+    fn serp_capability_does_not_authorize_arbitrary_result_domains() {
+        let capability: serde_json::Value = serde_json::from_str(include_str!(
+            "../../capabilities/webview-serp.json"
+        ))
+        .expect("webview-serp capability should be valid JSON");
+        let urls = capability["remote"]["urls"]
+            .as_array()
+            .expect("remote.urls should be an array")
+            .iter()
+            .map(|url| url.as_str().expect("capability URL should be a string"))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            urls,
+            vec![
+                "https://*.bing.com/*",
+                "https://*.google.com/*",
+                "https://*.baidu.com/*",
+                "https://duckduckgo.com/*",
+                "https://*.duckduckgo.com/*",
+            ]
+        );
     }
 
     #[test]

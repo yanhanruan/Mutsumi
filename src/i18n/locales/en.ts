@@ -16,10 +16,13 @@ export const en: Translations = {
   save:              'Save',
   resetPet:          'Reset Mutsumi',
   close:             'Close',
+  minimize:          'Minimize',
   savedMsg:          'Saved.',
   resetMsg:          'Reset.',
   autostartOnMsg:    'Launch on startup enabled.',
   autostartOffMsg:   'Launch on startup disabled.',
+  autostartUnavailable: 'Launch on startup is unavailable on this system.',
+  autostartFailedMsg:   'Could not change the launch-on-startup setting.',
 
   // ── About window ─────────────────────────────────────────────────
   aboutTitle:             'about',
@@ -27,10 +30,12 @@ export const en: Translations = {
   aboutAppSummary:        'App Summary',
   aboutAppSummaryBody:    'Mutsumi is a lightweight desktop companion that keeps Wakaba Mutsumi on your desktop, helping you focus, rest, and enjoy small everyday interactions.',
   aboutMainFeatures:      'Main Features',
+  aboutCompanionFeature:  '👻 Always-on-top with click-through transparency, drag anywhere on screen',
+  aboutAudioActivityFeature: '🎧 Automatic audio awareness — headphones on when music plays',
+  aboutAudioActivityDegradedFeature: '🎧 Audio activity awareness estimated from output-device I/O',
+  aboutMediaControllerFeature: '🎵 Mini music controller via Windows SMTC for supported media apps',
+  aboutMediaControllerDegradedFeature: '🎵 Limited media information or controls, based on platform support',
   aboutFeaturesList:      [
-    '👻 Always-on-top with click-through transparency, drag anywhere on screen',
-    '🎧 Automatic audio awareness — headphones on when music plays',
-    '🎵 Mini music controller via Windows SMTC for any playing app',
     '🍅 Pomodoro focus timer & real-time weather display',
     '🔮 Daily tarot reading with 78 unique cards',
     '💬 AI chat: character-faithful role-play dialogue as Mutsumi',
@@ -97,6 +102,8 @@ export const en: Translations = {
 
   // ── Music controller visibility ───────────────────────────────────
   showMusic: 'Show Music Controller',
+  showAudioActivity: 'Show Audio Activity Badge',
+  audioActivityDegradedHint: 'Audio activity is estimated from output-device I/O and may remain active for silent streams.',
 
   // ── Sleep "zzz" effect visibility ─────────────────────────────────
   showZzz: 'Show Sleep "zzz"',
@@ -104,7 +111,8 @@ export const en: Translations = {
   // ── Flying screensaver ────────────────────────────────────────────
   flyingScreensaver:     'Flying Screensaver',
   flyingWaitLabel:       'Start after',
-  flyingScreensaverHint: 'She floats around the screen after the computer sits idle for a while. Ctrl+Alt+F toggles flight anytime.',
+  flyingScreensaverHint: 'She floats around the screen after the computer sits idle for a while. {keys} toggles flight anytime.',
+  flyingScreensaverUnavailable: 'Automatic idle flight is not available on this platform yet. Manual flight remains available.',
   hotkeyUnavailable:     '{keys} is in use by another app, so the shortcut is off for this session. Close that app and restart Mutsumi to get it back.',
 
   // ── Search engine ─────────────────────────────────────────────────
@@ -141,6 +149,9 @@ export const en: Translations = {
   apiKeyClear:          'Clear',
   apiKeySavedMsg:       'API key saved.',
   apiKeyClearedMsg:     'API key cleared.',
+  apiKeySaveFailedMsg:  'Could not save the API key to the system credential store.',
+  apiKeyClearFailedMsg: 'Could not clear the API key from the system credential store.',
+  apiKeyCredentialStoreUnavailable: 'The system credential store is unavailable. A saved API key may not have been loaded.',
   apiKeyHelp:           'How to get an API key?',
 
   // ── Pomodoro badge ────────────────────────────────────────────────
@@ -302,6 +313,7 @@ export const en: Translations = {
     network:     'Network',
     online:      'Online',
     offline:     'Offline',
+    unavailable: 'Unavailable',
     wifi:        'Wi-Fi',
     ethernet:    'Ethernet',
     uptime:      'Uptime',
