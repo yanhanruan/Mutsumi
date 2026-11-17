@@ -115,7 +115,7 @@ Mutsumi 当前是以 Windows 为唯一发布平台设计的 Tauri 2 桌面应用
 
 | 模块 | 内容 | 状态 |
 | --- | --- | --- |
-| M0 | PR #18 的 `desktop-ci` 恢复全绿 | 计划已写，待 review |
+| M0 | PR #18 的 `desktop-ci` 恢复全绿 | 已完成（2026-11-17） |
 | M1 | 媒体：MediaRemote spike → 实现（含降级）；系统音量/静音（CoreAudio）；About 能力清单与三语文案 | 未开始 |
 | M2 | （可选）9.9.8 WebKit 崩溃排查；x86_64（Rosetta）成功升级补验 | 未开始 |
 | M3 | 窗口与生命周期真机矩阵：多显示器/缩放/负坐标、睡眠/锁屏/切换用户/热插拔、登录自启、单实例重聚焦 | 未开始 |
@@ -154,6 +154,12 @@ Windows 编译与 universal 打包未在本地验证。
 Intel macOS regression 三个 job 全部通过；run ID 与结论记录在本节。
 
 **不在 M0 范围**：除修 CI 所需外不改功能代码；不发布任何版本。
+
+**结果（2026-11-17）**：`7fa555e` 快进推送到 `feat/macos-adaptation` 后，`desktop-ci`
+run [`44087331979`](https://github.com/yanhanruan/Mutsumi/actions/runs/44087331979)
+三个 job 全部通过：Windows regression、unsigned universal bundle（含 bundle 契约与
+Apple Silicon Finder 生命周期 smoke）、native Intel macOS regression（含 Intel 生命周期
+smoke）。无需额外修复，锁文件即为完整修复。第 5 步收尾未执行，留待维护者决定。
 
 ## 5. 总体技术方案
 
