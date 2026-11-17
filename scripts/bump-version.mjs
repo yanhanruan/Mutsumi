@@ -2,9 +2,10 @@
 /**
  * bump-version.mjs — single source of truth for the app version.
  *
- * Writes the given semver into BOTH src-tauri/tauri.conf.json and
- * src-tauri/Cargo.toml so they can never drift. The About window reads the
- * version at runtime (getVersion()), so there is nothing else to hand-edit.
+ * Writes the given semver into src-tauri/tauri.conf.json, src-tauri/Cargo.toml
+ * and the app's own entry in the committed src-tauri/Cargo.lock so they can
+ * never drift. The About window reads the version at runtime (getVersion()),
+ * so there is nothing else to hand-edit.
  *
  *   node scripts/bump-version.mjs 1.5.0
  *   npm run release 1.5.0
@@ -29,14 +30,23 @@ if (!/^\d+\.\d+\.\d+$/.test(version)) {
   process.exit(1)
 }
 
-/** Replace the single occurrence matched by `re`, or fail loudly if absent. */
+/** Edits are validated first and written together, so a failure leaves nothing half-bumped. */
+const pending = []
+
+/** Queue replacing the single occurrence matched by `re`, or fail loudly if absent. */
 function patch(path, re, replacement, label) {
-  const before = readFileSync(path, 'utf8')
+  let before
+  try {
+    before = readFileSync(path, 'utf8')
+  } catch {
+    console.error(`error: could not read ${path}`)
+    process.exit(1)
+  }
   if (!re.test(before)) {
     console.error(`error: could not find the ${label} in ${path}`)
     process.exit(1)
   }
-  writeFileSync(path, before.replace(re, replacement))
+  pending.push([path, before.replace(re, replacement)])
 }
 
 const confPath = join(root, 'src-tauri', 'tauri.conf.json')
@@ -47,8 +57,19 @@ const cargoPath = join(root, 'src-tauri', 'Cargo.toml')
 // never a dependency's version.
 patch(cargoPath, /(\[package\][\s\S]*?\nversion\s*=\s*")[^"]*(")/, `$1${version}$2`, '[package] version')
 
+// Cargo.lock records the app's own version too. Patch just that entry (no
+// re-resolve, so every dependency stays exactly as locked); otherwise the next
+// build rewrites it and the release commit ships a stale lock.
+const pkgName = readFileSync(cargoPath, 'utf8').match(/\[package\][\s\S]*?\nname\s*=\s*"([^"]+)"/)?.[1]
+const lockPath = join(root, 'src-tauri', 'Cargo.lock')
+const escaped = (pkgName ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+patch(lockPath, new RegExp(`(\\[\\[package\\]\\]\\r?\\nname = "${escaped}"\\r?\\nversion = ")[^"]*(")`), `$1${version}$2`, `"${pkgName}" package entry`)
+
+for (const [path, after] of pending) writeFileSync(path, after)
+
 console.log(`bumped to ${version}`)
 console.log('  • src-tauri/tauri.conf.json')
 console.log('  • src-tauri/Cargo.toml')
+console.log('  • src-tauri/Cargo.lock')
 console.log('')
 console.log(`next:  git commit -am "chore(release): v${version}"  &&  git tag v${version}  &&  git push --follow-tags`)

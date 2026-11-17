@@ -23,6 +23,12 @@ serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
 # `with_webview` exposes platform-native handles whose shape may change across
 # Tauri minor releases; keep this adapter within the audited 2.11 line.
+# The pin alone doesn't hold that line: every tauri 2.11.x has caret deps on
+# tauri-runtime / tauri-runtime-wry, so a fresh resolve pulls their 2.12.x,
+# which tauri 2.11 doesn't compile against. The committed Cargo.lock keeps them
+# on 2.11, so never run a bare `cargo update`. Even `cargo update -p <crate>` can
+# move transitive deps: afterwards check `cargo tree -i tauri-runtime -i
+# tauri-runtime-wry` still shows 2.11, then run `cargo test --locked`.
 tauri = { version = "~2.11.2", features = ["protocol-asset", "tray-icon", "image-png", "macos-private-api"] }
 tauri-plugin-log = "2"
 tauri-plugin-autostart = "2"
