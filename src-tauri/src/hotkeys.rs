@@ -22,8 +22,6 @@ struct HotkeyDef {
     id: &'static str,
     /// Accelerator in the plugin's parse syntax.
     accelerator: &'static str,
-    /// User-facing form for UI text.
-    display: &'static str,
     /// Called on every press of the registered shortcut.
     on_press: fn(&AppHandle),
 }
@@ -33,16 +31,34 @@ struct HotkeyDef {
 const DEFS: &[HotkeyDef] = &[HotkeyDef {
     id: "toggle-flight",
     accelerator: "ctrl+alt+f",
-    display: "Ctrl+Alt+F",
     on_press: |app| crate::flight::toggle_manual(app),
 }];
+
+fn accelerator_display(accelerator: &str, macos: bool) -> String {
+    accelerator
+        .split('+')
+        .map(|part| match (macos, part.to_ascii_lowercase().as_str()) {
+            (true, "ctrl" | "control") => "⌃".into(),
+            (true, "alt" | "option") => "⌥".into(),
+            (true, "shift") => "⇧".into(),
+            (true, "cmd" | "command" | "meta" | "super") => "⌘".into(),
+            (true, key) => key.to_ascii_uppercase(),
+            (false, "ctrl" | "control") => "Ctrl".into(),
+            (false, "alt" | "option") => "Alt".into(),
+            (false, "shift") => "Shift".into(),
+            (false, "cmd" | "command" | "meta" | "super") => "Meta".into(),
+            (false, key) => key.to_ascii_uppercase(),
+        })
+        .collect::<Vec<_>>()
+        .join(if macos { "" } else { "+" })
+}
 
 /// Runtime status of one hotkey, as exposed to the frontend.
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HotkeyStatus {
     pub id: String,
-    /// User-facing accelerator ("Ctrl+Alt+F").
+    /// User-facing accelerator ("Ctrl+Alt+F" / "⌃⌥F").
     pub accelerator: String,
     /// False when registration failed (another app owns the combination).
     pub active: bool,
@@ -87,16 +103,17 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
                     },
                 );
                 if let Err(e) = &result {
+                    let display = accelerator_display(def.accelerator, cfg!(target_os = "macos"));
                     log::warn!(
                         "global shortcut {} ({}) unavailable (likely already in use \
                          by another app); disabled for this session: {e}",
-                        def.display,
+                        display,
                         def.id,
                     );
                 }
                 HotkeyStatus {
                     id: def.id.into(),
-                    accelerator: def.display.into(),
+                    accelerator: accelerator_display(def.accelerator, cfg!(target_os = "macos")),
                     active: result.is_ok(),
                 }
             })
@@ -105,4 +122,21 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
 
     app.manage(HotkeysState(Mutex::new(statuses)));
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn formats_macos_modifier_symbols_without_separators() {
+        assert_eq!(accelerator_display("ctrl+alt+f", true), "⌃⌥F");
+        assert_eq!(accelerator_display("shift+meta+k", true), "⇧⌘K");
+    }
+
+    #[test]
+    fn formats_non_macos_accelerators_with_named_modifiers() {
+        assert_eq!(accelerator_display("ctrl+alt+f", false), "Ctrl+Alt+F");
+        assert_eq!(accelerator_display("shift+meta+k", false), "Shift+Meta+K");
+    }
 }

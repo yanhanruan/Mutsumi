@@ -9,8 +9,13 @@
   <a href="https://tauri.app/"><img src="https://img.shields.io/badge/Tauri-2.0-24C8D8?logo=tauri&logoColor=white" alt="Tauri 2"></a>
   <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-Backend-000000?logo=rust&logoColor=white" alt="Rust"></a>
   <a href="https://vuejs.org/"><img src="https://img.shields.io/badge/Vue_3-Frontend-4FC08D?logo=vuedotjs&logoColor=white" alt="Vue 3"></a>
-  <a href="#download"><img src="https://img.shields.io/badge/Platform-Windows-0078D6?logo=windows&logoColor=white" alt="Windows Only"></a>
+  <a href="../../releases"><img src="https://img.shields.io/badge/Windows-released-0078D6?logo=windows&logoColor=white" alt="Windows released"></a>
+  <a href="docs/MACOS-ADAPTATION-PLAN.md"><img src="https://img.shields.io/badge/macOS-in%20development-000000?logo=apple&logoColor=white" alt="macOS in development"></a>
 </p>
+
+> **Platform status / 平台状态：** Windows 版已发布。macOS 13+ 适配正在开发与真机验收中，
+> 尚未提供签名、notarized 的公开 DMG。The Windows build is released; macOS 13+ is under
+> active development and does not yet have a signed, notarized public DMG.
 
 <p align="center">
   <a href="#mutsumi--桌面陪伴宠物-中文"><b>中文</b></a> | <a href="#mutsumi--desktop-companion-english"><b>English</b></a>
@@ -43,9 +48,9 @@ Mutsumi 是一个静静住在你屏幕角落的小伙伴。
 
 <p align="center"><img src="docs/images/flying.avif" width="100%" alt="flying mode" /></p>
 
-🎧 **全局音频感知（无需配置）**：当你开始播放音乐或看视频时，她会立刻戴上耳机跟着节奏晃动；声音停止，她会摘下耳机恢复平静。
+🎧 **全局音频感知（无需配置）**：当你开始播放音乐或看视频时，她会戴上耳机；声音停止后恢复平静。Windows 使用 WASAPI 振幅，macOS 首版使用公开 CoreAudio 输出设备 I/O 状态估算活动，因此静音但未关闭的音频流可能仍被视为活动。
 
-🎵 **迷你音乐控制器**：右下角常驻一个会随音乐律动的音响小图标。悬停即可展开控制面板——播放 / 暂停、上一首 / 下一首、快进 / 快退 10 秒、重播、系统音量与静音，并显示当前曲目、歌手和播放进度，点击或拖动进度条即可跳转到任意位置。当多个应用同时在播放时，还能切换音源并自动跟随最新的播放会话。基于 Windows 系统媒体控件（SMTC），能控制任何正在播放的应用：Spotify、网易云音乐、浏览器等（建议下载最新版本）。可在设置中随时开关。
+🎵 **迷你音乐控制器（当前仅 Windows）**：右下角的音响小图标可展开播放 / 暂停、上一首 / 下一首、进度、系统音量与静音等控制。该功能依赖 Windows SMTC；macOS 没有对等的公开跨应用接口，因此 macOS 版会保留音频活动徽章，但隐藏不可用的曲目信息和控制面板。
 
 <p align="center"><img src="docs/images/music-controller.avif" width="100%" alt="music controller" /></p>
 
@@ -66,11 +71,11 @@ Mutsumi 是一个静静住在你屏幕角落的小伙伴。
 * 💭 **长期记忆**：她会记得你们聊过的事情：家里的猫、最近的工作、偶尔提起的小烦恼，甚至是你们之间那些不起眼的小约定。底层基于 RAG 记忆系统实现，本地化轻量存储。
 * 🗂️ **连续记录 & 历史检索**：所有对话像微信 / iMessage 一样连成一条时间线并保存在本地；可按关键词或日期翻查，向上滚动自动加载更早的消息，并按时间分组显示。
 
-> 🐍如果用毒蛇的毒毒毒蛇，毒蛇会不会被毒蛇蛇毒的毒毒死？😆众所周知，作为最猛没有之一的大爬虫，各大浏览器引擎厂商采用了及其严苛的底层加密（浏览器高级指纹识别、自动化框架特征检测、 引擎混淆与反调试、TLS/JA3 指纹、HTTP/2 帧指纹等等）以实现anti-scraping & bot-detection，原始的搜索增强方案主包采用了rust的reqwest plus fallback 切换引擎处理，效果并不理想，究其原因就是前文的底层加密，深入研究后发现如果真的攻克这些技术难点，主包可能会被通缉(，并且时间花费性价比太低。因此主包采用了一种更为巧妙的实现方式，类似于Python的无头浏览器，区别在于tauri框架会根据操作系统自动匹配WebView，因此所需额外的lib依赖为零。通过这种方式，成功实现“以彼之矛，攻彼之盾”，同时每个客户端独立、安全、隐私，不需要任何额外的ip连接池或者指纹破解。
+> 🐍如果用毒蛇的毒毒毒蛇，毒蛇会不会被毒蛇蛇毒的毒毒死？😆众所周知，作为最猛没有之一的大爬虫，各大浏览器引擎厂商采用了及其严苛的底层加密（浏览器高级指纹识别、自动化框架特征检测、引擎混淆与反调试、TLS/JA3 指纹、HTTP/2 帧指纹等等）以实现 anti-scraping & bot-detection。原始的搜索增强方案采用 Rust reqwest 与引擎 fallback，但无法稳定跨过这些保护。现在改用操作系统自带的真实 WebView（Windows 为 WebView2 / Chromium，macOS 为 WKWebView / WebKit），无需携带额外的浏览器运行时。这样每个客户端仍然独立、安全，不需要 IP 连接池或指纹伪造。
 
 * 🔍 **联网搜索**：睦头也会好奇外面的世界。想知道最近的热点、Ave Mujica 的新消息、或者东京今天的天气？跟她说一声就好——她会读网页，再把真正有用的那几条挑出来告诉你。核心技术：
 
-  - **反反爬原理：** 大多数桌面应用用 HTTP 客户端假装浏览器，却无法解决 Cloudflare、JS 、SPA等难点。睦头直接把应用自带的隐藏 WebView2 / Chromium 窗口导航到搜索页——请求带着真实浏览器的 TLS/JA3 指纹、warm cookie jar 和 JS 引擎。因为文档来源就是搜索引擎本身，连 CORS 边界都不存在。一个长期复用的隐藏单例窗口让"过关 cookie"保持active；极小概率下（国内机场不稳定且使用外网引擎除外），人机验证窗口会自己浮现让你手动解一次，随后无缝继续。
+  - **反反爬原理：** 大多数桌面应用用 HTTP 客户端假装浏览器，却无法解决 Cloudflare、JS、SPA 等难点。睦头直接把隐藏 WebView（Windows WebView2 / Chromium 或 macOS WKWebView / WebKit）导航到搜索页——请求带着真实浏览器的网络指纹、warm cookie jar 和 JS 引擎。因为文档来源就是搜索引擎本身，连 CORS 边界都不存在。一个长期复用的隐藏单例窗口保持 cookie；遇到人机验证时，验证窗口会显示出来让用户手动完成，随后继续原请求。
   - **渲染后的 HTML 传递问题：** Tauri v2 的安全模型下，一个远程页面不允许调用应用命令。解法：给这个 `serp-fetcher` 窗口单独授一份能力（`capabilities/webview-serp.json`），注入的 init-script 通过核心 event 插件（`plugin:event|emit`）把渲染后的 `outerHTML` 发回 Rust。每次导航在 URL 的 **query**（`&__serpid=…`——故意用 query 而非 fragment，这样即便被 `continue=` 重定向包裹也能存活）里带一个请求 id，脚本在 document-start 读到并回传以对上号；当某引擎在重定向里丢了这个参数时，再用"当前唯一在途导航"兜底路由——因为所有导航都串行，在途永远只有一个。
   - **多引擎 · 双解析 · 链接还原：** Bing（国内与国际）、Google、百度、DuckDuckGo：主解析用正则盯结构性 landmark（如 `<li class="b_algo">`，比 CSS 类名更抗改版），返回空再退回 CSS 选择器兜底；每家的跳转包装各自还原成真实地址（Bing `/ck/a?u=a1<base64url>`、Google `/url?q=`、DDG `l/?uddg=`、百度 302 直跳）。解析全是纯同步函数，选择器失配只返回空、安全fallback。五类引擎均有实测。
   - **两段式架构：** SERP 摘要其实是答案的**劣质载体**：引擎常把数字截断、或换成网站的 SEO 标语（"XX天气网为您提供…"）。所以先做质量筛选——要求命中查询主题、且摘要里真的带一个具体事实（温度 / 汇率 / 日期）；话题相关的链接会保留，但它的废话摘要会被丢掉、而不是当答案喂给模型；并做了繁体与日文新字体归一（気→气、発→发、英偉達→英伟达）。当排名第一的摘要**只提到话题却没写那个数字**时，触发"再深入一层"：把同一个隐藏窗口导航进正文页，剥掉非内容子树、按文档顺序取出真正陈述该事实的段落（有硬上限）。深入只会增加信号——抽取不到就退回原摘要，安全revert。
@@ -135,12 +140,12 @@ Mutsumi 是一个静静住在你屏幕角落的小伙伴。
 
 ### 🚀 快速获取
 
-**直接安装（推荐）：**
-前往 [Releases 页面](../../releases) 获取最新的 `.exe` 可执行文件，双击即可召唤小黄瓜。（目前仅支持 Windows）
+**Windows 直接安装（推荐）：**
+前往 [Releases 页面](../../releases) 获取最新的 Windows 安装包。macOS 签名 / notarized DMG 尚未公开发布，目前仅建议开发和测试人员从源码运行。
 
 **面向开发者的源码构建：**
 如果你想研究 Tauri 的异形窗口或系统音频捕获逻辑，欢迎克隆代码！
-环境要求：`Node.js (18+)` + `Rust 环境`
+环境要求：`Node.js (18+)` + `Rust stable`；macOS 还需安装 Xcode Command Line Tools。
 
 ```bash
 git clone <你的仓库地址>
@@ -153,7 +158,7 @@ npm run tauri dev
 
 ### 🛠️ 技术架构
 
-Tauri 2（Rust 后端）+ Vue 3 前端，打包为单文件原生 Windows 应用。
+Tauri 2（Rust 后端）+ Vue 3 前端，Windows 为当前发布平台，macOS 13+ 适配正在进行中。
 
 ```
 Mutsumi/
@@ -218,10 +223,10 @@ After your computer has been idle for a configurable period (6–30 minutes), Mu
 <p align="center"><img src="docs/images/flying.avif" width="100%" alt="flying mode" /></p>
 
 🎧 **Automatic Audio Awareness**
- Start playing music or a video, and she'll instantly put on her headphones and groove along to the beat. When the audio stops, she'll take them off and quietly return to idle.
+ Start playing music or a video and she'll put on her headphones; when audio stops, she returns to idle. Windows uses WASAPI amplitude. The first macOS build estimates activity from public CoreAudio output-device I/O, so a silent stream that remains open may still appear active.
 
-🎵 **Mini Music Controller**
- A little speaker icon sits in the bottom-right corner and pulses along with your audio. Hover to expand a control panel — play/pause, previous/next, skip ±10s, replay, plus system volume and mute — alongside the current track, artist, and a progress bar you can click or drag to seek. When multiple apps are playing at once, switch between sources or let it auto-follow whichever one is most active. Built on Windows System Media Transport Controls (SMTC), so it drives anything that's playing: Spotify, NetEase Cloud Music, browser media, and more (Update to the latest version). Toggle it anytime from Settings.
+🎵 **Mini Music Controller (currently Windows only)**
+ The speaker badge expands into playback, track, progress, system-volume, and mute controls backed by Windows SMTC. macOS has no equivalent public cross-application API, so the macOS build keeps the audio-activity badge while hiding unavailable metadata and transport controls.
 
 <p align="center"><img src="docs/images/music-controller.avif" width="100%" alt="music controller" /></p>
 
@@ -250,10 +255,10 @@ After your computer has been idle for a configurable period (6–30 minutes), Mu
 * 🗂️ **Persistent Chat History & Search**
   All conversations are stored locally and organized into a continuous timeline, similar to WeChat, iMessage, or other modern messaging apps. Browse past chats by keyword or date, automatically load older messages as you scroll, and view conversations grouped by time.
 
-> 🐍 What happens when you use a snake’s own venom against it? Uno reverse card? 😆As everyone knows, search-engine crawlers are the fiercest crawlers of them all. Major browser and search-engine vendors employ extremely rigorous low-level defenses—advanced browser fingerprinting, automation-framework signature detection, engine obfuscation and anti-debugging, TLS/JA3 fingerprinting, HTTP/2 frame fingerprinting, and more—to implement anti-scraping and bot detection. The original search-augmentation solution used Rust’s reqwest, with fallback engine switching, but the results were less than ideal. The root cause was precisely the low-level protections mentioned above. Further research revealed that truly overcoming these technical barriers might get yours truly put on a wanted list—and the time investment simply would not be worth it. So a more ingenious approach was adopted. It works somewhat like a Python headless browser, except that the Tauri framework automatically selects the appropriate WebView for the operating system, so it requires zero additional library dependencies. This successfully turns their own spear against their shield, while keeping every client independent, secure, and private, with no need for extra IP pools or fingerprint spoofing.
+> 🐍 What happens when you use a snake’s own venom against it? Uno reverse card? 😆 Browser engines have deep anti-automation defenses that a static HTTP client cannot reliably reproduce. Mutsumi therefore uses the operating system's real WebView—WebView2 / Chromium on Windows and WKWebView / WebKit on macOS—without bundling another browser runtime. Each client remains independent and does not need proxy pools or fingerprint spoofing.
 
 * 🔍 **Web Search** Mutsumi gets curious about the outside world too. Want to know the latest trending topics, new updates about Ave Mujica, or today’s weather in Tokyo? Just ask her—she will read the web pages and pick out the few pieces of information that are genuinely useful. Core technologies:
-  * **Anti-anti-scraping principle:** Most desktop applications use HTTP clients to impersonate browsers, but they cannot properly handle challenges such as Cloudflare, JavaScript, and SPAs. Mutsumi instead navigates the application’s built-in hidden WebView2 / Chromium window directly to the search page. The requests therefore carry a real browser’s TLS/JA3 fingerprint, warm cookie jar, and JavaScript engine. Because the document is loaded directly from the search engine itself, there is not even a CORS boundary to cross. A long-lived, reusable hidden singleton window keeps the “clearance cookies” active. In the extremely rare event that a human-verification challenge appears—excluding cases involving unstable China-based proxy services while accessing overseas search engines—the verification window surfaces automatically so you can solve it once manually, after which the process continues seamlessly.
+  * **Anti-anti-scraping principle:** Most desktop applications use HTTP clients to impersonate browsers, but they cannot properly handle challenges such as Cloudflare, JavaScript, and SPAs. Mutsumi instead navigates a hidden WebView—Windows WebView2 / Chromium or macOS WKWebView / WebKit—directly to the search page. Requests therefore carry a real browser engine, warm cookie jar, and JavaScript runtime. A long-lived singleton keeps cookies warm; if a human-verification challenge appears, the window surfaces for the user to complete it before the original request continues.
   * **Passing rendered HTML back to the application:** Under Tauri v2’s security model, a remote page is not allowed to invoke application commands. The solution is to grant the `serp-fetcher` window its own dedicated capability (`capabilities/webview-serp.json`). An injected init script then sends the rendered `outerHTML` back to Rust through the core event plugin (`plugin:event|emit`). Each navigation carries a request ID in the URL’s **query string** (`&__serpid=…`—deliberately placed in the query rather than the fragment so that it survives even when wrapped inside a `continue=` redirect). The script reads the ID at document start and sends it back so the response can be matched to the correct request. When an engine drops this parameter during a redirect, routing falls back to the “only currently in-flight navigation.” Because all navigations are serialized, there can only ever be one in flight.
   * **Multiple engines · dual parsing · link restoration:** Bing (domestic and international), Google, Baidu, and DuckDuckGo are supported. The primary parser uses regular expressions to target structural landmarks such as `<li class="b_algo">`, which are more resistant to redesigns than ordinary CSS class names. If that returns nothing, it falls back to CSS selectors. Each engine’s redirect wrapper is independently resolved back to the real destination URL: Bing’s `/ck/a?u=a1<base64url>`, Google’s `/url?q=`, DDG’s `l/?uddg=`, and Baidu’s direct 302 redirects. All parsing is implemented as pure synchronous functions. A selector mismatch simply returns an empty result and triggers a safe fallback. All five engine variants have been tested in practice.
   * **Two-stage architecture:** SERP snippets are actually a **poor carrier for answers**. Search engines often truncate numbers or replace useful content with a website’s SEO tagline, such as “XX Weather provides you with…”. Results therefore undergo quality filtering first: a snippet must match the query topic and actually contain a concrete fact, such as a temperature, exchange rate, or date. Topically relevant links are retained, but their useless snippets are discarded rather than fed to the model as answers. Traditional Chinese and Japanese shinjitai variants are also normalized (`気→气`, `発→发`, `英偉達→英伟达`). When the top-ranked snippet **mentions the topic but omits the actual number**, the system triggers a “go one level deeper” step: it navigates the same hidden window to the source page, strips out non-content subtrees, and extracts—in document order—the paragraphs that genuinely state the relevant fact, subject to a hard limit. Going deeper can only add signal: if extraction fails, the system safely reverts to the original snippet.
@@ -284,12 +289,12 @@ After your computer has been idle for a configurable period (6–30 minutes), Mu
 
 ### 🚀 Getting Started
 
-**Option 1 — Download (Easiest):**
-Grab the latest `.msi` installer from the [Releases page](../../releases) and double-click to install. *(Windows only for now)*
+**Option 1 — Windows download (Easiest):**
+Grab the latest Windows installer from the [Releases page](../../releases). A signed, notarized macOS DMG has not been published yet; source builds are currently intended for development and testing only.
 
 **Option 2 — Build from Source (For Geeks):**
 Want to see how we handle transparent windows or global audio capture in Tauri? Clone away!
-Requirements: `Node.js (18+)` + `Rust`
+Requirements: `Node.js (18+)` + `Rust stable`; macOS also requires Xcode Command Line Tools.
 
 ```bash
 git clone <repo-url>
@@ -302,7 +307,7 @@ npm run tauri dev
 
 ### ⚙️ Settings
 
-Right-click her icon in the system tray (bottom-right corner) to tweak: `Pomodoro Durations` / `Character Size (S/M/L)` / `Weather Toggle` / `Music Controller Toggle` / `Flying Screensaver Toggle & Wait Time` / `Language`
+Right-click her Windows tray icon or macOS menu-bar icon to tweak: `Pomodoro Durations` / `Character Size (S/M/L)` / `Weather Toggle` / `Audio Badge or Music Controller` / `Flying Screensaver Toggle & Wait Time` / `Language`
 
 <p align="center"><img src="docs/images/setting.avif" width="440" alt="Settings window" /></p>
 
@@ -310,7 +315,7 @@ Right-click her icon in the system tray (bottom-right corner) to tweak: `Pomodor
 
 ### 🛠️ Architecture
 
-Tauri 2 (Rust backend) + Vue 3 frontend, bundled as a single native Windows app.
+Tauri 2 (Rust backend) + Vue 3 frontend. Windows is the current release platform; macOS 13+ adaptation is in progress.
 
 ```
 Mutsumi/

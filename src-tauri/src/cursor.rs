@@ -1,29 +1,36 @@
-//! OS-level cursor poller (Windows).
+//! OS-level cursor poller (Windows and macOS).
 //!
 //! When the webview has `setIgnoreCursorEvents(true)`, it stops receiving
 //! mouse events — so the only way to detect the cursor returning to a
 //! visible pixel is to poll from outside the webview. This module spawns a
-//! background thread that calls `GetCursorPos` every ~30 ms, computes the
-//! cursor position relative to the main window, and emits a `cursor-pos`
-//! event the frontend uses to drive per-pixel hit testing.
-//!
-//! On non-Windows platforms the spawn is a no-op.
+//! background thread that reads the native/Tauri global cursor position every
+//! ~30 ms, computes it relative to the main window, and emits a `cursor-pos`
+//! event the frontend uses to drive per-pixel hit testing. Other platforms
+//! currently keep the no-op fallback.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
+#[cfg(any(windows, target_os = "macos"))]
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
+#[cfg(any(windows, target_os = "macos"))]
 use std::thread;
+#[cfg(any(windows, target_os = "macos"))]
 use std::time::Duration;
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::AppHandle;
+#[cfg(any(windows, target_os = "macos"))]
+use tauri::{Emitter, Manager};
 
 #[cfg(windows)]
 use windows::Win32::Foundation::POINT;
 #[cfg(windows)]
 use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
 
+#[cfg(any(windows, target_os = "macos"))]
 const POLL_INTERVAL: Duration = Duration::from_millis(30);   // ~33 Hz
 
+#[cfg(any(windows, target_os = "macos"))]
 #[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug)]
 struct CursorPos {
     /// Cursor x relative to the main window's top-left (in physical px).
@@ -55,7 +62,7 @@ pub fn compute_relative(
 }
 
 pub fn spawn(app: AppHandle, stop_flag: Arc<AtomicBool>) {
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         let _ = (app, stop_flag);
         return;
@@ -81,6 +88,38 @@ pub fn spawn(app: AppHandle, stop_flag: Arc<AtomicBool>) {
                 (win_pos.x, win_pos.y),
                 (win_size.width, win_size.height),
             );
+
+            let _ = app.emit("cursor-pos", CursorPos { x: rel_x, y: rel_y, over_window: over });
+        }
+    });
+
+    #[cfg(target_os = "macos")]
+    thread::spawn(move || {
+        let mut logged_first_sample = false;
+        while !stop_flag.load(Ordering::Relaxed) {
+            thread::sleep(POLL_INTERVAL);
+
+            let Some(window) = app.get_webview_window("main") else { continue };
+            let Ok(win_pos) = window.outer_position() else { continue };
+            let Ok(win_size) = window.outer_size() else { continue };
+            let Ok(cursor) = window.cursor_position() else { continue };
+
+            let (rel_x, rel_y, over) = compute_relative(
+                (cursor.x.round() as i32, cursor.y.round() as i32),
+                (win_pos.x, win_pos.y),
+                (win_size.width, win_size.height),
+            );
+
+            if !logged_first_sample {
+                log::info!(
+                    "[macos] global cursor polling active (window=({}, {}), cursor=({:.0}, {:.0}))",
+                    win_pos.x,
+                    win_pos.y,
+                    cursor.x,
+                    cursor.y
+                );
+                logged_first_sample = true;
+            }
 
             let _ = app.emit("cursor-pos", CursorPos { x: rel_x, y: rel_y, over_window: over });
         }

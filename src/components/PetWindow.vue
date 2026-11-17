@@ -26,6 +26,7 @@ import { LogicalSize } from '@tauri-apps/api/dpi'
 import { invoke } from '@tauri-apps/api/core'
 import { useAppConfig, CHAR_SIZE_DIMS, SYS_WINDOW_DIMS } from '../composables/useAppConfig'
 import { useWeatherAvailable } from '../composables/useWeatherAvailable'
+import { usePlatformCapabilities } from '../composables/usePlatformCapabilities'
 import { TAROT_WINDOW_DIMS } from '../config/tarot'
 import { CHAT_WINDOW_DIMS } from '../config/chat'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
@@ -109,6 +110,7 @@ const flyGraded = computed(() =>
 const { t, locale } = useI18n()
 const { config } = useAppConfig()
 const { weatherAvailable } = useWeatherAvailable()
+const { musicAvailable } = usePlatformCapabilities()
 
 // ── Window show / hide transitions ────────────────────────────────
 // petOpacity drives a CSS opacity transition. It starts at 1, goes to 0 when
@@ -144,7 +146,7 @@ const sysStateRef = ref<InstanceType<typeof SystemStateOverlay> | null>(null)
 // (tarotActive is declared above — the size watch reads it on its immediate run.)
 let savedPos: Awaited<ReturnType<ReturnType<typeof getCurrentWindow>['outerPosition']>> | null = null
 
-// Apply size + position in ONE atomic native op (set_window_bounds → SetWindowPos)
+// Apply size + position in one atomic native op (SetWindowPos / NSWindow setFrame).
 // so the window lands at its final bounds in a single step. Two separate ops
 // (setSize then center) produced a visible grow-then-recenter jump and could
 // re-enter tao's paint flush and panic. Bounds are physical pixels.
@@ -509,7 +511,7 @@ onUnmounted(() => {
     </Transition>
     <PomodoroBadge v-if="!overlayOpen && !flying" />
     <WeatherBadge v-if="!overlayOpen && !flying && config.showWeather && weatherAvailable !== false" />
-    <MusicBadge v-if="!overlayOpen && !flying && config.showMusic" />
+    <MusicBadge v-if="!overlayOpen && !flying && config.showMusic && musicAvailable" />
     <div class="bubble-anchor">
       <ChatBubble ref="bubbleRef" />
     </div>

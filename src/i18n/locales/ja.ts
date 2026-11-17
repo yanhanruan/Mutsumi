@@ -16,10 +16,13 @@ export const ja: Translations = {
   save:              '保存',
   resetPet:          '若葉睦をリセット',
   close:             '閉じる',
+  minimize:          '最小化',
   savedMsg:          '保存しました。',
   resetMsg:          'リセットしました。',
   autostartOnMsg:    '自動起動を有効にしました。',
   autostartOffMsg:   '自動起動を無効にしました。',
+  autostartUnavailable: 'このシステムでは自動起動を利用できません。',
+  autostartFailedMsg:   '自動起動の設定を変更できませんでした。',
 
   // ── About window ─────────────────────────────────────────────────
   aboutTitle:             'このアプリについて',
@@ -27,10 +30,12 @@ export const ja: Translations = {
   aboutAppSummary:        'アプリ概要',
   aboutAppSummaryBody:    'Mutsumi は、若葉睦をデスクトップにそっと常駐させる軽量なデスクトップコンパニオンです。集中、休憩、日々の小さな反応をやさしく支えます。',
   aboutMainFeatures:      '主な機能',
+  aboutCompanionFeature:  '👻 常に最前面表示、透明部分はクリックスルー、画面上の好きな場所へドラッグ可能',
+  aboutAudioActivityFeature: '🎧 音楽再生を自動感知してヘッドホン姿に切り替え',
+  aboutAudioActivityDegradedFeature: '🎧 出力デバイスの I/O からオーディオ動作を推定',
+  aboutMediaControllerFeature: '🎵 Windows SMTC 対応のミニ音楽コントローラー',
+  aboutMediaControllerDegradedFeature: '🎵 プラットフォームの対応範囲に応じた限定的なメディア情報または操作',
   aboutFeaturesList:      [
-    '👻 常に最前面表示、透明部分はクリック順透、画面が任意の場所にドラッグ可能',
-    '🎧 音楽再生を自動感知〔ヘッドホンをつけてノリのり〕',
-    '🎵 SMTC ベースのミニ音楽コントローラー',
     '🍅 ポモドーロタイマー & リアルタイム天気表示',
     '🔮 毎日のタロット占い、78 枚のカード',
     '💬 AI チャット：睦の性格を忠実に再現したロールプレイ',
@@ -97,6 +102,8 @@ export const ja: Translations = {
 
   // ── Music controller visibility ───────────────────────────────────
   showMusic: '音楽コントローラーを表示',
+  showAudioActivity: 'オーディオ動作バッジを表示',
+  audioActivityDegradedHint: '出力デバイスの I/O から推定するため、無音のまま開いているストリームも再生中と表示される場合があります。',
 
   // ── Sleep "zzz" effect visibility ─────────────────────────────────
   showZzz: '寝るときの zzz を表示',
@@ -104,7 +111,8 @@ export const ja: Translations = {
   // ── Flying screensaver ────────────────────────────────────────────
   flyingScreensaver:     'フライングスクリーンセーバー',
   flyingWaitLabel:       '開始までの待機時間',
-  flyingScreensaverHint: 'パソコンをしばらく操作しないと、画面の中をふわふわ飛び回ります。Ctrl+Alt+F でいつでも切り替えできます。',
+  flyingScreensaverHint: 'パソコンをしばらく操作しないと、画面の中をふわふわ飛び回ります。{keys} でいつでも切り替えできます。',
+  flyingScreensaverUnavailable: 'このプラットフォームではアイドル時の自動飛行はまだ利用できません。手動での飛行切り替えは利用できます。',
   hotkeyUnavailable:     '{keys} は他のアプリで使用中のため、今回の起動ではこのショートカットは無効です。該当アプリを閉じてから Mutsumi を再起動すると復活します。',
 
   // ── Search engine ─────────────────────────────────────────────────
@@ -141,6 +149,9 @@ export const ja: Translations = {
   apiKeyClear:          'クリア',
   apiKeySavedMsg:       'API キーを保存しました。',
   apiKeyClearedMsg:     'API キーをクリアしました。',
+  apiKeySaveFailedMsg:  'API キーをシステムの資格情報ストアに保存できませんでした。',
+  apiKeyClearFailedMsg: 'API キーをシステムの資格情報ストアから削除できませんでした。',
+  apiKeyCredentialStoreUnavailable: 'システムの資格情報ストアを利用できません。保存済みの API キーが読み込まれていない可能性があります。',
   apiKeyHelp:           'API キーの取得方法は？',
 
   // ── Pomodoro badge ────────────────────────────────────────────────
@@ -302,6 +313,7 @@ export const ja: Translations = {
     network:     'ネットワーク',
     online:      'オンライン',
     offline:     'オフライン',
+    unavailable: '現在検出できません',
     wifi:        'Wi-Fi',
     ethernet:    '有線LAN',
     uptime:      '起動時間',

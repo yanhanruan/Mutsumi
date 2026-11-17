@@ -1,8 +1,9 @@
 # Post-publish gate: the safety net the pre-publish gate can't provide.
 #
 # Fires when a release is PUBLISHED (a human clicking "Publish release" in the
-# GitHub UI), and can also be run on demand. It verifies that the installer URL
-# baked into the live `latest.json` actually resolves for end users — and, if
+# GitHub UI), and can also be run on demand. Prereleases such as the rolling
+# `staging` channel exit without rebinding. For production, it verifies that
+# every updater URL baked into the live `latest.json` resolves for end users — and, if
 # the release got orphaned on an `untagged-*` ref (see below), rebinds it to its
 # `vX.Y.Z` tag so the URL resolves, then re-checks.
 #
@@ -33,13 +34,13 @@ jobs:
   gate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
 
-      - name: Post-publish updater gate (verify + heal the download URL)
+      - name: Post-publish updater gate (verify + heal download URLs)
         env:
           GITHUB_TOKEN: ${{ github.token }}
         shell: bash

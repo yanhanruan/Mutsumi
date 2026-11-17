@@ -21,10 +21,13 @@ export interface Translations {
   /** Replaces "Reset pet" — now "Reset Mutsumi" / "重置若叶睦" / "若葉睦をリセット". */
   resetPet:          string
   close:             string
+  minimize:          string
   savedMsg:          string
   resetMsg:          string
   autostartOnMsg:    string
   autostartOffMsg:   string
+  autostartUnavailable: string
+  autostartFailedMsg:   string
 
   // ── About window ────────────────────────────────────────────────
   aboutTitle:             string
@@ -32,6 +35,12 @@ export interface Translations {
   aboutAppSummary:        string
   aboutAppSummaryBody:    string
   aboutMainFeatures:      string
+  aboutCompanionFeature:  string
+  aboutAudioActivityFeature: string
+  aboutAudioActivityDegradedFeature: string
+  aboutMediaControllerFeature: string
+  aboutMediaControllerDegradedFeature: string
+  /** Platform-neutral features appended after capability-specific entries. */
   aboutFeaturesList:      string[]
   aboutDeveloper:            string
   aboutAcknowledgements:     string
@@ -95,6 +104,8 @@ export interface Translations {
 
   // ── Music controller visibility ─────────────────────────────────
   showMusic: string
+  showAudioActivity: string
+  audioActivityDegradedHint: string
 
   // ── Sleep "zzz" effect visibility ───────────────────────────────
   showZzz: string
@@ -102,7 +113,9 @@ export interface Translations {
   // ── Flying screensaver ──────────────────────────────────────────
   flyingScreensaver:     string
   flyingWaitLabel:       string
+  /** Contains a `{keys}` placeholder for the platform-formatted shortcut. */
   flyingScreensaverHint: string
+  flyingScreensaverUnavailable: string
   /** Shown when a global hotkey failed to register ({keys} = accelerator). */
   hotkeyUnavailable:     string
 
@@ -141,6 +154,9 @@ export interface Translations {
   apiKeyClear:          string
   apiKeySavedMsg:       string
   apiKeyClearedMsg:     string
+  apiKeySaveFailedMsg:  string
+  apiKeyClearFailedMsg: string
+  apiKeyCredentialStoreUnavailable: string
   apiKeyHelp:           string
 
   // ── Pomodoro badge ──────────────────────────────────────────────
@@ -272,6 +288,7 @@ export interface Translations {
     network:     string
     online:      string
     offline:     string
+    unavailable: string
     wifi:        string
     ethernet:    string
     uptime:      string

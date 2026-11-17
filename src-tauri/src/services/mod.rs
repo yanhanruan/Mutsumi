@@ -27,6 +27,7 @@ pub use fish_audio::{FishAudioTtsService, TtsConfig};
 pub use qwen::{QwenClient, QwenConfig};
 
 use crate::http::ApiError;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Tauri-managed handle to the Fish Audio TTS service.
 ///
@@ -74,14 +75,20 @@ impl QwenState {
         !self.config.read().unwrap().api_key.trim().is_empty()
     }
 
+    /// Snapshot used only to restore the live client if persisting a new key
+    /// to the OS credential store fails. Callers must never log this value.
+    fn api_key_snapshot(&self) -> String {
+        self.config.read().unwrap().api_key.clone()
+    }
+
     /// Replace the API key and rebuild the live client. An empty string clears it
     /// (subsequent calls then fail with an auth error until a key is set again).
     pub fn set_api_key(&self, key: &str) -> Result<(), ApiError> {
-        let new_client = {
-            let mut cfg = self.config.write().unwrap();
-            cfg.api_key = key.trim().to_string();
-            QwenClient::new(cfg.clone())?
-        };
+        let mut next_config = self.config.read().unwrap().clone();
+        next_config.api_key = key.trim().to_string();
+        let new_client = QwenClient::new(next_config.clone())?;
+
+        *self.config.write().unwrap() = next_config;
         *self.client.write().unwrap() = new_client;
         Ok(())
     }
@@ -95,14 +102,14 @@ impl QwenState {
         if model.is_empty() {
             return Ok(());
         }
-        let new_client = {
-            let mut cfg = self.config.write().unwrap();
-            if cfg.chat_model == model {
-                return Ok(()); // no-op; avoid a needless client rebuild
-            }
-            cfg.chat_model = model.to_string();
-            QwenClient::new(cfg.clone())?
-        };
+        let mut next_config = self.config.read().unwrap().clone();
+        if next_config.chat_model == model {
+            return Ok(()); // no-op; avoid a needless client rebuild
+        }
+        next_config.chat_model = model.to_string();
+        let new_client = QwenClient::new(next_config.clone())?;
+
+        *self.config.write().unwrap() = next_config;
         *self.client.write().unwrap() = new_client;
         Ok(())
     }
@@ -113,8 +120,31 @@ impl QwenState {
 // Stored in the OS credential store via `keyring` (Windows Credential Manager /
 // macOS Keychain / Linux Secret Service) — never plaintext on disk.
 
+// This is a credential namespace, not the platform bundle identifier. Keep the
+// established value stable so changing the macOS bundle identity does not make
+// an existing API key disappear from Keychain or Windows Credential Manager.
 const KEYRING_SERVICE: &str = "com.mutsumi.app";
 const KEYRING_USER: &str = "dashscope_api_key";
+
+/// Runtime health of the OS credential-store adapter. This intentionally
+/// carries no credential contents or backend error text.
+pub struct CredentialStoreState(AtomicBool);
+
+impl Default for CredentialStoreState {
+    fn default() -> Self {
+        Self(AtomicBool::new(true))
+    }
+}
+
+impl CredentialStoreState {
+    pub fn set_available(&self, available: bool) {
+        self.0.store(available, Ordering::Relaxed);
+    }
+
+    fn is_available(&self) -> bool {
+        self.0.load(Ordering::Relaxed)
+    }
+}
 
 fn qwen_key_entry() -> keyring::Result<keyring::Entry> {
     keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER)
@@ -122,10 +152,12 @@ fn qwen_key_entry() -> keyring::Result<keyring::Entry> {
 
 /// Load a previously-saved key from the OS credential store, if any (called at
 /// startup to override the `.env` default).
-pub fn load_persisted_qwen_key() -> Option<String> {
-    match qwen_key_entry().ok()?.get_password() {
-        Ok(s) if !s.trim().is_empty() => Some(s.trim().to_string()),
-        _ => None, // no entry, empty, or backend error → fall back to .env
+pub fn load_persisted_qwen_key() -> Result<Option<String>, String> {
+    let entry = qwen_key_entry().map_err(|error| error.to_string())?;
+    match entry.get_password() {
+        Ok(key) if !key.trim().is_empty() => Ok(Some(key.trim().to_string())),
+        Ok(_) | Err(keyring::Error::NoEntry) => Ok(None),
+        Err(error) => Err(error.to_string()),
     }
 }
 
@@ -165,10 +197,24 @@ pub fn tts_set_recaptcha(state: tauri::State<'_, FishAudioState>, token: String)
     state.0.set_recaptcha(token);
 }
 
-/// Whether a Qwen / 百炼 (DashScope) API key is currently configured.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QwenKeyStatus {
+    configured: bool,
+    credential_store_available: bool,
+}
+
+/// Whether a Qwen / 百炼 (DashScope) API key is currently configured, and
+/// whether the OS credential store was readable during the latest operation.
 #[tauri::command]
-pub fn qwen_key_status(qwen: tauri::State<'_, QwenState>) -> bool {
-    qwen.has_key()
+pub fn qwen_key_status(
+    qwen: tauri::State<'_, QwenState>,
+    credential_store: tauri::State<'_, CredentialStoreState>,
+) -> QwenKeyStatus {
+    QwenKeyStatus {
+        configured: qwen.has_key(),
+        credential_store_available: credential_store.is_available(),
+    }
 }
 
 /// Set the user's Qwen / 百炼 (DashScope) API key: applies it to the live client
@@ -177,10 +223,21 @@ pub fn qwen_key_status(qwen: tauri::State<'_, QwenState>) -> bool {
 #[tauri::command]
 pub fn qwen_set_api_key(
     qwen: tauri::State<'_, QwenState>,
+    credential_store: tauri::State<'_, CredentialStoreState>,
     key: String,
 ) -> Result<bool, String> {
+    let previous_key = qwen.api_key_snapshot();
     qwen.set_api_key(&key).map_err(|e| e.to_string())?;
-    save_persisted_qwen_key(&key).map_err(|e| e.to_string())?;
+    if let Err(persist_error) = save_persisted_qwen_key(&key) {
+        credential_store.set_available(false);
+        if let Err(rollback_error) = qwen.set_api_key(&previous_key) {
+            return Err(format!(
+                "credential store update failed ({persist_error}); live client rollback also failed ({rollback_error})"
+            ));
+        }
+        return Err(format!("credential store update failed: {persist_error}"));
+    }
+    credential_store.set_available(true);
     Ok(qwen.has_key())
 }
 
@@ -192,4 +249,42 @@ pub fn qwen_set_chat_model(
     model: String,
 ) -> Result<(), String> {
     qwen.set_chat_model(&model).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn qwen_state(api_key: &str) -> QwenState {
+        QwenState::new(QwenConfig {
+            api_key: api_key.into(),
+            base_url: "https://example.com/v1".into(),
+            chat_model: "chat-model".into(),
+            embed_model: "embed-model".into(),
+            embed_dimensions: 16,
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn invalid_api_key_does_not_mutate_live_configuration() {
+        let state = qwen_state("previous-key");
+
+        assert!(state.set_api_key("invalid\nheader").is_err());
+        assert_eq!(state.api_key_snapshot(), "previous-key");
+    }
+
+    #[test]
+    fn valid_api_key_update_is_applied_after_client_build() {
+        let state = qwen_state("previous-key");
+
+        state.set_api_key(" replacement-key ").unwrap();
+        assert_eq!(state.api_key_snapshot(), "replacement-key");
+    }
+
+    #[test]
+    fn credential_namespace_remains_compatible_with_existing_installations() {
+        assert_eq!(KEYRING_SERVICE, "com.mutsumi.app");
+        assert_eq!(KEYRING_USER, "dashscope_api_key");
+    }
 }

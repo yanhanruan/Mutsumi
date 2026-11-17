@@ -1,0 +1,228 @@
+# macOS 桌面真机测试记录
+
+> 测试窗口：2026-08-23 至 2026-08-29
+>
+> 记录更新：2026-08-31（补录 8 月 29 日最终远程证据与 8 月 31 日 secret 名称审计；无新增 signed 正例）
+>
+> 分支：`feat/macos-adaptation`
+>
+> 当前功能证据锚点：`6adc5ed test(updater): cover localized available window`
+>
+> 证据范围：未签名开发产物；不代表可分发、已签名或已 notarize
+
+本文只记录已经实际执行的测试。自动化通过不替代需要观察显示器、权限提示、
+外设或签名安装体验的人工验收。
+
+## 1. 测试环境
+
+| 项目 | 值 |
+| --- | --- |
+| 设备 | MacBook Air (`Mac17,3`) |
+| 芯片 | Apple M5，10 核，16 GB 内存 |
+| 系统 | macOS 26.6.2 (`25G83`) |
+| 本机架构 | `arm64` |
+| 显示器 | Built-in Retina Display，逻辑分辨率 `1470 x 956`，`2.0x` |
+| 可见工作区 | 原点 `(0, 78)`，大小 `1470 x 845` |
+| 当前网络 | Wi-Fi (`en0`)；测试时存在 VPN 虚拟接口，能力层归类为 `other` |
+| 当前输出设备 | MacBook Air 内建扬声器，双声道，48 kHz |
+| Rust | stable 1.98.0；安装 `aarch64-apple-darwin` 与 `x86_64-apple-darwin` |
+| Node.js | 本机 26.7.0；远程 CI 仍以 Node.js 22 为准 |
+| Rosetta | 首次 x86_64 smoke 前未安装；安装 Apple Rosetta 2 后复验通过 |
+
+环境记录不包含序列号、IP 地址、MAC 地址、账号、Keychain 内容或开发者凭据。
+
+## 2. 自动化基线
+
+| 检查 | 结果 | 证据 |
+| --- | --- | --- |
+| Vue/Vitest | 通过 | 26 个测试文件，390 项通过；新增中/日/英预取更新载荷窗口 |
+| 前端生产构建 | 通过 | `vue-tsc -b` 与 Vite production build 完成 |
+| Rust 测试 | 通过 | 348 项通过，36 项按设计 ignored |
+| 发布、bundle、生命周期与 workflow 纯契约 | 通过 | 88/88；新增凭据就绪、Finder 首启与双原生架构 CI 契约 |
+| universal app | 通过 | Mach-O 恰好包含 `arm64` 与 `x86_64` |
+| 最低系统版本 | 通过 | `LSMinimumSystemVersion=13.0` |
+| Dock 前台资格 | 通过 | `APPL`，非 `LSUIElement`，非 `LSBackgroundOnly` |
+| unsigned DMG | 通过 | `mutsumi_1.5.3_universal.dmg` 生成，`hdiutil verify` 通过 |
+| arm64 生命周期 | 通过 | 前台启动、第二实例复用/激活、标准 Quit、socket 清理 |
+| x86_64 Rosetta 生命周期 | 通过 | 确认 `LSArchitecture=x86_64`，其余生命周期契约同样通过 |
+| arm64 Finder 首启生命周期 | 通过 | 本机与远程原生 arm64 均由 Finder Apple Event 启动首实例，前台/Dock、singleton、Quit 与 socket 清理全通过 |
+| 原生 Intel CI | 通过 | `macos-15-intel` 上 x86_64 host、Rust、app build 与 Finder 首启生命周期全通过 |
+| Draft PR Windows regression | 通过 | `windows-latest` 前端、发布契约、生产构建与 Rust 回归均通过 |
+| Draft PR macOS universal | 通过 | `macos-latest` 构建并验证 app/DMG，上传七天保留的未签名 artifact |
+
+2026-08-25 在 `4ed1d0d` 上重新执行本机可复现的 CI 主体：Vue/Vitest
+387/387、发布/bundle/生命周期纯契约 57/57、前端生产构建、Rust 347 passed /
+36 ignored（含 doctest）均通过；同一功能源码的现有 universal app/DMG 再次通过
+unsigned bundle contract。当前受控 shell 的默认 `PATH` 未暴露 Cargo 工具链，
+最终复验显式指定 rustup stable 的 `rustc` / `rustdoc` 后以零退出码完成；这不是
+代码或远程 `desktop-ci` 的失败。
+
+DMG 在受控文件沙箱中首次运行 `bundle_dmg.sh` 失败；同一命令在正常交互式用户
+会话中完成 Finder 布局、压缩和完整性校验。该失败属于测试执行环境限制，不是
+bundle 内容失败。Draft PR #18 后续的远程 `macos-latest` job 已独立重建并验证
+同一 unsigned universal app/DMG，证明 GitHub-hosted 环境不受该本机沙箱限制。
+
+2026-08-25，证据锚点 `d54d0c5` 的
+[`desktop-ci` run 32815861642](https://github.com/yanhanruan/Mutsumi/actions/runs/32815861642)
+完整通过：Windows regression 用时 2 分 41 秒，macOS unsigned universal job
+用时 7 分 28 秒。两边实际运行 `actions/checkout@v7` 与
+`actions/setup-node@v7`，macOS 另用 `actions/upload-artifact@v7` 完成上传；
+此前首轮远程运行暴露的 Node.js 20 Action 弃用提示不再出现。该次 run 唯一
+annotation 是已知的 `com.mutsumi.app` identifier 正式签名前门禁，不影响
+unsigned CI，也不代表该 identifier 已获准用于签名发布。
+
+identifier 冻结提交 `d0cec0a` 的
+[`desktop-ci` run 32822830132](https://github.com/yanhanruan/Mutsumi/actions/runs/32822830132)
+随后完整通过：Windows regression 2 分 39 秒，macOS unsigned universal job
+10 分 45 秒。后者在 clean GitHub-hosted runner 重新构建 app/DMG；bundle
+contract 明确输出 `io.github.yanhanruan.mutsumi`、`arm64` + `x86_64`、macOS
+13.0、Dock 前台资格及 DMG 完整性。job annotations 为 0；七天 artifact ID
+`9554071608` 上传成功。该证据关闭旧 identifier warning，但仍然只代表 unsigned
+CI，不代表 Developer ID 签名、Gatekeeper 或 notarization 已通过。
+
+signed workflow 接线提交 `b027006` 的
+[`desktop-ci` run 32828050890](https://github.com/yanhanruan/Mutsumi/actions/runs/32828050890)
+也完整通过：Windows regression 2 分 28 秒，macOS unsigned universal job
+8 分 32 秒。两边均实际执行 76/76 纯契约和各自 Rust 回归；macOS 在 clean runner
+重新生成双架构 app/DMG、通过 unsigned bundle contract，并上传七天 artifact
+`9555918530`（449,258,997 bytes，SHA-256
+`23a967b51fd2b8bd89662dcb5207bcceeb3c2c66cfe9bf674d866b0e0d96555d`）。两个
+job annotations 均为空。该 PR workflow 不读取 Apple/release secrets，也不触发
+`staging-release.yml` 或 `release.yml`，所以只能证明静态 workflow 契约、双平台
+回归与 unsigned bundle，不能把 Developer ID/notarization 正例标记为通过。
+
+原生 Intel 门禁首个修复后正例为 `e7c9c26` 的
+[`desktop-ci` run 32950993902](https://github.com/yanhanruan/Mutsumi/actions/runs/32950993902)：
+Windows 3 分 36 秒、Apple Silicon universal 8 分 17 秒、Intel 14 分 50 秒，三个
+job 均成功。Intel runner 明确报告 `uname -m=x86_64` 和
+`host: x86_64-apple-darwin`，随后完成 native Rust tests、x86_64 app-only build，
+并在真实 x86_64 slice 上通过 LaunchServices/Dock、singleton 与 Quit 清理。
+这关闭了核心 Intel 构建/启动只能依赖 Rosetta 的证据缺口；它不等于在外部 Intel
+设备上肉眼观察每个 UI 场景。
+
+2026-08-29，本机现有 unsigned universal app 通过 Finder Apple Event 首启的
+arm64 生命周期 smoke：脚本在启动前确认无同 identifier/精确 executable 实例，
+Finder 打开后独立读取唯一 LaunchServices ASN/PID、精确 bundle path、前台状态和
+`LSArchitecture=arm64`；第二实例仍用强制新进程路径验证 singleton，标准 Quit 后
+进程、注册和 socket 均已清理。Finder 路径不靠 shell/AppleScript 字符串插值，
+app path 作为 `osascript` 参数传入。
+
+当前功能锚点 `6adc5ed` 的
+[`desktop-ci` run 33239271856](https://github.com/yanhanruan/Mutsumi/actions/runs/33239271856)
+随后在 2026-08-29 三个 job 全部通过：
+[Windows regression](https://github.com/yanhanruan/Mutsumi/actions/runs/33239271856/job/99065715577)
+4 分 25 秒、
+[Apple Silicon universal](https://github.com/yanhanruan/Mutsumi/actions/runs/33239271856/job/99065715574)
+10 分 07 秒、
+[native Intel](https://github.com/yanhanruan/Mutsumi/actions/runs/33239271856/job/99065715423)
+14 分 03 秒。Apple Silicon job 在 bundle contract 后、artifact 上传前通过
+`Verify Apple Silicon Finder lifecycle`；Intel job 在 native app build 后通过
+`Verify native Intel lifecycle`。两者都实际使用 Finder Apple Event 启动首实例，
+并 fail-closed 验证对应原生架构、前台、singleton 和 Quit 清理。该 run 同时执行
+26 个前端测试文件/390 项测试与 88/88 纯契约；它是自动化 Finder 打开正例，不是
+人的鼠标双击记录，也不代表签名/notarization 或完整视觉矩阵通过。
+
+同日新增更新窗口组件正例：中/日/英三种语言都从 `get_pending_update` 读取
+`9.9.9-test` 预取载荷，展示当前/新版本和多行 release notes，切换到 440×520 并
+居中；测试同时断言没有再次调用 updater `check()`。这与 Rust 的 update-first
+恢复优先级纯测试共同覆盖确定性逻辑，但不冒充真实 macOS key-window 视觉焦点。
+
+`release-credential-readiness` 已形成 84 项阶段契约并在 Finder/更新测试加入后
+汇总为 88/88：工作流只有 `contents: read`，通过临时 Minisign 探针证明 updater
+私钥与已提交公钥匹配，临时 codesign 证明 Developer ID 私钥可用，并用
+`notarytool history` 做只读认证；不创建/删除 Release 或 tag、不上传 artifact、
+不提交 notarization。2026-08-31 的仓库只读 secret 名称复核仍只有
+`TAURI_SIGNING_PRIVATE_KEY`，所以没有运行真实凭据正例。
+
+## 3. macOS 原生探针
+
+带 live/ignored 标记的探针均被逐项显式选择；空闲时间与默认网络探针属于普通
+测试，并额外通过定向运行记录真机结果。没有运行需要 DashScope 密钥的 live suite：
+
+| 探针 | 结果 | 说明 |
+| --- | --- | --- |
+| CoreAudio 默认输出活动属性 | 通过 | 公开 API 可读取当前默认输出设备状态 |
+| GPU 与物理磁盘详情 | 通过 | `system_profiler` JSON 与 `diskutil` plist 均产生有效结果 |
+| Keychain 后端往返 | 通过 | 唯一测试条目完成写入、读取、删除并由清理守卫兜底 |
+| LaunchAgent 后端往返 | 通过 | 唯一测试配置完成启用、状态读取、禁用和清理 |
+| 空闲时间公开 API | 通过 | CoreGraphics 与 IOKit 查询返回有效样本 |
+| `PreventUserIdleDisplaySleep` | 通过 | 临时 `caffeinate -d` 断言被正确识别 |
+| 默认网络类型 | 通过 | 活跃 VPN 为主路由时返回 `other`，没有伪报 Wi-Fi |
+
+## 4. 测试中发现并处理的事项
+
+### 4.1 x86_64 smoke 缺少 Rosetta 时启动了错误 slice
+
+首次执行 x86_64 生命周期 smoke 时，系统尚未安装 Rosetta。macOS 的
+`open --arch x86_64` 没有直接报错，而是启动了 universal app 的 arm64 slice；
+现有运行时契约随后以 `LSArchitecture=arm64` 拒绝了结果，因此没有产生假阳性。
+
+本轮增加目标 slice 执行预检：
+
+- 启动应用前直接用 `arch -<requested> /usr/bin/true` 验证请求的 slice 能否执行，
+  不再用 `uname -m` 猜测物理硬件；因此脚本本身运行在 Rosetta 下也不会误判。
+- x86_64 不可执行时明确提示需要 Intel Mac 或 Rosetta 2；arm64 不可执行时明确
+  提示需要 Apple Silicon，且两种情况都不会启动 Mutsumi。
+- 对两个目标架构的可执行/不可执行组合增加纯契约测试。
+
+安装 Rosetta 后，x86_64 生命周期 smoke 已重新执行并通过。
+
+### 4.2 延迟重聚焦尊重用户主动切换
+
+人工桌面验收已确认 Dock 图标常驻、透明宠物窗口、菜单栏入口、隐藏后点击 Dock
+恢复、`设置 > 关于 > 主窗口` 的恢复优先级，以及标准第二实例复用/激活。更新窗口
+现已用预取可用载荷覆盖三语言 DOM/尺寸，并以 Rust 纯测试固定最高恢复优先级；
+真实 macOS key-window 焦点观察仍单独保留。
+
+主动切走边界暴露了原实现的缺口：第二实例回调即时聚焦后，无条件的一秒延迟重试
+无法区分 LaunchServices 回弹和用户选择其他应用。本轮将重试改为：
+
+- 继续保留即时聚焦，并在没有后续用户操作时补偿 LaunchServices 时序竞态。
+- 使用公开 CoreGraphics 读取鼠标按下、键盘和滚动事件的空闲时间；检测到调度后
+  超出 50 ms 容差的焦点相关输入时取消延迟重试，且忽略不会表达切换意图的被动
+  鼠标移动。
+- 使用公开 `mach_continuous_time` 计算包含系统睡眠的经过时间；超过两秒时视为
+  陈旧任务并放弃，不在运行时停顿或睡眠后突然抢焦点。
+- CoreGraphics 采样失败时保留原有补偿行为；纯决策覆盖有输入、无输入、采样失败、
+  50 ms 容差边界、陈旧延迟、Mach tick 换算和连续时钟 live sample。
+
+修复后的 universal app 已在 arm64 与 x86_64/Rosetta 下通过标准生命周期 smoke。
+精确最终构建的首轮 arm64 smoke 曾出现一次前台激活超时，fallback cleanup 没有留下
+进程、LaunchServices 注册或 socket；同一源码随后自动采样五类事件，确认程序化
+Finder/第二实例期间各事件年龄均只随时间递增且最终前台为 Mutsumi，完整 arm64
+重跑通过。该结果继续说明全局前台断言会受真实桌面操作影响，不把超时隐藏为通过。
+自动化尝试用无副作用 F13 事件覆盖输入分支，但当前执行进程的
+`CGPreflightPostEventAccess=false`，macOS 拒绝发布合成输入；因此最终物理输入端到端
+确认仍保留为一项人工验收，不把未生效的合成事件记为通过。产品在 2026-08-25
+决定将该项推迟到正式发布前处理，不作为当前 macOS 适配开发的阻塞门禁。
+
+### 4.3 依赖审计提示
+
+`npm ci` 在 2026-08-23 的 advisory 数据下报告 4 个 high 项，路径落在
+Vite/PostCSS/nanoid/brace-expansion 的构建与测试依赖图。它们没有在本次 macOS
+验证提交中自动升级，避免把依赖维护混入平台验收；后续应以独立安全维护提交更新
+锁文件并同时跑 Windows/macOS 回归。没有执行 `npm audit fix`。
+
+### 4.4 GitHub Actions Node.js 20 弃用提示
+
+Draft PR 首轮双平台 job 均通过，但 GitHub 将旧版 `actions/checkout@v4`、
+`actions/setup-node@v4` 和 `actions/upload-artifact@v4` 强制切到 Node.js 24，
+同时产生 Node.js 20 弃用 annotation。根据三个官方 Action 的当前 major，四个
+workflow 已统一升级到 `@v7`；项目测试所用 `node-version: 22`、workflow 权限、
+触发条件、发布命令和 unsigned artifact 边界均未改变。验证 Action 升级的远程 run 已证明三种
+v7 Action 在 `windows-latest` / `macos-latest` 上实际通过，且弃用提示消失。
+
+## 5. 尚未完成，不能标记通过
+
+- 真实可用更新载荷存在时，肉眼确认更新窗口成为 macOS key window；载荷渲染和
+  update-first 决策已自动化。
+- 正式发布前：修复后单实例约 1 秒延迟期间由用户物理切走的一次最终端到端确认。
+- 双屏、负坐标、不同缩放、主副屏切换和显示器热插拔；本机本轮只有单屏。
+- 睡眠/唤醒、锁屏/解锁、网络物理断开/恢复。
+- 真实登录启动；本轮只验证 LaunchAgent 后端往返。
+- Keychain 首次允许、拒绝、锁定、撤销和重新授权的可见错误路径。
+- 耳机、USB、HDMI、蓝牙、AirPlay 和暂时无默认输出设备的 CoreAudio 矩阵。
+- 签名/notarized staging DMG 安装与真实跨版本自动更新。
+- 2026-08-31 仓库 secret 名称审计只看到 `TAURI_SIGNING_PRIVATE_KEY`；仍需配置六项 Apple
+  secrets，再运行只读 credential readiness 自动核实私钥匹配、Developer ID 与
+  notary 认证。

@@ -1,12 +1,10 @@
 /**
  * Window-control helpers for the in-pet overlays (chat / history).
  *
- * The pet ("main") window is created with `skipTaskbar: true` — it floats as a
- * borderless companion with no taskbar button. While a panel (chat / history) is
- * open we expose a taskbar button so the window behaves like a normal app window:
- * it shows on the taskbar and a minimize parks it there (instead of stranding a
- * skip-taskbar window with no way to restore it). When the panel closes we hide
- * the taskbar button again so the pet goes back to floating cleanly.
+ * On Windows the pet ("main") window is created with `skipTaskbar: true`; while
+ * a panel is open we expose a taskbar button so minimize has a restore target.
+ * macOS intentionally keeps a permanent Dock icon and treats skip-taskbar as a
+ * no-op, so the same calls preserve the product baseline there.
  */
 import { getCurrentWindow } from '@tauri-apps/api/window'
 

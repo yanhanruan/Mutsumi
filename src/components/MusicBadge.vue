@@ -3,9 +3,9 @@
  * MusicBadge — mini music controller pinned to the bottom-right of the pet.
  *
  * Mirrors WeatherBadge: seed the cached snapshot via `get_media` on mount, then
- * subscribe to `media-update`. A compact equalizer badge shows whenever a media
- * session is active; hovering expands a frosted panel with title / artist, a
- * progress bar, and transport controls (prev / play-pause / next).
+ * subscribe to `media-update`. A compact equalizer badge reflects platform
+ * audio activity; when media-session capabilities exist, hovering expands a
+ * frosted panel with metadata, progress, and transport controls.
  *
  * The backend (SMTC, src-tauri/src/media.rs) drives any app that integrates with
  * Windows media controls — Spotify, browsers, 网易云音乐, etc. The progress bar
@@ -19,6 +19,7 @@ import lottie from 'lottie-web'
 import { useI18n } from '../i18n'
 import { useAppConfig, type CharacterSize } from '../composables/useAppConfig'
 import { useInteractionLock } from '../composables/useInteractionLock'
+import { usePlatformCapabilities } from '../composables/usePlatformCapabilities'
 import {
   createClock, reconcile, commitSeek, tickPosition,
   pctOf, fmtTime, seekPositionFromPointer, type ProgressClock,
@@ -53,6 +54,7 @@ interface MediaSnapshot {
 const { t } = useI18n()
 const { config } = useAppConfig()
 const { beginDrag, endDrag } = useInteractionLock()
+const { musicPanelAvailable } = usePlatformCapabilities()
 
 // Badge size tracks the character-size setting (大中小), mirroring how the rest
 // of the pet UI scales with the window. The Lottie itself is an SVG, so it
@@ -66,10 +68,9 @@ const badgePx = computed(() => BADGE_PX[config.value.characterSize])
 
 const data    = ref<MediaSnapshot | null>(null)
 const hovered = ref(false)
-// System-audio activity (from the WASAPI detector). The Lottie speakers spin
-// while audio is actually playing and rest when it stops — independent of
-// whether a controllable SMTC session exists. Whether the badge is *shown* at
-// all is decided in Settings (config.showMusic), not here.
+// System-audio activity. Windows derives this from WASAPI peak meters; macOS
+// uses a less precise CoreAudio output-I/O signal. The Lottie speakers spin
+// independently of whether a controllable media session exists.
 const audioOn = ref(false)
 
 // Volume slider state (local so dragging stays smooth between backend polls).
@@ -125,6 +126,12 @@ const sessions    = computed<SessionInfo[]>(() => data.value?.sessions ?? [])
 const multiSource = computed(() => sessions.value.length > 1)
 // Close the source menu whenever the panel itself hides.
 watch(hovered, v => { if (!v) showSources.value = false })
+watch(musicPanelAvailable, available => {
+  if (!available) {
+    hovered.value = false
+    showSources.value = false
+  }
+})
 
 // Friendly source name for the switcher. SMTC reports each session's
 // SourceAppUserModelId (typically the app's exe / AUMID, e.g. "chrome.exe",
@@ -327,8 +334,8 @@ onMounted(async () => {
     if (cached) applySnapshot(cached)
   } catch { /* ignore — events will populate it */ }
 
-  // Seed + subscribe to the system-audio detector so the speakers animate in
-  // lock-step with real playback (same events as the pet's headphones).
+  // Seed + subscribe to the platform audio-activity signal (the same events as
+  // the pet's headphones). On macOS this is output I/O, not sample amplitude.
   try { audioOn.value = await invoke<boolean>('get_audio_state') } catch { /* ignore */ }
   unlistenStart = await listen('audio-started', () => { audioOn.value = true  })
   unlistenStop  = await listen('audio-stopped', () => { audioOn.value = false })
@@ -354,7 +361,7 @@ onUnmounted(() => {
 <template>
   <div
     class="music-anchor pet-ui-overlay"
-    @mouseenter="hovered = true"
+    @mouseenter="hovered = musicPanelAvailable"
     @mouseleave="hovered = false"
     @mousedown.stop
     @mouseup.stop
@@ -363,7 +370,7 @@ onUnmounted(() => {
     <!-- Hover panel (above the badge). Stays mounted while a drag is in flight
          so the progress / volume element is never destroyed mid-gesture. -->
     <Transition name="tip">
-      <div v-if="hovered || draggingSeek || draggingVol" class="panel">
+      <div v-if="musicPanelAvailable && (hovered || draggingSeek || draggingVol)" class="panel">
         <!-- Source switcher — only when several apps hold a media session -->
         <div v-if="multiSource" class="source-bar">
           <button

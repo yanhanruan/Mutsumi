@@ -34,9 +34,14 @@ pub fn reveal_in_folder(path: String) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
         Ok(())
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
     {
-        let _ = path;
+        std::process::Command::new("open")
+            .args(["-R", &path])
+            .spawn()
+            .map_err(|e| e.to_string())?;
         Ok(())
     }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    Err("reveal in folder is not supported on this platform".into())
 }

@@ -56,6 +56,117 @@ This layer runs a **real staging build** of the app against a local HTTP
 server that speaks the updater protocol — including the negative cases that
 matter most.
 
+The server supports Windows and both macOS architectures. `--platform` defaults
+to `windows-x86_64`; use `darwin-aarch64` or `darwin-x86_64` for the actual Mac
+client being tested. `missing-platform` removes only that target's entries, and
+`bad-signature` corrupts only their cryptographic signature line. "Entries"
+includes installer-specific keys such as `darwin-aarch64-app`, which the client
+looks up before the bare `darwin-aarch64` key. The legacy `missing-windows`
+scenario remains available for Windows only; with a macOS `--platform` the
+server refuses to start, because it would leave the Mac client a valid update
+and silently act like `ok`. The server listens on loopback (`localhost`), not
+the LAN; on macOS that resolved to IPv6 `[::1]` only, which the client reached.
+
+### macOS local protocol runbook
+
+Use a disposable test checkout and a writable test app location. Quit any other
+Mutsumi instance first: test builds retain the macOS bundle identifier and can
+share app data/Keychain with your regular build. Back up the app data before
+testing; do not overwrite your daily installation. These local artifacts are
+not Developer ID/notarized distribution evidence.
+
+1. Run `node scripts/gen-test-keys.mjs` and put its printed test public key into
+   the local `src-tauri/tauri.staging.conf.json`. The checked-in sample key does
+   **not** automatically match a newly generated private key. Keep this local
+   configuration change and the test keys out of commits.
+2. In a shell without Apple release credentials, build an old and new test
+   version with the same test key. The macOS overlay is loaded automatically;
+   the extra version configuration avoids editing committed version files:
+
+   ```bash
+   export TAURI_SIGNING_PRIVATE_KEY="$PWD/scripts/test-keys/mutsumi-test.key"
+   export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=''
+   npx tauri build --target universal-apple-darwin --bundles app --ci \
+     --config src-tauri/tauri.staging.conf.json --config '{"version":"9.9.8"}'
+   ```
+
+   Copy the generated `.app` from
+   `src-tauri/target/universal-apple-darwin/release/bundle/macos/` to your writable
+   test location **before** the next build. Launch that copy and confirm About
+   says `9.9.8`, then quit it. Build again with `{"version":"9.9.9"}`; keep the
+   new `.app.tar.gz` and adjacent `.sig`. Do not substitute the DMG, or launch
+   the new client before testing the old one.
+3. Create a universal manifest (replace the archive path with the actual output):
+
+   ```bash
+   node scripts/make-latest-json.mjs \
+     --installer src-tauri/target/universal-apple-darwin/release/bundle/macos/mutsumi.app.tar.gz \
+     --version 9.9.9 --platform darwin-universal
+   node scripts/fake-update-server.mjs --platform darwin-aarch64 --scenario lower-version
+   ```
+
+   Both Darwin entries point to the same archive/signature. On native Intel use
+   `--platform darwin-x86_64`; use the architecture of the running client, not
+   just the physical host. Repeat the server command for `missing-platform`,
+   `malformed-json`, `installer-404`, `bad-signature`, `interrupt`, then `ok` last.
+4. For each scenario use the **old copied app**, About → Check for updates.
+   The existing scenario table defines the expected UI. In all download-failure
+   cases confirm About still reports `9.9.8`; for `ok`, confirm the relaunched
+   app reports `9.9.9`. Record architecture, OS, both versions, scenario, actual
+   result and evidence. A Gatekeeper/launch failure is a blocked local test,
+   not a protocol pass; do not disable Gatekeeper to claim success.
+
+`npm run test:local-updater` exercises real loopback HTTP responses and fixture
+generation for Windows and both Darwin targets. Its synthetic signatures and
+archive bytes test the **harness**, not Tauri signature verification or macOS
+installation. Those require the manual procedure above and signed staging for
+the final release gate. The recorded successful local upgrade is arm64 only;
+Rosetta coverage is limited to the failure and cross-platform checks below.
+A successful Rosetta upgrade, signed staging and the Layer 4 real upgrade
+are still pending.
+
+#### macOS local results — 2026-09-05
+
+Host: Apple M5 (`Mac17,4`), macOS 26.5.1 (`25F80`). Builds from `ebf12c0`:
+`universal-apple-darwin`, `--bundles app`, staging overlay with a locally
+generated test key, ad-hoc signed — **not** Developer ID/notarized evidence.
+Old 9.9.8 → new 9.9.9 (`mutsumi.app.tar.gz`). One copied old app was launched
+natively (`open --arch arm64`) and under Rosetta (`open --arch x86_64`, confirmed
+by the Rosetta runtime mapped into the process). Evidence for every row: the
+server request log, the SHA-256 of `Contents/MacOS/Mutsumi` compared with both
+builds, the process ID, and the pop-up as seen by the tester.
+
+| Client | `--platform` | Scenario | Pop-up | Requests | Installed afterwards |
+| --- | --- | --- | --- | --- | --- |
+| arm64 | `darwin-aarch64` | `missing-platform` | failed: none of `darwin-aarch64-app`, `darwin-aarch64` found | manifest only | 9.9.8, unchanged |
+| arm64 | `darwin-aarch64` | `bad-signature` | offered 9.9.9 → failed after download | manifest + archive | 9.9.8, unchanged |
+| arm64 | `darwin-aarch64` | `interrupt` | failed mid-download | manifest + archive | 9.9.8, unchanged |
+| x86_64 | `darwin-x86_64` | `missing-platform` | failed: none of `darwin-x86_64-app`, `darwin-x86_64` found | manifest only | 9.9.8, unchanged |
+| x86_64 | `darwin-x86_64` | `bad-signature` | failed after download | manifest + archive | 9.9.8, unchanged |
+| x86_64 | `darwin-x86_64` | `interrupt` | failed: `error decoding response body` | manifest + archive | 9.9.8, unchanged |
+| x86_64 | `darwin-aarch64` | `missing-platform` (cross-check) | offered 9.9.9; closed without installing | manifest only | 9.9.8, unchanged |
+| arm64 | `darwin-x86_64` | `missing-platform` (cross-check) | offered 9.9.9; closed without installing | manifest only | 9.9.8, unchanged |
+| arm64 | `darwin-aarch64` | `lower-version` | up to date | manifest only | 9.9.8, unchanged |
+| arm64 | `darwin-aarch64` | `malformed-json` | failed, no crash | manifest only | 9.9.8, unchanged |
+| arm64 | `darwin-aarch64` | `installer-404` | failed; Retry failed again | manifest + archive 404 ×2 | 9.9.8, unchanged |
+| arm64 | `darwin-aarch64` | `ok` (last) | downloaded, installed, relaunched; About shows 9.9.9 | manifest + archive | 9.9.9 = new build, new process |
+
+After `ok`, nothing was left next to the app or in the app's temp directory, and
+the updated bundle carried no quarantine attribute. Two observations from the
+run:
+
+- About 5 s after the `lower-version` "up to date" view, with no user input,
+  9.9.8 crashed once (SIGSEGV on the main thread in WebKit,
+  `ScrollingTree::takePendingScrollUpdates` from the display-link refresh). The
+  installed bundle was unaffected; the app was relaunched and the run
+  continued. The cause remains undetermined: an unchanged installed bundle
+  does not rule out the update window as a trigger. Further investigation is
+  required; this observation does not establish that the crash is unrelated
+  to the updater.
+- The archive was an odd number of bytes, so `interrupt` dropped the
+  connection correctly but never printed its `interrupting after` line. The
+  server has since been fixed; `npm run test:local-updater` covers it.
+
 ### One-time setup
 
 ```powershell
@@ -127,7 +238,8 @@ node scripts/fake-update-server.mjs --scenario lower-version
 | --- | --- | --- |
 | `ok` | valid manifest + installer + signature | offer 1.5.0 → download → install → relaunch as 1.5.0 |
 | `lower-version` | manifest advertises 0.0.1 | show "latest version", no offer |
-| `missing-windows` | no windows platform in manifest | failed view — the plugin errors ("none of the fallback platforms… found"). Correct for a Windows-only app: such a manifest is broken, not "no update"; `verify-release-assets.mjs` blocks it from ever shipping |
+| `missing-platform` | removes the requested `--platform` entries, including installer-specific keys | failed view because no matching client platform exists; no download or install |
+| `missing-windows` | no windows platform in manifest (Windows `--platform` only) | failed view — the plugin errors ("none of the fallback platforms… found"). Correct for a Windows-only app: such a manifest is broken, not "no update"; `verify-release-assets.mjs` blocks it from ever shipping |
 | `installer-404` | download URL returns 404 | failed view with reason; Retry works |
 | `bad-signature` | signature tampered | **reject the install** — failed view, never 🎉 |
 | `malformed-json` | manifest is not JSON | failed view, no crash |
@@ -141,23 +253,68 @@ against a real binary, which no mock can.
 
 ## Layer 3 — GitHub staging release + asset verification
 
+Before the first staging run, configure the seven required updater/Apple
+secrets described in [`RELEASING.md`](RELEASING.md), then run the manual
+**release-credential-readiness** workflow. That check has only `contents: read`:
+it proves the updater private key matches the committed public key, exercises a
+disposable Developer ID signature, and authenticates through a read-only
+`notarytool history` request. It does not create a release/tag/artifact or submit
+anything for notarization. A green readiness run proves credentials, not the
+signed Mutsumi bundle; continue with staging for the end-to-end gate.
+
 Run the **staging-release** workflow (GitHub → Actions → staging-release →
 *Run workflow*, choosing any branch). It:
 
-1. runs the unit tests;
-2. builds + signs with the **production** key (repo secrets);
-3. publishes to the rolling **`staging` tag as a prerelease** — prereleases
-   never resolve through `releases/latest/download/…`, so a staging build can
-   never leak to real clients;
-4. runs [`scripts/verify-release-assets.mjs`](../scripts/verify-release-assets.mjs),
-   which fails the workflow unless the release carries exactly one
-   `*-setup.exe`, its `.sig`, and a `latest.json` whose version matches the
-   committed version and whose URL points at the actually-uploaded installer.
+1. runs a structural preflight for the updater and Apple release secrets before
+   creating or mutating a GitHub Release; certificate/password validity,
+   signing identity and notarization are still proven later on the macOS runner;
+2. runs the unit tests, then builds and updater-signs Windows with the
+   **production** key, creates the
+   rolling **`staging` prerelease**, and passes its release ID to the macOS job.
+   This prerelease never resolves through `releases/latest/download/…`, so it
+   cannot leak to production clients;
+3. builds one `universal-apple-darwin` app/DMG, signs it with Developer ID,
+   notarizes/staples the app and uploads initial assets through Tauri. An
+   explicit outer-DMG submission then waits for `Accepted`, staples and
+   validates the DMG ticket, and runs the full signed bundle gate. Only after
+   that gate passes does the workflow replace the initial DMG in the same
+   ID/tag/channel-validated release. The action merges macOS updater entries
+   into the existing `latest.json`; replacing the DMG does not alter the
+   updater archive or its signature;
+4. runs [`scripts/verify-release-assets.mjs`](../scripts/verify-release-assets.mjs)
+   with `--require-macos-universal`, which fails unless the release carries the
+   complete Windows NSIS and universal macOS DMG/updater asset set, with a
+   version-matched manifest whose URLs and embedded signatures exactly match
+   the uploaded assets. Before this gate, a normalizer binds every
+   returned release ID/tag/channel, then binds every `tauri-action@v1` API asset
+   ID to an asset on that same release and rewrites it to the stable public tag
+   download URL; wrong releases, foreign repositories, unknown IDs and
+   ambiguous IDs fail closed.
 
 Step 4 is the guard against the **partial-success** hazard: a release that
 exists (clients see an update) but whose installer/signature/manifest is
 missing or mismatched (every update attempt fails). The same script gates
-production drafts in `release.yml`.
+production drafts in `release.yml`. The staging prerelease is visible while its
+jobs are running, so test clients must not check for updates until the final
+verify job is green; this channel is isolated from production clients. Reset
+errors are no longer treated as “not found”, and the final job also requires the
+rolling `staging` tag to resolve to the workflow source SHA.
+
+The macOS package itself has a separate bundle contract. Unsigned desktop CI
+runs `scripts/verify-macos-bundle.mjs --mode unsigned` to check the universal
+architectures, minimum OS, bundle metadata and DMG integrity. Signed staging and
+production jobs invoke `--mode signed`, adding Developer ID, hardened-runtime,
+timestamp, entitlement, Gatekeeper and stapled-notarization checks. The
+macOS-only identifier is now
+frozen as `io.github.yanhanruan.mutsumi`; signed mode must require that exact
+value while the Windows base identifier and data namespace remain unchanged.
+The wiring and pure contracts are automated, but the signed positive case stays
+pending until the Apple secrets are installed and a credentialed staging run
+passes; unsigned CI is not a substitute.
+
+The production post-publish healer ignores this prerelease. The rolling channel
+must remain attached to the literal `staging` tag rather than being rebound to
+the build's `vX.Y.Z` version tag.
 
 ---
 
@@ -209,8 +366,11 @@ whenever the updater config changes) is the readiness bar.
 | 5 | An old Windows client really upgrades | Layer 4 runbook |
 | 6 | Invalid signatures are rejected | Layer 2 `bad-signature` |
 | 7 | Download failures never display as success | Layer 1 reducer + Layer 2 `interrupt` |
-| 8 | Incomplete `latest.json` can't ship a broken update | manifest contract checks in `verify-release-assets.mjs` |
+| 8 | Incomplete or signature-mismatched `latest.json` can't ship a broken update | pure contract tests + `verify-release-assets.mjs` |
 | 9 | A Windows smoke test has run | Layer 4, step 3–4 |
+| 10 | The unsigned macOS universal app/DMG satisfies its bundle contract | `desktop-ci.yml` + `verify-macos-bundle.mjs --mode unsigned` |
+| 11 | A signed macOS app/DMG passes Developer ID, Gatekeeper and stapling checks | Pending first credentialed staging run; workflow invokes `verify-macos-bundle.mjs --mode signed` |
+| 12 | One manifest safely contains Windows and both universal macOS updater entries | Workflow contract tests + final `--require-macos-universal` release gate; credentialed run pending |
 
 The production flow in [`RELEASING.md`](RELEASING.md) enforces the gate:
 releases are created as **drafts**, verified automatically, smoke-tested via
