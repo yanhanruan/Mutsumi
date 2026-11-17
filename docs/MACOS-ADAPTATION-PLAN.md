@@ -1,9 +1,9 @@
 # Mutsumi macOS 适配计划
 
 > 状态：实施中；已锁定 Dock 与透明窗口 API 边界
-> 工作分支：`feat/macos-adaptation`
+> 工作分支：`feat/macos-adaptation`（本地续作分支 `claude/macos-update-manual-verify-36086d`，推送到前者）
 > 基线：`main` / `d3b52a9`
-> 更新时间：2026-09-07
+> 更新时间：2026-11-17
 > 跨设备续作：见 [`MACOS-DEVELOPMENT-HANDOFF.md`](MACOS-DEVELOPMENT-HANDOFF.md)
 > 最新真机证据：见 [`MACOS-DESKTOP-TEST-RECORD.md`](MACOS-DESKTOP-TEST-RECORD.md)
 
@@ -94,6 +94,66 @@ Mutsumi 当前是以 Windows 为唯一发布平台设计的 Tauri 2 桌面应用
   Windows、Apple Silicon 与原生 Intel 三个 job 形成远程正例；签名/notarization
   staging 与 production workflow、updater 资产聚合和静态契约已经接入，但首个
   Developer ID/App Store Connect 凭据运行与 signed 正例仍待完成。
+
+## 收尾计划（2026-11-17 起）
+
+目标：把 macOS 版做完到可公开下载，按模块推进。每个模块开工前先在本节写好该模块的
+计划并经 review，完成后在对应模块下记录结果与证据。
+
+### 已确认的决定
+
+- **媒体**：采用 `MediaRemote` 以获得接近 Windows SMTC 的跨播放器能力，推翻第 9 节
+  “不采用私有 `MediaRemote`”的原决定；须先做可行性 spike，且必须保留探测失败时的
+  `unavailable` 降级。第 9 节与 [`MACOS-MEDIA-SPIKE.md`](MACOS-MEDIA-SPIKE.md) 的
+  相关结论在 M1 中改写。
+- **分发**：维护者没有付费 Apple Developer Program 账号，首发改为 ad-hoc 签名的
+  未签名 DMG，经 GitHub Releases 分发；Developer ID 签名/公证流程保留不删，不再作为
+  发布前提，日后有账号时可切回。
+- **更新崩溃排查（M2）为可选项**，不阻塞发布。
+
+### 模块路线
+
+| 模块 | 内容 | 状态 |
+| --- | --- | --- |
+| M0 | PR #18 的 `desktop-ci` 恢复全绿 | 计划已写，待 review |
+| M1 | 媒体：MediaRemote spike → 实现（含降级）；系统音量/静音（CoreAudio）；About 能力清单与三语文案 | 未开始 |
+| M2 | （可选）9.9.8 WebKit 崩溃排查；x86_64（Rosetta）成功升级补验 | 未开始 |
+| M3 | 窗口与生命周期真机矩阵：多显示器/缩放/负坐标、睡眠/锁屏/切换用户/热插拔、登录自启、单实例重聚焦 | 未开始 |
+| M4 | 未签名发布：ad-hoc 发布路径、发布契约调整、README 三语安装说明、下载安装与真实自动更新验收 | 未开始 |
+| M5 | 界面与 i18n：字体、滚动条、安全区的三语视觉矩阵 | 未开始 |
+| M6 | 最终回归（含 Windows、macOS 13）、PR #18 转正并合并 | 未开始 |
+
+顺序：M0 → M1 → M4 → M3 / M5 → M6；M2 视情况插入。
+
+### M0：恢复 desktop-ci
+
+**背景**：PR #18 最近一次 `desktop-ci`（2026-10-13，`fcaac03`）三个 job 全部失败。
+根因已在本地复现：仓库未提交 `Cargo.lock`，每次 CI 重新解析依赖；tauri 2.11.x 对
+`tauri-runtime` / `tauri-runtime-wry` 的要求是 `^2.11.x`，会解析到 2.12.x，而 tauri
+2.11 无法用 2.12 的 runtime 编译（`app.rs` 中 monitor API 不匹配，cargo 退出码 101）。
+`e652157` 已提交锁文件（tauri 2.11.5 / runtime 2.11.3 / runtime-wry 2.11.4），本机
+Apple Silicon `cargo test --locked` 348 通过，Intel 目标 `cargo check --locked` 通过；
+Windows 编译与 universal 打包未在本地验证。
+
+**步骤**：
+
+1. 提交本计划文档（须维护者同意）。
+2. 推送：`claude/macos-update-manual-verify-36086d` 快进推送到
+   `origin/feat/macos-adaptation`（须维护者同意）。除锁文件与本文档外，会一并公开
+   6 个此前未推送的提交：本地 updater 测试场景、假更新服务器加固及相关文档，其中
+   包括“9.9.8 WebKit 崩溃原因未定”的记录。
+3. 读取 PR #18 checks 页面上三个 job 的结果（公开仓库，无需登录即可看到通过/失败；
+   失败日志需维护者登录后提供）。
+4. 若失败：先在本地复现可复现的部分（macOS 测试、打包），定位后在本分支修复，回到
+   第 2 步；Windows 专属问题以 CI 日志为准。已知风险点：Windows 编译（`clipboard-win`
+   5.4.3 仅在 Windows 编译）、`tauri build` universal 打包与生命周期 smoke。
+5. 收尾（可选）：`git worktree prune` 清理已失效的 `/private/tmp/mutsumi-macos-review.*`
+   记录，再把本地 `feat/macos-adaptation` 快进到推送后的提交。
+
+**完成标准**：推送后的提交上 Windows regression、unsigned universal bundle、native
+Intel macOS regression 三个 job 全部通过；run ID 与结论记录在本节。
+
+**不在 M0 范围**：除修 CI 所需外不改功能代码；不发布任何版本。
 
 ## 5. 总体技术方案
 
