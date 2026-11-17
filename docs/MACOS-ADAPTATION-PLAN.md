@@ -131,7 +131,7 @@ Mutsumi 当前是以 Windows 为唯一发布平台设计的 Tauri 2 桌面应用
 根因已在本地复现：仓库未提交 `Cargo.lock`，每次 CI 重新解析依赖；tauri 2.11.x 对
 `tauri-runtime` / `tauri-runtime-wry` 的要求是 `^2.11.x`，会解析到 2.12.x，而 tauri
 2.11 无法用 2.12 的 runtime 编译（`app.rs` 中 monitor API 不匹配，cargo 退出码 101）。
-`e652157` 已提交锁文件（tauri 2.11.5 / runtime 2.11.3 / runtime-wry 2.11.4），本机
+`eab3511` 已提交锁文件（tauri 2.11.5 / runtime 2.11.3 / runtime-wry 2.11.4），本机
 Apple Silicon `cargo test --locked` 348 通过，Intel 目标 `cargo check --locked` 通过；
 Windows 编译与 universal 打包未在本地验证。
 
@@ -155,11 +155,14 @@ Intel macOS regression 三个 job 全部通过；run ID 与结论记录在本节
 
 **不在 M0 范围**：除修 CI 所需外不改功能代码；不发布任何版本。
 
-**结果（2026-11-17）**：`7fa555e` 快进推送到 `feat/macos-adaptation` 后，`desktop-ci`
-run [`44087331979`](https://github.com/yanhanruan/Mutsumi/actions/runs/44087331979)
+**结果（2026-11-17）**：`feat/macos-adaptation` 当前提交 `ff60644` 上的 `desktop-ci`
+run [`44093822727`](https://github.com/yanhanruan/Mutsumi/actions/runs/44093822727)
 三个 job 全部通过：Windows regression、unsigned universal bundle（含 bundle 契约与
 Apple Silicon Finder 生命周期 smoke）、native Intel macOS regression（含 Intel 生命周期
-smoke）。无需额外修复，锁文件即为完整修复。第 5 步收尾未执行，留待维护者决定。
+smoke）。无需额外修复，锁文件即为完整修复。首次全绿是 run
+[`44087331979`](https://github.com/yanhanruan/Mutsumi/actions/runs/44087331979)（`7fa555e`）；
+随后因本机未配置 git 身份，改写了最近 3 个提交的作者信息（内容不变）并强制推送，
+上面的 run 即改写后的复验。第 5 步收尾未执行，留待维护者决定。
 
 ## 5. 总体技术方案
 
