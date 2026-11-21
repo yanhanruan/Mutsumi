@@ -1,205 +1,160 @@
-import { ref } from 'vue'
+import { shallowRef } from 'vue'
 import { localDateKey } from './useTarotJournal'
 import {
-  createCryptoRandomSource,
-  createIChingReading,
-  createReadingId,
-  findHexagramByPattern,
+  analyzeIChingLines,
+  FORTUNE_LEVELS,
   generateLines,
-  getChangedPattern,
-  getMovingLineIndexes,
-  getPrimaryPattern,
-  isHexagramId,
   isIChingLines,
-  validateIChingReading,
-  type IChingReading,
-  type RandomSource,
+  type CoinFlip,
+  type FortuneLevel,
+  type IChingCast,
+  type IChingLines,
 } from '../config/iching'
 import { createDivinationTimeContext } from '../config/ichingCalendar'
 import { evaluateDailyFortune } from '../config/ichingFortune'
 
-export interface IChingJournalData {
-  version: 1
-  readings: IChingReading[]
+interface ReadingData {
+  dateKey: string
+  createdAt: string
+  lines: IChingLines
+  fortuneLevel: FortuneLevel
 }
 
-interface UseIChingJournalOptions {
-  randomSource?: RandomSource
-  now?: () => Date
-}
-
+export type IChingReading = ReadingData & IChingCast
 export const ICHING_JOURNAL_KEY = 'mutsumi_iching_journal'
+const JOURNAL_BACKUP_KEY = ICHING_JOURNAL_KEY + '_backup'
 
-function emptyJournal(): IChingJournalData {
-  return { version: 1, readings: [] }
+function isDateKey(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const date = new Date(`${value}T00:00:00Z`)
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value
 }
 
-function readRawStorage(): string | null {
-  try {
-    return localStorage.getItem(ICHING_JOURNAL_KEY)
-  } catch {
-    return null
+function isCreatedAt(value: unknown): value is string {
+  if (typeof value !== 'string') return false
+  const date = /^(\d{4}-\d{2}-\d{2})T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/.exec(value)?.[1]
+  return isDateKey(date) && Number.isFinite(Date.parse(value))
+}
+
+function decodeReading(value: unknown): { reading: IChingReading; repaired: boolean } | null {
+  if (!value || typeof value !== 'object') return null
+  const { dateKey, createdAt, lines, fortuneLevel, timezone } =
+    value as Partial<ReadingData & { timezone: string }>
+  if (!isDateKey(dateKey)) return null
+  if (!isCreatedAt(createdAt)) return null
+  if (!isIChingLines(lines)) return null
+
+  const cast = analyzeIChingLines(lines)
+  let level: FortuneLevel = 'neutral'
+  let repaired = false
+  if (fortuneLevel && FORTUNE_LEVELS.includes(fortuneLevel)) {
+    level = fortuneLevel
+  } else {
+    // Older records may lack a saved level. An invalid legacy timezone must
+    // not make the underlying cast or the rest of the journal unreadable.
+    repaired = fortuneLevel !== undefined || (timezone !== undefined && typeof timezone !== 'string')
+    try {
+      const time = createDivinationTimeContext(createdAt, typeof timezone === 'string' ? timezone : 'UTC')
+      level = evaluateDailyFortune(cast, time).level
+    } catch {
+      repaired = true
+    }
   }
-}
-
-function writeJournal(data: IChingJournalData): void {
-  localStorage.setItem(ICHING_JOURNAL_KEY, JSON.stringify(data))
-}
-
-function dateMs(reading: IChingReading): number {
-  return Date.parse(reading.createdAt)
+  return { reading: { ...cast, dateKey, createdAt, fortuneLevel: level }, repaired }
 }
 
 function newestFirst(a: IChingReading, b: IChingReading): number {
-  const byDate = b.dateKey.localeCompare(a.dateKey)
-  if (byDate !== 0) return byDate
-  return dateMs(b) - dateMs(a)
+  return b.dateKey.localeCompare(a.dateKey)
 }
 
-function repairReading(value: unknown): IChingReading | null {
-  if (validateIChingReading(value)) return value
-  if (!value || typeof value !== 'object') return null
-  const reading = value as Partial<IChingReading>
-  if (typeof reading.id !== 'string' || reading.id.trim() === '') return null
-  if (typeof reading.dateKey !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(reading.dateKey)) return null
-  if (typeof reading.createdAt !== 'string' || Number.isNaN(Date.parse(reading.createdAt))) return null
-  if (!isIChingLines(reading.lines)) return null
-
-  const timezone = typeof reading.timezone === 'string' && reading.timezone ? reading.timezone : 'UTC'
-  const base = createIChingReading(reading.lines, reading.dateKey, reading.createdAt, reading.id)
-  const evaluation = evaluateDailyFortune(base, createDivinationTimeContext(reading.createdAt, timezone))
-  const repaired = createIChingReading(reading.lines, reading.dateKey, reading.createdAt, reading.id, {
-    timezone, fortuneRuleVersion: 2, fortuneLevel: evaluation.level, fortuneScore: evaluation.score,
-  })
-  if (reading.primaryHexagramId && isHexagramId(reading.primaryHexagramId)) {
-    const actualPrimary = findHexagramByPattern(getPrimaryPattern(reading.lines)).id
-    if (reading.primaryHexagramId !== actualPrimary) return null
+function readHistory(raw: string | null): { readings: IChingReading[]; needsBackup: boolean } {
+  if (raw === null) return { readings: [], needsBackup: false }
+  const stored = JSON.parse(raw) as { version?: number; readings?: unknown[] } | null
+  if (stored?.version !== 1 || !Array.isArray(stored.readings)) {
+    throw new Error('Unrecognized I Ching journal')
   }
-  if (reading.changedHexagramId && isHexagramId(reading.changedHexagramId)) {
-    const moving = getMovingLineIndexes(reading.lines)
-    const actualChanged = moving.length > 0 ? findHexagramByPattern(getChangedPattern(reading.lines)).id : null
-    if (reading.changedHexagramId !== actualChanged) return null
-  }
-  return repaired
-}
-
-export function normalizeIChingJournal(value: unknown): IChingJournalData {
-  if (!value || typeof value !== 'object') return emptyJournal()
-  const data = value as Partial<IChingJournalData>
-  if (data.version !== 1 || !Array.isArray(data.readings)) return emptyJournal()
 
   const byDate = new Map<string, IChingReading>()
-  for (const raw of data.readings) {
-    const reading = repairReading(raw)
-    if (!reading) continue
-    const existing = byDate.get(reading.dateKey)
-    if (!existing || dateMs(reading) >= dateMs(existing)) {
+  let needsBackup = false
+  for (const value of stored.readings) {
+    const decoded = decodeReading(value)
+    if (!decoded) {
+      needsBackup = true
+      continue
+    }
+    const { reading, repaired } = decoded
+    needsBackup ||= repaired
+    const previous = byDate.get(reading.dateKey)
+    if (!previous || Date.parse(reading.createdAt) >= Date.parse(previous.createdAt)) {
       byDate.set(reading.dateKey, reading)
     }
   }
-
-  return { version: 1, readings: Array.from(byDate.values()).sort(newestFirst) }
+  if (stored.readings.length && !byDate.size) {
+    throw new Error('I Ching journal has no readable entries')
+  }
+  return { readings: [...byDate.values()].sort(newestFirst), needsBackup }
 }
 
-function readJournal(): IChingJournalData {
-  const raw = readRawStorage()
-  if (!raw) return emptyJournal()
+function backUpJournal(raw: string) {
+  const stored = localStorage.getItem(JOURNAL_BACKUP_KEY)
+  const backups: unknown = stored === null ? [] : JSON.parse(stored)
+  if (!Array.isArray(backups) || backups.some(backup => typeof backup !== 'string')) {
+    throw new Error('Unrecognized I Ching journal backup')
+  }
+  // A failed main write may leave this snapshot already backed up.
+  if (!backups.includes(raw)) {
+    localStorage.setItem(JOURNAL_BACKUP_KEY, JSON.stringify([...backups, raw]))
+  }
+}
+
+export function useIChingJournal({
+  flipCoin,
+  now = () => new Date(),
+}: { flipCoin?: CoinFlip; now?: () => Date } = {}) {
+  const history = shallowRef<IChingReading[]>([])
+
   try {
-    return normalizeIChingJournal(JSON.parse(raw))
+    history.value = readHistory(localStorage.getItem(ICHING_JOURNAL_KEY)).readings
   } catch {
-    return emptyJournal()
-  }
-}
-
-function replaceReading(data: IChingJournalData, reading: IChingReading): IChingJournalData {
-  return {
-    version: 1,
-    readings: [reading, ...data.readings.filter(item => item.dateKey !== reading.dateKey)].sort(newestFirst),
-  }
-}
-
-const journal = ref<IChingJournalData>(readJournal())
-const isGenerating = ref(false)
-
-export function useIChingJournal(options: UseIChingJournalOptions = {}) {
-  const randomSource = options.randomSource ?? createCryptoRandomSource()
-  const now = options.now ?? (() => new Date())
-
-  function refresh(): void {
-    journal.value = readJournal()
+    // Keep the panel usable, but require a successful read before any write.
   }
 
-  function getReadingForDate(dateKey = localDateKey(now())): IChingReading | null {
-    refresh()
-    return journal.value.readings.find(reading => reading.dateKey === dateKey) ?? null
+  function getTodayReading(dateKey = localDateKey(now())): IChingReading | null {
+    return history.value.find(reading => reading.dateKey === dateKey) ?? null
   }
 
-  function getTodayReading(): IChingReading | null {
-    return getReadingForDate(localDateKey(now()))
-  }
+  function castToday(replace = false): IChingReading {
+    // Another open panel or a recovery may have changed storage since mount.
+    const raw = localStorage.getItem(ICHING_JOURNAL_KEY)
+    const { readings: latest, needsBackup } = readHistory(raw)
+    const instant = now()
+    const dateKey = localDateKey(instant)
+    const existing = latest.find(reading => reading.dateKey === dateKey)
+    if (existing && !replace) {
+      history.value = latest
+      return existing
+    }
 
-  function getHistory(): IChingReading[] {
-    refresh()
-    return [...journal.value.readings]
-  }
-
-  function buildReading(dateKey: string): IChingReading {
-    const completionTime = now()
-    const createdAt = completionTime.toISOString()
+    const cast = analyzeIChingLines(generateLines(flipCoin))
+    const createdAt = instant.toISOString()
     const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
-    const lines = generateLines(randomSource)
-    const id = createReadingId(randomSource, completionTime.getTime())
-    const base = createIChingReading(lines, dateKey, createdAt, id)
-    const evaluation = evaluateDailyFortune(base, createDivinationTimeContext(createdAt, timezone))
-    const reading = createIChingReading(lines, dateKey, createdAt, id, {
-      timezone, fortuneRuleVersion: 2, fortuneLevel: evaluation.level, fortuneScore: evaluation.score,
-    })
-    if (!validateIChingReading(reading)) throw new Error('Generated invalid I Ching reading')
+    const time = createDivinationTimeContext(createdAt, timezone)
+    const reading: IChingReading = {
+      ...cast, dateKey, createdAt, fortuneLevel: evaluateDailyFortune(cast, time).level,
+    }
+    const next = [reading, ...latest.filter(item => item.dateKey !== dateKey)].sort(newestFirst)
+    const readings = next.map(({ dateKey, createdAt, lines, fortuneLevel }): ReadingData =>
+      ({ dateKey, createdAt, lines, fortuneLevel }))
+    const updated = JSON.stringify({ version: 1, readings })
+    if (needsBackup && raw !== null) backUpJournal(raw)
+    if (localStorage.getItem(ICHING_JOURNAL_KEY) !== raw) {
+      throw new Error('I Ching journal changed while preparing the save')
+    }
+    // Change the displayed history only after storage accepts the replacement.
+    localStorage.setItem(ICHING_JOURNAL_KEY, updated)
+    history.value = next
     return reading
   }
 
-  function persistReplacement(reading: IChingReading): IChingReading {
-    const previous = journal.value
-    const next = replaceReading(previous, reading)
-    writeJournal(next)
-    journal.value = next
-    return reading
-  }
-
-  function createReading(dateKey = localDateKey(now())): IChingReading {
-    if (isGenerating.value) throw new Error('I Ching generation already in progress')
-    const existing = getReadingForDate(dateKey)
-    if (existing) return existing
-
-    isGenerating.value = true
-    try {
-      const reading = buildReading(dateKey)
-      return persistReplacement(reading)
-    } finally {
-      isGenerating.value = false
-    }
-  }
-
-  function rerollReading(dateKey = localDateKey(now())): IChingReading {
-    if (isGenerating.value) throw new Error('I Ching generation already in progress')
-    refresh()
-    isGenerating.value = true
-    try {
-      const reading = buildReading(dateKey)
-      return persistReplacement(reading)
-    } finally {
-      isGenerating.value = false
-    }
-  }
-
-  return {
-    journal,
-    isGenerating,
-    getReadingForDate,
-    getTodayReading,
-    getHistory,
-    createReading,
-    rerollReading,
-    refresh,
-  }
+  return { history, getTodayReading, castToday }
 }

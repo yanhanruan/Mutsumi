@@ -501,7 +501,6 @@ onUnmounted(() => {
   gap: 6px;
   pointer-events: auto;
   user-select: none;
-  z-index: 1;
 }
 
 /* ── Badge (animated Lottie speakers) ────────────────────────────── */
@@ -513,6 +512,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
+  z-index: 1;
   /* width / height set inline from the 大中小 character-size setting. */
   cursor: default;
   transition: transform 160ms cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -525,6 +525,7 @@ onUnmounted(() => {
 .panel {
   display: flex;
   flex-direction: column;
+  z-index: 1001; /* Above the context menu and its floating label. */
   gap: 6px;
   /* Fit within the (small) pet window — 8px margins each side — capped so it
      doesn't get oversized on the large character setting. */

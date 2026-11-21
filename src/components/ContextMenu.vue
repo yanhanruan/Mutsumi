@@ -196,29 +196,33 @@ defineExpose({ open, close })
    Default (36px) matches the "large" character setting.             */
 .bubble-panel {
   --bubble-size: 36px; /* overridden by inline :style per size tier  */
+  --button-inset: calc(var(--bubble-size) * 0.22);
+  --hover-room: calc(var(--bubble-size) * 0.26);
 
   position: fixed;
-  left: calc(var(--bubble-size) * 0.22);   /* ~8 px at large */
+  left: 0;
   top: 50%;
   transform: translateY(-50%);
   z-index: 999;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
+  /* In RTL the buttons align to the right edge, irrespective of the left scrollbar. */
+  box-sizing: border-box;
+  width: calc(var(--button-inset) + var(--bubble-size) + var(--hover-room));
   gap: calc(var(--bubble-size) * 0.19);    /* ~7 px at large */
   max-height: calc(100vh - calc(var(--bubble-size) * 0.44));
+  direction: rtl; /* Keep the native scrollbar to the left of the buttons. */
   overflow-y: auto;
   overflow-x: hidden;
   overscroll-behavior: contain;
   padding-block: calc(var(--bubble-size) * 0.11);
-  padding-right: calc(var(--bubble-size) * 0.26);
+  padding-right: var(--hover-room);
   pointer-events: auto;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(119, 153, 119, 0.45) transparent;
 }
 
 .bubble-panel::-webkit-scrollbar {
-  width: 5px;
+  width: 4px;
 }
 
 .bubble-panel::-webkit-scrollbar-thumb {
@@ -261,6 +265,7 @@ defineExpose({ open, close })
 .bubble-wrap {
   position: relative;
   display: flex;
+  direction: ltr;
   align-items: center;
   pointer-events: auto;
 }

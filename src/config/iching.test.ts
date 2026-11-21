@@ -1,226 +1,71 @@
-import { describe, it, expect } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import {
-  HEXAGRAMS,
-  HEXAGRAM_PALACES,
-  PALACE_POSITIONS,
-  createIChingReading,
-  findHexagramById,
-  findHexagramByPattern,
-  generateLine,
-  generateLines,
-  getCoinSidesForLine,
-  getChangedPattern,
-  getMovingLineIndexes,
-  getHexagramPalaceInfo,
-  getPrimaryPattern,
-  isChangedYang,
-  isMovingLine,
-  isPrimaryYang,
-  patternKey,
+  analyzeIChingLines, findHexagramByPattern, generateLines, getCoinSidesForLine, isIChingLines,
+  HEXAGRAMS, HEXAGRAM_PALACES, PALACE_POSITIONS, patternKey,
   type HexagramLinePattern,
-  type IChingLines,
-  type RandomSource,
 } from './iching'
 
-class SequenceRandom implements RandomSource {
-  private index = 0
-  private readonly values: readonly number[]
-
-  constructor(values: readonly number[]) {
-    this.values = values
-  }
-
-  nextInt(maxExclusive: number): number {
-    const value = this.values[this.index++]
-    if (value === undefined) throw new Error('No more random values')
-    expect(value).toBeGreaterThanOrEqual(0)
-    expect(value).toBeLessThan(maxExclusive)
-    return value
-  }
-}
-
-describe('I Ching line semantics', () => {
-  it('maps line values to primary, changed, and moving states', () => {
-    expect(isPrimaryYang(6)).toBe(false)
-    expect(isChangedYang(6)).toBe(true)
-    expect(isMovingLine(6)).toBe(true)
-
-    expect(isPrimaryYang(7)).toBe(true)
-    expect(isChangedYang(7)).toBe(true)
-    expect(isMovingLine(7)).toBe(false)
-
-    expect(isPrimaryYang(8)).toBe(false)
-    expect(isChangedYang(8)).toBe(false)
-    expect(isMovingLine(8)).toBe(false)
-
-    expect(isPrimaryYang(9)).toBe(true)
-    expect(isChangedYang(9)).toBe(false)
-    expect(isMovingLine(9)).toBe(true)
-  })
-
-  it('maps coin backs to the matching yin or yang line value', () => {
-    expect(getCoinSidesForLine(6)).toEqual(['front', 'front', 'front'])
-    expect(getCoinSidesForLine(7)).toEqual(['back', 'front', 'front'])
-    expect(getCoinSidesForLine(8)).toEqual(['back', 'back', 'front'])
-    expect(getCoinSidesForLine(9)).toEqual(['back', 'back', 'back'])
-  })
-})
-
-describe('I Ching line ordering', () => {
-  it('keeps generated lines in bottom-to-top order', () => {
-    const lines = generateLines(new SequenceRandom([
-      0, 0, 0,
-      0, 0, 1,
-      0, 1, 1,
-      1, 1, 1,
-      0, 0, 0,
-      1, 1, 1,
-    ]))
-    expect(lines).toEqual([6, 7, 8, 9, 6, 9])
-  })
-
-  it('visual reversal does not mutate canonical data', () => {
-    const lines: IChingLines = [6, 7, 8, 9, 7, 8]
-    const visual = [...lines].reverse()
-    expect(visual).toEqual([8, 7, 9, 8, 7, 6])
-    expect(lines).toEqual([6, 7, 8, 9, 7, 8])
-  })
-
-  it('moving-line indexes use zero-based bottom-to-top positions', () => {
-    expect(getMovingLineIndexes([6, 7, 8, 7, 8, 9])).toEqual([0, 5])
-  })
-})
-
-describe('I Ching random generation', () => {
-  it('deterministic injected randomness produces expected coin totals', () => {
-    expect(generateLine(new SequenceRandom([0, 0, 0]))).toBe(6)
-    expect(generateLine(new SequenceRandom([0, 0, 1]))).toBe(7)
-    expect(generateLine(new SequenceRandom([0, 1, 1]))).toBe(8)
-    expect(generateLine(new SequenceRandom([1, 1, 1]))).toBe(9)
-  })
-
-  it('one generated line always belongs to 6 | 7 | 8 | 9', () => {
-    for (const bits of [[0, 0, 0], [0, 0, 1], [0, 1, 1], [1, 1, 1]]) {
-      expect([6, 7, 8, 9]).toContain(generateLine(new SequenceRandom(bits)))
+describe('coin casting', () => {
+  it('preserves one, three, three and one outcomes for the four line values', () => {
+    const totals = new Map<number, number>()
+    for (let combination = 0; combination < 8; combination++) {
+      const coins = [combination & 1, (combination >> 1) & 1, (combination >> 2) & 1] as const
+      let index = 0
+      const [value] = generateLines(() => coins[index++ % 3] as 0 | 1)
+      totals.set(value, (totals.get(value) ?? 0) + 1)
     }
+    expect(Object.fromEntries(totals)).toEqual({ 6: 1, 7: 3, 8: 3, 9: 1 })
   })
 
-  it('six-line generation always returns exactly six values', () => {
-    const lines = generateLines(new SequenceRandom(Array.from({ length: 18 }, (_, i) => i % 2)))
-    expect(lines).toHaveLength(6)
-  })
-})
-
-describe('I Ching hexagram mapping', () => {
-  it('contains exactly 64 hexagrams', () => {
-    expect(HEXAGRAMS).toHaveLength(64)
-  })
-
-  it('contains every King Wen number from 1 to 64 exactly once', () => {
-    const numbers = HEXAGRAMS.map(h => h.kingWenNumber).sort((a, b) => a - b)
-    expect(numbers).toEqual(Array.from({ length: 64 }, (_, i) => i + 1))
-    expect(new Set(numbers).size).toBe(64)
-  })
-
-  it('contains unique line patterns', () => {
-    const keys = HEXAGRAMS.map(h => patternKey(h.lines))
-    expect(new Set(keys).size).toBe(64)
-  })
-
-  it('resolves all possible six-line patterns', () => {
-    for (let mask = 0; mask < 64; mask++) {
-      const pattern = Array.from({ length: 6 }, (_, i) => Boolean(mask & (1 << i))) as unknown as HexagramLinePattern
-      expect(findHexagramByPattern(pattern).kingWenNumber).toBeGreaterThanOrEqual(1)
-    }
-  })
-
-  it('maps Qian and Kun to King Wen 1 and 2', () => {
-    expect(findHexagramByPattern([true, true, true, true, true, true]).kingWenNumber).toBe(1)
-    expect(findHexagramByPattern([false, false, false, false, false, false]).kingWenNumber).toBe(2)
-  })
-
-  it('resolves a representative mixed pattern to the canonical hexagram', () => {
-    expect(findHexagramByPattern([true, false, false, false, true, false]).kingWenNumber).toBe(3)
+  it('casts six lines bottom to top and displays the correct number of coin backs', () => {
+    const coins = [0, 0, 0, 1, 0, 0, 1, 1, 0, 1, 1, 1, 0, 0, 0, 1, 0, 0] as const
+    const expected = [6, 7, 8, 9, 6, 7] as const
+    let index = 0
+    expect(generateLines(() => coins[index++])).toEqual(expected)
+    expect(expected.slice(0, 4).map(getCoinSidesForLine)).toEqual([
+      ['front', 'front', 'front'], ['back', 'front', 'front'],
+      ['back', 'back', 'front'], ['back', 'back', 'back'],
+    ])
   })
 })
 
-describe('Jing Fang Eight-Palace classification', () => {
-  it('classifies all 64 canonical hexagrams', () => {
-    expect(HEXAGRAMS).toHaveLength(64)
-    for (const hexagram of HEXAGRAMS) {
-      expect(HEXAGRAM_PALACES).toContain(hexagram.palace)
-      expect(PALACE_POSITIONS).toContain(hexagram.palacePosition)
-      expect(getHexagramPalaceInfo(hexagram.id)).toEqual({
-        palace: hexagram.palace,
-        position: hexagram.palacePosition,
-      })
-    }
+describe('hexagram analysis', () => {
+  it('rejects six-line arrays with missing or invalid line values', () => {
+    expect(isIChingLines([6, 7, 8, 9, 6, 7])).toBe(true)
+    expect(isIChingLines(Array(6))).toBe(false)
+    expect(isIChingLines([6, 7, 8, 9, 6, 10])).toBe(false)
   })
 
-  it('contains exactly eight hexagrams and one of every position per palace', () => {
+  it('maps each of the 64 patterns to its unique King Wen entry', () => {
+    const ids = new Set()
+    for (let bits = 0; bits < 64; bits++) {
+      const pattern = Array.from({ length: 6 }, (_, i) => Boolean(bits & (1 << i))) as unknown as HexagramLinePattern
+      const hexagram = findHexagramByPattern(pattern)
+      expect(patternKey(hexagram.lines)).toBe(patternKey(pattern))
+      expect(HEXAGRAMS[hexagram.kingWenNumber - 1]).toBe(hexagram)
+      ids.add(hexagram.id)
+    }
+    expect(ids.size).toBe(64)
+    expect(analyzeIChingLines([7, 7, 7, 7, 7, 7]).primary.kingWenNumber).toBe(1)
+    expect(analyzeIChingLines([8, 8, 8, 8, 8, 8]).primary.kingWenNumber).toBe(2)
+  })
+
+  it('classifies all 64 hexagrams into eight palaces with one of each position', () => {
     for (const palace of HEXAGRAM_PALACES) {
-      const members = HEXAGRAMS.filter(hexagram => hexagram.palace === palace)
-      expect(members).toHaveLength(8)
-      expect(new Set(members.map(hexagram => hexagram.palacePosition))).toEqual(new Set(PALACE_POSITIONS))
+      const group = HEXAGRAMS.filter(hexagram => hexagram.palace === palace)
+      expect(group).toHaveLength(8)
+      expect(new Set(group.map(hexagram => hexagram.palacePosition))).toEqual(new Set(PALACE_POSITIONS))
     }
   })
 
-  it.each([
-    ['hexagram01', 'qian', 'pure'],
-    ['hexagram02', 'kun', 'pure'],
-    ['hexagram44', 'qian', 'first'],
-    ['hexagram35', 'qian', 'wanderingSoul'],
-    ['hexagram14', 'qian', 'returningSoul'],
-  ] as const)('classifies %s as %s / %s', (id, palace, position) => {
-    expect(getHexagramPalaceInfo(id)).toEqual({ palace, position })
+  it('flips old yin and old yang at the correct positions, leaving young lines alone', () => {
+    const cast = analyzeIChingLines([6, 7, 8, 9, 7, 8])
+    expect(cast.movingLineIndexes).toEqual([0, 3])
+    expect(cast.primary).toMatchObject({ id: 'hexagram47', palace: 'dui', palacePosition: 'first' })
+    expect(cast.changed).toMatchObject({ id: 'hexagram60', palace: 'kan', palacePosition: 'first' })
   })
 
-  it('resolves primary and changed palace information independently', () => {
-    const reading = createIChingReading([6, 7, 8, 9, 7, 8], '2026-07-12', '2026-07-12T00:00:00.000Z', 'palace-pair')
-    expect(reading.primaryHexagramId).toBe('hexagram47')
-    expect(reading.changedHexagramId).toBe('hexagram60')
-    expect(getHexagramPalaceInfo(reading.primaryHexagramId)).toEqual({ palace: 'dui', position: 'first' })
-    expect(getHexagramPalaceInfo(reading.changedHexagramId!)).toEqual({ palace: 'kan', position: 'first' })
-  })
-
-  it('does not depend on date, time, randomness, or moving-line count', () => {
-    const stillQian = createIChingReading([7, 7, 7, 7, 7, 7], '1900-01-01', '1900-01-01T00:00:00.000Z', 'still')
-    generateLine(new SequenceRandom([1, 0, 1]))
-    const movingQian = createIChingReading([9, 7, 7, 7, 7, 7], '2999-12-31', '2999-12-31T23:59:59.999Z', 'moving')
-
-    expect(stillQian.movingLineIndexes).toHaveLength(0)
-    expect(movingQian.movingLineIndexes).toHaveLength(1)
-    expect(getHexagramPalaceInfo(stillQian.primaryHexagramId)).toEqual({ palace: 'qian', position: 'pure' })
-    expect(getHexagramPalaceInfo(movingQian.primaryHexagramId)).toEqual({ palace: 'qian', position: 'pure' })
-    expect(getHexagramPalaceInfo(movingQian.changedHexagramId!)).toEqual({ palace: 'qian', position: 'first' })
-    expect(stillQian).not.toHaveProperty('palace')
-    expect(movingQian).not.toHaveProperty('palacePosition')
-  })
-
-  it('keeps the canonical definition as the classification source', () => {
-    expect(findHexagramById('hexagram35')).toMatchObject({ palace: 'qian', palacePosition: 'wanderingSoul' })
-  })
-})
-
-describe('I Ching changed hexagram', () => {
-  it('has no moving lines for all young-yang lines', () => {
-    expect(getMovingLineIndexes([7, 7, 7, 7, 7, 7])).toEqual([])
-  })
-
-  it('omits changedHexagramId when no lines move', () => {
-    const reading = createIChingReading([7, 7, 7, 7, 7, 7], '2026-07-12', '2026-07-12T00:00:00.000Z', 'r1')
-    expect(reading.changedHexagramId).toBeNull()
-  })
-
-  it('changes old yin to yang and old yang to yin while preserving non-moving lines', () => {
-    const lines: IChingLines = [6, 7, 8, 9, 7, 8]
-    expect(getPrimaryPattern(lines)).toEqual([false, true, false, true, true, false])
-    expect(getChangedPattern(lines)).toEqual([true, true, false, false, true, false])
-  })
-
-  it('resolves a representative changed hexagram', () => {
-    const reading = createIChingReading([6, 7, 8, 9, 7, 8], '2026-07-12', '2026-07-12T00:00:00.000Z', 'r2')
-    expect(reading.primaryHexagramId).toBe('hexagram47')
-    expect(reading.changedHexagramId).toBe('hexagram60')
+  it('has no changed hexagram when all six lines are still', () => {
+    expect(analyzeIChingLines([7, 7, 7, 7, 7, 7])).toMatchObject({ changed: null, movingLineIndexes: [] })
   })
 })

@@ -5,7 +5,6 @@ import {
   type IChingHexagramLocale,
   type IChingLocale,
   type PalacePosition,
-  type TrigramId,
 } from '../config/iching'
 import zhClassics from '@freizl/yijing/zh-CN/64gua.json'
 
@@ -32,17 +31,6 @@ const EN_NAMES = [
   'Inner Truth', 'Small Preponderance', 'After Completion', 'Before Completion',
 ] as const
 
-const ZH_NAMES = [
-  '乾', '坤', '屯', '蒙', '需', '讼', '师', '比',
-  '小畜', '履', '泰', '否', '同人', '大有', '谦', '豫',
-  '随', '蛊', '临', '观', '噬嗑', '贲', '剥', '复',
-  '无妄', '大畜', '颐', '大过', '坎', '离', '咸', '恒',
-  '遁', '大壮', '晋', '明夷', '家人', '睽', '蹇', '解',
-  '损', '益', '夬', '姤', '萃', '升', '困', '井',
-  '革', '鼎', '震', '艮', '渐', '归妹', '丰', '旅',
-  '巽', '兑', '涣', '节', '中孚', '小过', '既济', '未济',
-] as const
-
 const ZH_FULL_NAMES = [
   '乾为天', '坤为地', '水雷屯', '山水蒙', '水天需', '天水讼', '地水师', '水地比',
   '风天小畜', '天泽履', '地天泰', '天地否', '天火同人', '火天大有', '地山谦', '雷地豫',
@@ -53,12 +41,6 @@ const ZH_FULL_NAMES = [
   '泽火革', '火风鼎', '震为雷', '艮为山', '风山渐', '雷泽归妹', '雷火丰', '火山旅',
   '巽为风', '兑为泽', '风水涣', '水泽节', '风泽中孚', '雷山小过', '水火既济', '火水未济',
 ] as const
-
-const TRIGRAM_NAMES: Record<LocaleKey, Record<TrigramId, string>> = {
-  en: { qian: 'Heaven', dui: 'Lake', li: 'Fire', zhen: 'Thunder', xun: 'Wind', kan: 'Water', gen: 'Mountain', kun: 'Earth' },
-  zh: { qian: '乾', dui: '兑', li: '离', zhen: '震', xun: '巽', kan: '坎', gen: '艮', kun: '坤' },
-  ja: { qian: '乾', dui: '兌', li: '離', zhen: '震', xun: '巽', kan: '坎', gen: '艮', kun: '坤' },
-}
 
 const PALACE_NAMES: Record<LocaleKey, Record<HexagramPalace, string>> = {
   en: { qian: 'Qian Palace', dui: 'Dui Palace', li: 'Li Palace', zhen: 'Zhen Palace', xun: 'Xun Palace', kan: 'Kan Palace', gen: 'Gen Palace', kun: 'Kun Palace' },
@@ -225,9 +207,6 @@ const UI: Record<LocaleKey, Omit<IChingLocale, 'hexagrams'>> = {
     commentary: 'Commentary',
     imageText: 'Image',
     allLines: 'Six lines',
-    upperTrigram: 'Upper trigram',
-    lowerTrigram: 'Lower trigram',
-    trigramNames: TRIGRAM_NAMES.en,
     palaceNames: PALACE_NAMES.en,
     palacePositions: PALACE_POSITION_NAMES.en,
     details: 'Details',
@@ -236,27 +215,22 @@ const UI: Record<LocaleKey, Omit<IChingLocale, 'hexagrams'>> = {
     emptyHistory: 'No I Ching readings yet.',
     back: 'Back',
     close: 'Close',
-    cancel: 'Cancel',
     generateAnother: 'Generate another reading',
     rerollTitle: 'Begin another reading?',
     rerollDescription: "The new result will replace today's current reading.",
     confirmReroll: 'Begin again',
     keepCurrent: 'Keep current result',
-    replacementNotice: "Today's saved reading will be replaced.",
     noChangeExplanation: 'There are no moving lines here. For now, it may be enough to observe what is already present without rushing to change it.',
     transitionExplanation: 'The moving lines suggest a gentle shift from the first hexagram toward the changed one.',
     disclaimer: 'This is a reflective companion ritual, not an authoritative prediction.',
-    storageRecovered: 'Some old reading data could not be used and was skipped safely.',
     generationError: 'The reading could not be completed. Your current result was kept.',
-    generationBusy: 'A reading is already in progress.',
     coinsAria: 'Three coin ritual in progress',
     movingLineAria: 'moving line',
     linePositions: ['first line', 'second line', 'third line', 'fourth line', 'fifth line', 'sixth line'],
     fortune: {
-      title: "Today's fortune", basis: 'Fortune basis', disclaimer: 'This reading is a light form of self-reflection, not a certain future.',
+      title: "Today's fortune",
       levels: { greatFortune: 'Great fortune', fortune: 'Fortune', neutral: 'Steady', misfortune: 'Take care' },
       summaries: { greatFortune: 'The overall flow looks supportive today. Move forward with what is already prepared and respond openly to opportunities.', fortune: 'Support slightly outweighs resistance today. Proceed steadily without trying to cover too much ground at once.', neutral: 'The day looks relatively balanced. Keep your rhythm, observe first, and adjust only when needed.', misfortune: 'There may be a little more resistance around you today. Slow the pace, protect your energy, and avoid rushing important matters.' },
-      factors: { monthSame:'The month branch aligns with the Shi line',monthSupport:'The month supports the Shi line',monthRestrain:'The month restrains the Shi line',monthSameElement:'The month shares the Shi line element',monthOpposition:'The month branch opposes the Shi line',daySame:'The day branch aligns with the Shi line',daySupport:'The day supports the Shi line',dayRestrain:'The day restrains the Shi line',daySameElement:'The day shares the Shi line element',dayOpposition:'The day branch opposes the Shi line',movingYuan:'A moving Yuan Shen offers support',movingJi:'A moving Ji Shen adds restraint',shiChangeSupport:'The changed Shi line returns support',shiChangeRestraint:'The changed Shi line returns restraint' },
     },
   },
   zh: {
@@ -276,9 +250,6 @@ const UI: Record<LocaleKey, Omit<IChingLocale, 'hexagrams'>> = {
     commentary: '彖辞',
     imageText: '大象',
     allLines: '六爻',
-    upperTrigram: '上卦',
-    lowerTrigram: '下卦',
-    trigramNames: TRIGRAM_NAMES.zh,
     palaceNames: PALACE_NAMES.zh,
     palacePositions: PALACE_POSITION_NAMES.zh,
     details: '查看详情',
@@ -287,27 +258,22 @@ const UI: Record<LocaleKey, Omit<IChingLocale, 'hexagrams'>> = {
     emptyHistory: '还没有周易记录。',
     back: '返回',
     close: '关闭',
-    cancel: '取消',
     generateAnother: '重新起一卦',
     rerollTitle: '要开始另一卦吗？',
     rerollDescription: '新的结果会替换今天当前保存的卦象。',
     confirmReroll: '重新开始',
     keepCurrent: '保留当前结果',
-    replacementNotice: '今天保存的卦象将被替换。',
     noChangeExplanation: '这一卦没有动爻。此刻也许只需要看见已经存在的东西，不必急着改变。',
     transitionExplanation: '动爻显示本卦变化后的之卦，可结合动爻爻辞一并参看。',
     disclaimer: '本占筮结果依据传统《周易》卦爻体系生成，仅供个人参考，不构成专业判断或现实决策依据。',
-    storageRecovered: '部分旧记录无法使用，已安全跳过。',
     generationError: '这次起卦没有完成。当前结果已保留。',
-    generationBusy: '正在起卦中。',
     coinsAria: '三枚硬币仪式进行中',
     movingLineAria: '动爻',
     linePositions: ['初爻', '二爻', '三爻', '四爻', '五爻', '上爻'],
     fortune: {
-      title: '今日运势', basis: '运势依据', disclaimer: '卦象只是一种轻松的自我观察，不代表确定的未来。',
+      title: '今日运势',
       levels: { greatFortune: '大吉', fortune: '吉', neutral: '平', misfortune: '凶' },
       summaries: { greatFortune: '今天的整体状态较为顺畅。适合推进已经准备好的事情，也可以更主动地回应机会。', fortune: '今天得到的支持略多于阻力。适合稳步推进，但不必一次迈得太远。', neutral: '今天的状态相对平稳。适合保持节奏，先观察，再决定是否调整方向。', misfortune: '今天外部阻力可能稍多。适合放慢节奏，保护精力，避免仓促处理重要事项。' },
-      factors: { monthSame:'月建与世爻地支相同',monthSupport:'月建对世爻有生扶',monthRestrain:'月建对世爻略有制约',monthSameElement:'月建与世爻五行相同',monthOpposition:'月建与世爻相冲',daySame:'日辰与世爻地支相同',daySupport:'日辰对世爻有生扶',dayRestrain:'日辰对世爻略有制约',daySameElement:'日辰与世爻五行相同',dayOpposition:'日辰与世爻相冲',movingYuan:'一处元神发动并提供支持',movingJi:'一处忌神发动并带来制约',shiChangeSupport:'世爻变化后回头生扶',shiChangeRestraint:'世爻变化后回头制约' },
     },
   },
   ja: {
@@ -327,9 +293,6 @@ const UI: Record<LocaleKey, Omit<IChingLocale, 'hexagrams'>> = {
     commentary: '彖伝',
     imageText: '大象',
     allLines: '六爻',
-    upperTrigram: '上卦',
-    lowerTrigram: '下卦',
-    trigramNames: TRIGRAM_NAMES.ja,
     palaceNames: PALACE_NAMES.ja,
     palacePositions: PALACE_POSITION_NAMES.ja,
     details: '詳細',
@@ -338,27 +301,22 @@ const UI: Record<LocaleKey, Omit<IChingLocale, 'hexagrams'>> = {
     emptyHistory: '易の記録はまだありません。',
     back: '戻る',
     close: '閉じる',
-    cancel: 'キャンセル',
     generateAnother: 'もう一度読む',
     rerollTitle: 'もう一度始めますか？',
     rerollDescription: '新しい結果は、今日保存されている卦を置き換えます。',
     confirmReroll: 'もう一度始める',
     keepCurrent: '今の結果を残す',
-    replacementNotice: '今日保存されている卦が置き換わります。',
     noChangeExplanation: 'この卦には変爻がありません。今は、急いで変えようとせず、すでにあるものを見つめるだけで十分かもしれません。',
     transitionExplanation: '変爻は、本卦から之卦へ向かう静かな変化を示しているようです。',
     disclaimer: 'これは寄り添うための小さな振り返りであり、権威ある予言ではありません。',
-    storageRecovered: '一部の古い記録は使えなかったため、安全にスキップしました。',
     generationError: '読みを完了できませんでした。現在の結果は保持されました。',
-    generationBusy: '読み取り中です。',
     coinsAria: '三枚のコインによる読み取り中',
     movingLineAria: '変爻',
     linePositions: ['初爻', '二爻', '三爻', '四爻', '五爻', '上爻'],
     fortune: {
-      title: '今日の運勢', basis: '運勢の根拠', disclaimer: '卦は気軽な自己観察であり、確定した未来を示すものではありません。',
+      title: '今日の運勢',
       levels: { greatFortune: '大吉', fortune: '吉', neutral: '平', misfortune: '凶' },
       summaries: { greatFortune: '今日は全体として流れが穏やかです。準備してきたことを進め、機会にも素直に応じられそうです。', fortune: '今日は妨げより支えがやや多い日です。無理に急がず、着実に進めましょう。', neutral: '今日は比較的安定しています。いつもの調子を保ち、観察してから方向を整えましょう。', misfortune: '今日は外からの抵抗が少し多いかもしれません。ペースを落とし、大切なことを急いで決めないようにしましょう。' },
-      factors: { monthSame:'月建が世爻の地支と重なる',monthSupport:'月建が世爻を支える',monthRestrain:'月建が世爻を抑える',monthSameElement:'月建と世爻の五行が同じ',monthOpposition:'月建が世爻と冲になる',daySame:'日辰が世爻の地支と重なる',daySupport:'日辰が世爻を支える',dayRestrain:'日辰が世爻を抑える',daySameElement:'日辰と世爻の五行が同じ',dayOpposition:'日辰が世爻と冲になる',movingYuan:'動く元神が支えになる',movingJi:'動く忌神が抑えになる',shiChangeSupport:'変化した世爻が元の世爻を支える',shiChangeRestraint:'変化した世爻が元の世爻を抑える' },
     },
   },
 }
@@ -377,7 +335,6 @@ function buildHexagram(locale: LocaleKey, index: number): IChingHexagramLocale {
     const classic = zhClassics[index]
     return {
       name,
-      shortName: ZH_NAMES[index],
       subtitle: theme,
       judgment: classic.gua_ci,
       reflection: ZH_EXPLANATIONS[index],
@@ -390,7 +347,6 @@ function buildHexagram(locale: LocaleKey, index: number): IChingHexagramLocale {
   if (locale === 'ja') {
     return {
       name,
-      shortName: name,
       subtitle: theme,
       judgment: `${name}は、${theme}に目を向けるよう静かに促しています。急いで結論を出さなくても大丈夫です。`,
       reflection: `${theme}の中で、もう少し忍耐と正直さを向けられる場所を探してみてください。`,
@@ -399,7 +355,6 @@ function buildHexagram(locale: LocaleKey, index: number): IChingHexagramLocale {
   }
   return {
     name,
-    shortName: name,
     subtitle: theme,
     judgment: `${name} invites attention to ${theme}. There is no need to force a conclusion right away.`,
     reflection: `Within ${theme}, you might notice where patience or honesty is asking for a little more room.`,

@@ -4,7 +4,8 @@ import type { HexagramLinePattern } from '../config/iching'
 const props = defineProps<{
   pattern: HexagramLinePattern
   movingLineIndexes?: readonly number[]
-  movingLabel: string
+  movingLabel?: string
+  revealed?: number
 }>()
 
 function isMoving(index: number): boolean {
@@ -13,12 +14,17 @@ function isMoving(index: number): boolean {
 </script>
 
 <template>
-  <div class="hexagram-lines" aria-hidden="false">
+  <div class="hexagram-lines">
     <div
       v-for="index in [5, 4, 3, 2, 1, 0]"
       :key="index"
       class="hex-line"
-      :class="{ 'is-yang': pattern[index], 'is-yin': !pattern[index], 'is-moving': isMoving(index) }"
+      :class="{
+        'is-yang': pattern[index],
+        'is-yin': !pattern[index],
+        'is-moving': isMoving(index),
+        'is-hidden': index >= (revealed ?? 6),
+      }"
     >
       <span class="line-shape" aria-hidden="true">
         <span class="segment segment-a" />
@@ -41,6 +47,10 @@ function isMoving(index: number): boolean {
 .hex-line {
   position: relative;
   height: 10px;
+}
+
+.hex-line.is-hidden {
+  visibility: hidden;
 }
 
 .line-shape {
@@ -85,7 +95,7 @@ function isMoving(index: number): boolean {
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .hex-line {
+  .hex-line:not(.is-hidden) {
     animation: line-in 260ms ease both;
   }
 

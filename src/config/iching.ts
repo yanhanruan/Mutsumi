@@ -67,9 +67,7 @@ export type IChingLines = readonly [
   LineValue,
 ]
 
-export interface RandomSource {
-  nextInt(maxExclusive: number): number
-}
+export type CoinFlip = () => 0 | 1
 
 export interface TrigramDefinition {
   id: TrigramId
@@ -91,23 +89,18 @@ export interface HexagramPalaceInfo {
   position: PalacePosition
 }
 
-export interface IChingReading {
-  id: string
-  dateKey: string
-  createdAt: string
+export interface IChingCast {
   lines: IChingLines
-  primaryHexagramId: HexagramId
-  changedHexagramId: HexagramId | null
+  primary: HexagramDefinition
+  changed: HexagramDefinition | null
   movingLineIndexes: number[]
-  timezone: string
-  fortuneRuleVersion: 1 | 2
-  fortuneLevel: 'greatFortune' | 'fortune' | 'neutral' | 'misfortune'
-  fortuneScore: number
 }
+
+export const FORTUNE_LEVELS = ['greatFortune', 'fortune', 'neutral', 'misfortune'] as const
+export type FortuneLevel = typeof FORTUNE_LEVELS[number]
 
 export interface IChingHexagramLocale {
   name: string
-  shortName: string
   subtitle: string
   judgment: string
   reflection: string
@@ -134,9 +127,6 @@ export interface IChingLocale {
   commentary: string
   imageText: string
   allLines: string
-  upperTrigram: string
-  lowerTrigram: string
-  trigramNames: Record<TrigramId, string>
   palaceNames: Record<HexagramPalace, string>
   palacePositions: Record<PalacePosition, string>
   details: string
@@ -145,29 +135,22 @@ export interface IChingLocale {
   emptyHistory: string
   back: string
   close: string
-  cancel: string
   generateAnother: string
   rerollTitle: string
   rerollDescription: string
   confirmReroll: string
   keepCurrent: string
-  replacementNotice: string
   noChangeExplanation: string
   transitionExplanation: string
   disclaimer: string
-  storageRecovered: string
   generationError: string
-  generationBusy: string
   coinsAria: string
   movingLineAria: string
   linePositions: readonly [string, string, string, string, string, string]
   fortune: {
     title: string
-    basis: string
-    disclaimer: string
-    levels: Record<IChingReading['fortuneLevel'], string>
-    summaries: Record<IChingReading['fortuneLevel'], string>
-    factors: Record<string, string>
+    levels: Record<FortuneLevel, string>
+    summaries: Record<FortuneLevel, string>
   }
   hexagrams: Record<HexagramId, IChingHexagramLocale>
 }
@@ -178,7 +161,7 @@ export const ICHING_WINDOW_DIMS: Record<'small' | 'medium' | 'large', [number, n
   large: [394, 590],
 }
 
-export const TRIGRAMS: readonly TrigramDefinition[] = [
+const TRIGRAMS: readonly TrigramDefinition[] = [
   { id: 'qian', lines: [true, true, true] },
   { id: 'dui', lines: [true, true, false] },
   { id: 'li', lines: [true, false, true] },
@@ -274,28 +257,10 @@ const HEXAGRAM_BY_PATTERN = new Map<string, HexagramDefinition>(
   HEXAGRAMS.map(hexagram => [patternKey(hexagram.lines), hexagram]),
 )
 
-const HEXAGRAM_BY_ID = new Map<HexagramId, HexagramDefinition>(
-  HEXAGRAMS.map(hexagram => [hexagram.id, hexagram]),
-)
-
 export function findHexagramByPattern(pattern: HexagramLinePattern): HexagramDefinition {
   const hexagram = HEXAGRAM_BY_PATTERN.get(patternKey(pattern))
   if (!hexagram) throw new Error(`Unknown hexagram pattern: ${patternKey(pattern)}`)
   return hexagram
-}
-
-export function findHexagramById(id: HexagramId): HexagramDefinition {
-  const hexagram = HEXAGRAM_BY_ID.get(id)
-  if (!hexagram) throw new Error(`Unknown hexagram id: ${id}`)
-  return hexagram
-}
-
-export function getHexagramPalaceInfo(hexagramId: HexagramId): HexagramPalaceInfo {
-  const definition = findHexagramById(hexagramId)
-  return {
-    palace: definition.palace,
-    position: definition.palacePosition,
-  }
 }
 
 export function isPrimaryYang(value: LineValue): boolean {
@@ -327,118 +292,32 @@ export function getMovingLineIndexes(lines: IChingLines): number[] {
   return lines.flatMap((line, index) => isMovingLine(line) ? [index] : [])
 }
 
-export function generateLine(randomSource: RandomSource): LineValue {
-  const total = (2 + randomSource.nextInt(2)) + (2 + randomSource.nextInt(2)) + (2 + randomSource.nextInt(2))
-  if (total !== 6 && total !== 7 && total !== 8 && total !== 9) {
-    throw new Error(`Invalid generated line total: ${total}`)
+export function generateLines(flipCoin?: CoinFlip): IChingLines {
+  const coins = new Uint8Array(18)
+  if (flipCoin) {
+    for (let i = 0; i < coins.length; i++) coins[i] = flipCoin()
+  } else {
+    globalThis.crypto.getRandomValues(coins)
   }
-  return total
+  // Three independent fair coins per line, stored bottom to top.
+  const line = (i: number) =>
+    (6 + (coins[i] & 1) + (coins[i + 1] & 1) + (coins[i + 2] & 1)) as LineValue
+  return [line(0), line(3), line(6), line(9), line(12), line(15)]
 }
 
-export function generateLines(randomSource: RandomSource): IChingLines {
-  // Generated and persisted in bottom-to-top order: index 0 is the bottom line.
-  return [
-    generateLine(randomSource),
-    generateLine(randomSource),
-    generateLine(randomSource),
-    generateLine(randomSource),
-    generateLine(randomSource),
-    generateLine(randomSource),
-  ]
-}
-
-export function createCryptoRandomSource(): RandomSource {
-  return {
-    nextInt(maxExclusive: number): number {
-      if (!Number.isInteger(maxExclusive) || maxExclusive <= 0 || maxExclusive > 0xffffffff) {
-        throw new Error(`Invalid maxExclusive: ${maxExclusive}`)
-      }
-      const cryptoApi = globalThis.crypto
-      if (!cryptoApi?.getRandomValues) {
-        throw new Error('Web Crypto is not available')
-      }
-      const range = 0x100000000
-      const limit = range - (range % maxExclusive)
-      const buffer = new Uint32Array(1)
-      do {
-        cryptoApi.getRandomValues(buffer)
-      } while (buffer[0] >= limit)
-      return buffer[0] % maxExclusive
-    },
-  }
-}
-
-export function createIChingReading(
-  lines: IChingLines,
-  dateKey: string,
-  createdAt: string,
-  id: string,
-  fortune?: Pick<IChingReading, 'timezone' | 'fortuneRuleVersion' | 'fortuneLevel' | 'fortuneScore'>,
-): IChingReading {
+export function analyzeIChingLines(lines: IChingLines): IChingCast {
   const primary = findHexagramByPattern(getPrimaryPattern(lines))
   const movingLineIndexes = getMovingLineIndexes(lines)
   const changed = movingLineIndexes.length > 0
     ? findHexagramByPattern(getChangedPattern(lines))
     : null
-
-  return {
-    id,
-    dateKey,
-    createdAt,
-    lines,
-    primaryHexagramId: primary.id,
-    changedHexagramId: changed?.id ?? null,
-    movingLineIndexes,
-    timezone: fortune?.timezone ?? 'UTC',
-    fortuneRuleVersion: fortune?.fortuneRuleVersion ?? 2,
-    fortuneLevel: fortune?.fortuneLevel ?? 'neutral',
-    fortuneScore: fortune?.fortuneScore ?? 0,
-  }
+  return { lines, primary, changed, movingLineIndexes }
 }
 
-export function createReadingId(randomSource: RandomSource, now = Date.now()): string {
-  const chunk = () => randomSource.nextInt(0x10000).toString(16).padStart(4, '0')
-  return `iching-${now.toString(36)}-${chunk()}${chunk()}`
-}
-
-export function generateIChingReading(
-  randomSource: RandomSource,
-  dateKey: string,
-  createdAt = new Date().toISOString(),
-): IChingReading {
-  const lines = generateLines(randomSource)
-  return createIChingReading(lines, dateKey, createdAt, createReadingId(randomSource))
-}
-
-export function isLineValue(value: unknown): value is LineValue {
+function isLineValue(value: unknown): value is LineValue {
   return value === 6 || value === 7 || value === 8 || value === 9
 }
 
-export function isHexagramId(value: unknown): value is HexagramId {
-  return typeof value === 'string' && HEXAGRAM_BY_ID.has(value as HexagramId)
-}
-
 export function isIChingLines(value: unknown): value is IChingLines {
-  return Array.isArray(value) && value.length === 6 && value.every(isLineValue)
-}
-
-export function validateIChingReading(value: unknown): value is IChingReading {
-  if (!value || typeof value !== 'object') return false
-  const reading = value as Partial<IChingReading>
-  if (typeof reading.id !== 'string' || reading.id.trim() === '') return false
-  if (typeof reading.dateKey !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(reading.dateKey)) return false
-  if (typeof reading.createdAt !== 'string' || Number.isNaN(Date.parse(reading.createdAt))) return false
-  if (!isIChingLines(reading.lines)) return false
-  if (!isHexagramId(reading.primaryHexagramId)) return false
-  if (reading.changedHexagramId !== null && !isHexagramId(reading.changedHexagramId)) return false
-  if (!Array.isArray(reading.movingLineIndexes)) return false
-  if (!reading.movingLineIndexes.every(index => Number.isInteger(index) && index >= 0 && index < 6)) return false
-  if (typeof reading.timezone !== 'string' || reading.timezone.length === 0) return false
-  if ((reading.fortuneRuleVersion !== 1 && reading.fortuneRuleVersion !== 2) || !['greatFortune', 'fortune', 'neutral', 'misfortune'].includes(reading.fortuneLevel ?? '')) return false
-  if (typeof reading.fortuneScore !== 'number' || !Number.isFinite(reading.fortuneScore)) return false
-
-  const recalculated = createIChingReading(reading.lines, reading.dateKey, reading.createdAt, reading.id)
-  return reading.primaryHexagramId === recalculated.primaryHexagramId &&
-    reading.changedHexagramId === recalculated.changedHexagramId &&
-    JSON.stringify(reading.movingLineIndexes) === JSON.stringify(recalculated.movingLineIndexes)
+  return Array.isArray(value) && value.length === 6 && [...value].every(isLineValue)
 }

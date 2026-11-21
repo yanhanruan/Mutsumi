@@ -13,7 +13,8 @@ import { detectLocale, setLocale, useI18n, type Locale } from './index'
 import { en } from './locales/en'
 import { zh } from './locales/zh'
 import { ja } from './locales/ja'
-import { HEXAGRAMS, HEXAGRAM_PALACES, PALACE_POSITIONS } from '../config/iching'
+import { HEXAGRAMS, HEXAGRAM_PALACES, PALACE_POSITIONS, patternKey } from '../config/iching'
+import zhClassics from '@freizl/yijing/zh-CN/64gua.json'
 
 // ── Helpers ────────────────────────────────────────────────────────
 
@@ -169,58 +170,41 @@ describe('locale bundle completeness', () => {
   })
 
   it('all locales contain complete I Ching UI and hexagram content', () => {
-    for (const bundle of [en, zh, ja]) {
-      expect(bundle.iching.title).toBeTruthy()
-      expect(bundle.iching.rerollTitle).toBeTruthy()
-      expect(bundle.iching.history).toBeTruthy()
-      expect(bundle.iching.linePositions).toHaveLength(6)
-      expect(Object.keys(bundle.iching.hexagrams)).toHaveLength(64)
+    for (const { iching } of [en, zh, ja]) {
+      const { title, rerollTitle, history, hexagrams, linePositions } = iching
+      expect([title, rerollTitle, history].every(label => label.trim())).toBe(true)
+      expect(linePositions).toHaveLength(6)
+      expect(Object.keys(hexagrams)).toHaveLength(64)
 
-      for (const hexagram of HEXAGRAMS) {
-        const text = bundle.iching.hexagrams[hexagram.id]
-        expect(text.name.trim()).toBeTruthy()
-        expect(text.subtitle.trim()).toBeTruthy()
-        expect(text.judgment.trim()).toBeTruthy()
-        expect(text.reflection.trim()).toBeTruthy()
-        expect(text.lines).toHaveLength(6)
-        for (const line of text.lines) {
-          expect(line.trim()).toBeTruthy()
-          expect(line).not.toMatch(/TODO|TBD|translation missing/i)
+      for (const { id } of HEXAGRAMS) {
+        const { name, subtitle, judgment, reflection, lines } = hexagrams[id]
+        expect(lines).toHaveLength(6)
+        for (const text of [name, subtitle, judgment, reflection, ...lines]) {
+          expect(text.trim(), id).not.toBe('')
+          expect(text, id).not.toMatch(/TODO|TBD|translation missing/i)
         }
       }
     }
   })
 
   it('Chinese I Ching content uses complete classical hexagram texts', () => {
-    const qian = zh.iching.hexagrams.hexagram01
-    const kun = zh.iching.hexagrams.hexagram02
+    expect(zh.iching.hexagrams.hexagram01).toMatchObject({ name: '乾为天', judgment: '乾：元亨，利贞。' })
 
-    expect(qian.judgment).toBe('乾：元亨，利贞。')
-    expect(qian.name).toBe('乾为天')
-    expect(qian.shortName).toBe('乾')
-    expect(zh.iching.hexagrams.hexagram02.name).toBe('坤为地')
-    expect(zh.iching.hexagrams.hexagram11.name).toBe('地天泰')
-    expect(zh.iching.trigramNames.qian).toBe('乾')
-    expect(zh.iching.trigramNames.kun).toBe('坤')
-    expect(qian.lines[0]).toBe('初九：潜龙，勿用。')
-    expect(qian.commentary).toContain('大哉乾元')
-    expect(qian.imageText).toBe('天行健，君子以自强不息。')
-    expect(qian.lineCommentaries).toHaveLength(6)
-    expect(kun.judgment).toContain('利牝马之贞')
-    expect(zh.iching.hexagrams.hexagram09.reflection).toContain('整理细节、约束冲动并累积条件')
-
-    for (const hexagram of Object.values(zh.iching.hexagrams)) {
-      expect(hexagram.reflection.length).toBeGreaterThan(45)
-      expect(hexagram.commentary?.trim()).toBeTruthy()
-      expect(hexagram.imageText?.trim()).toBeTruthy()
-      expect(hexagram.lineCommentaries).toHaveLength(6)
+    const linePositions = [/^初[六九]/, /^[六九]二/, /^[六九]三/, /^[六九]四/, /^[六九]五/, /^上[六九]/]
+    for (const definition of HEXAGRAMS) {
+      const hexagram = zh.iching.hexagrams[definition.id]
+      const source = zhClassics[definition.kingWenNumber - 1]
+      expect(source.id).toBe(patternKey(definition.lines))
+      expect(hexagram).toMatchObject({
+        judgment: source.gua_ci, commentary: source.tuan_ci, imageText: source.da_xiang,
+        lines: source.yao_ci.slice(0, 6), lineCommentaries: source.xiao_xiang.slice(0, 6),
+      })
+      hexagram.lines.forEach((line, i) => expect(line).toMatch(linePositions[i]))
     }
   })
 
   it('all locales contain every Eight-Palace name and position label', () => {
     for (const bundle of [en, zh, ja]) {
-      expect(Object.keys(bundle.iching.palaceNames)).toHaveLength(8)
-      expect(Object.keys(bundle.iching.palacePositions)).toHaveLength(8)
       for (const palace of HEXAGRAM_PALACES) {
         expect(bundle.iching.palaceNames[palace].trim()).toBeTruthy()
       }
