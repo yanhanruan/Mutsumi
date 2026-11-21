@@ -1,4 +1,5 @@
 import type { Translations } from '../types'
+import { buildIChingLocale } from '../ichingContent'
 
 export const zh: Translations = {
   // ── Settings window ──────────────────────────────────────────────
@@ -155,6 +156,7 @@ export const zh: Translations = {
     wake:          '叫醒',
     fast_learning: '快速学习',
     tarot:         '塔罗占卜',
+    iching:        '周易占筮',
     chat:          '聊天',
     sys_state:     '系统状态',
     hide:          '隐藏应用',
@@ -249,6 +251,8 @@ export const zh: Translations = {
     history:      '最近',
     empty:        '还没有占卜记录。',
   },
+
+  iching: buildIChingLocale('zh'),
 
   // ── Chat overlay UI chrome ────────────────────────────────────────
   chat: {

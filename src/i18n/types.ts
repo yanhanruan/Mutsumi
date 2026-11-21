@@ -1,3 +1,5 @@
+import type { IChingLocale } from '../config/iching'
+
 /**
  * Canonical shape of a locale's translation bundle.
  * Every locale file must satisfy this interface completely —
@@ -157,6 +159,8 @@ export interface Translations {
     fast_learning: string
     /** Opens the in-pet tarot overlay (frontend-only). */
     tarot:         string
+    /** Opens the in-pet I Ching overlay (frontend-only). */
+    iching:        string
     /** Opens the in-pet chat overlay (frontend-only). */
     chat:          string
     /** Opens the system state overlay (frontend-only). */
@@ -189,6 +193,9 @@ export interface Translations {
     history:      string   // history toggle / panel heading
     empty:        string   // empty-history placeholder
   }
+
+  // ── I Ching overlay UI + localized hexagram content ──────────────
+  iching: IChingLocale
 
   // ── Chat overlay UI chrome ──────────────────────────────────────
   chat: {
