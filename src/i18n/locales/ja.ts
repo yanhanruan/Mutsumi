@@ -1,4 +1,5 @@
 import type { Translations } from '../types'
+import { buildIChingLocale } from '../ichingContent'
 
 export const ja: Translations = {
   // ── Settings window ──────────────────────────────────────────────
@@ -155,6 +156,7 @@ export const ja: Translations = {
     wake:          'おこす',
     fast_learning: '速習モード',
     tarot:         'タロット占い',
+    iching:        '易のリーディング',
     chat:          'おしゃべり',
     sys_state:     'システム状態',
     hide:          'アプリを隠す',
@@ -249,6 +251,8 @@ export const ja: Translations = {
     history:      '最近',
     empty:        'まだ占いの記録がありません。',
   },
+
+  iching: buildIChingLocale('ja'),
 
   // ── Chat overlay UI chrome ────────────────────────────────────────
   chat: {
